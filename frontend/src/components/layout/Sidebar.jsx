@@ -1,0 +1,96 @@
+import { Link, useLocation } from 'react-router-dom'
+import { useSelector } from 'react-redux'
+import brandLogo from '../../assets/brand-logo.png'
+
+const navigation = [
+  { name: 'Dashboard', href: '/dashboard', short: 'DA' },
+  { name: 'Course Fees', href: '/courses', short: 'CF' },
+  { name: 'Leads', href: '/leads', short: 'LE' },
+  { name: 'Walk-ins', href: '/walkins', short: 'WI' },
+  { name: 'Students', href: '/students', short: 'ST' },
+  { name: 'Enrollments', href: '/enrollments', short: 'EN' },
+  { name: 'Payments', href: '/payments', short: 'PY' },
+]
+
+const adminNavigation = [
+  { name: 'Courses', href: '/admin/courses', short: 'CO' },
+  { name: 'Discounts', href: '/admin/discounts', short: 'DI' },
+  { name: 'Users', href: '/admin/users', short: 'US' },
+  { name: 'Targets', href: '/admin/targets', short: 'TA' },
+  { name: 'Historical Analytics', href: '/admin/historical-analytics', short: 'HA' },
+  { name: 'Lead Inbox', href: '/admin/lead-inbox', short: 'IN' },
+  { name: 'WhatsApp Templates', href: '/admin/whatsapp-templates', short: 'WT' },
+  { name: 'Branches', href: '/admin/branches', short: 'BR' },
+  { name: 'Reports', href: '/admin/reports', short: 'RE' },
+  { name: 'User Monitoring', href: '/admin/user-monitoring', short: 'UM' },
+  { name: 'Lead Import History', href: '/admin/lead-import-history', short: 'LI' },
+]
+
+function NavItem({ item, active }) {
+  return (
+    <Link
+      to={item.href}
+      className={`flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold transition ${
+        active
+          ? 'bg-white/16 text-white shadow-lg shadow-slate-950/20 ring-1 ring-white/10'
+          : 'text-slate-200 hover:bg-white/10 hover:text-white'
+      }`}
+    >
+      <span
+        className={`flex h-9 w-9 items-center justify-center rounded-xl text-[11px] font-bold tracking-[0.2em] ${
+          active ? 'bg-white text-slate-900' : 'bg-white/10 text-slate-200'
+        }`}
+      >
+        {item.short}
+      </span>
+      <span>{item.name}</span>
+    </Link>
+  )
+}
+
+export default function Sidebar() {
+  const location = useLocation()
+  const { user } = useSelector((state) => state.auth)
+
+  return (
+    <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-72 md:flex-col">
+      <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-white">
+        <div className="border-b border-white/10 px-6 py-6">
+          <div className="flex items-center justify-center">
+            <img src={brandLogo} alt="IIE Logo" className="h-20 w-20 object-contain" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5">
+          <nav className="space-y-2">
+            {navigation.map((item) => (
+              <NavItem
+                key={item.name}
+                item={item}
+                active={location.pathname.startsWith(item.href)}
+              />
+            ))}
+
+            {user?.role === 'super_admin' && (
+              <>
+                <div className="mb-3 mt-8 px-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                    Admin
+                  </p>
+                </div>
+                {adminNavigation.map((item) => (
+                  <NavItem
+                    key={item.name}
+                    item={item}
+                    active={location.pathname.startsWith(item.href)}
+                  />
+                ))}
+              </>
+            )}
+          </nav>
+        </div>
+
+      </div>
+    </aside>
+  )
+}

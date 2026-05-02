@@ -1,0 +1,43 @@
+
+> crm-frontend@1.0.0 dev
+> vite --host 127.0.0.1 --port 5175
+
+
+  [32m[1mVITE[22m v4.5.14[39m  [2mready in [0m[1m197[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m5175[22m/static/[39m
+[2m4:41:40 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m4:41:57 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:42:28 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:42:42 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m4:47:54 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m4:48:27 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m4:48:54 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:48:59 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:57:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m4:57:58 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:58:56 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:59:34 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m4:59:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m5:18:23 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/admin/BranchesPage.jsx, /src/index.css[22m
+[2m5:37:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.jsx, /src/index.css[22m
+[2m5:37:55 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/Sidebar.jsx, /src/index.css[22m
+[2m5:38:03 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/dashboard/DashboardPage.jsx, /src/index.css[22m
+[2m5:38:46 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m5:38:57 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/leads/LeadDetailPage.jsx, /src/index.css[22m
+[2m5:39:18 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m5:39:29 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m5:39:53 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m5:40:09 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/walkins/WalkInDetailPage.jsx, /src/index.css[22m
+[2m5:40:40 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/admin/TransferRequestsPage.jsx, /src/index.css[22m
+[2m5:54:20 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.jsx, /src/index.css[22m
+[2m5:54:48 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/enrollments/EnrollmentDetailPage.jsx, /src/index.css[22m
+[2m5:54:58 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/students/StudentDetailPage.jsx, /src/index.css[22m
+[2m6:25:39 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/MainLayout.jsx, /src/index.css[22m
+[2m6:27:11 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/dashboard/DashboardPage.jsx, /src/index.css[22m
+[2m6:27:16 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/dashboard/DashboardPage.jsx, /src/index.css[22m
+[2m6:27:28 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/payments/PaymentsListPage.jsx, /src/index.css[22m
+[2m6:28:01 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/App.jsx, /src/index.css[22m
+[2m6:28:12 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/components/layout/Sidebar.jsx, /src/index.css[22m
+[2m6:55:48 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/enrollments/EnrollmentDetailPage.jsx, /src/index.css[22m
+[2m6:56:09 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/pages/payments/PaymentDetailPage.jsx, /src/index.css[22m
