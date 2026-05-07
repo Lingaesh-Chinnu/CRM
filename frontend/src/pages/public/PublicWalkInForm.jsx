@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import { api } from '../../services/api'
 import brandLogo from '../../assets/brand-logo.png'
 
 const initialForm = {
@@ -67,7 +67,7 @@ export default function PublicWalkInForm() {
   const [redirecting, setRedirecting] = useState(false)
 
   useEffect(() => {
-    axios.get('/api/public/walkin/').then(({ data }) => {
+    api.get('/public/walkin/').then(({ data }) => {
       setBranches(data.branches || [])
       setCourses(data.courses || [])
       setTimings(data.preferred_timing_options || [])
@@ -85,7 +85,7 @@ export default function PublicWalkInForm() {
     setMessage('')
 
     try {
-      await axios.post('/api/public/walkin/', {
+      await api.post('/public/walkin/', {
         ...form,
         branch: Number(form.branch),
         course: Number(form.course),

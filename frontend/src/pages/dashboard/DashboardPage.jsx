@@ -131,7 +131,7 @@ function openWhatsApp(phone, message) {
   const cleanPhone = digits.length === 10 ? `91${digits}` : digits.startsWith('0') && digits.length === 11 ? `91${digits.slice(1)}` : digits
   const encodedMessage = encodeURIComponent(message)
   const url = `https://wa.me/${cleanPhone}?text=${encodedMessage}`
-  window.open(url, 'IIE_WhatsApp_Web')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function HistoricalAnalyticsChart({ rows }) {
@@ -151,9 +151,9 @@ function HistoricalAnalyticsChart({ rows }) {
         <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-500"></span>Walk-ins</span>
         <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-violet-500"></span>Enrollments</span>
       </div>
-      <div className="mx-auto mt-5 flex h-[320px] max-w-3xl items-end justify-center gap-8 border-b border-slate-200 px-4 pb-8">
+      <div className="mx-auto mt-5 flex h-[320px] max-w-3xl items-end justify-start gap-4 overflow-x-auto border-b border-slate-200 px-1 pb-8 sm:justify-center sm:gap-8 sm:px-4">
           {rows.map((row) => (
-            <div key={row.year} className="flex w-40 flex-col items-center justify-end">
+            <div key={row.year} className="flex w-32 shrink-0 flex-col items-center justify-end sm:w-40">
               <div className="flex h-[240px] w-full items-end justify-center gap-3 rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
                 {[
                   ['leads', 'bg-cyan-500'],
@@ -294,9 +294,13 @@ function WeeklyPendingPaymentCard({ amount }) {
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState(null)
+  const [dashboardStats, setDashboardStats] = useState(null)
+  const [summaryStats, setSummaryStats] = useState(null)
+  const [actionBoardStats, setActionBoardStats] = useState(null)
   const [branches, setBranches] = useState([])
-  const [selectedBranch, setSelectedBranch] = useState('all')
+  const [dashboardBranch, setDashboardBranch] = useState('all')
+  const [historicalBranch, setHistoricalBranch] = useState('all')
+  const [summaryBranch, setSummaryBranch] = useState('all')
   const [historicalData, setHistoricalData] = useState([])
   const [historicalMeta, setHistoricalMeta] = useState(null)
   const [historicalLoading, setHistoricalLoading] = useState(true)
@@ -324,23 +328,31 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchDashboardData()
-  }, [selectedBranch, isSuperAdmin])
+  }, [dashboardBranch, isSuperAdmin])
+
+  useEffect(() => {
+    fetchSummaryData()
+  }, [summaryBranch, isSuperAdmin])
+
+  useEffect(() => {
+    fetchActionBoardStats()
+  }, [isSuperAdmin])
 
   useEffect(() => {
     fetchHistoricalAnalytics()
-  }, [selectedBranch, isSuperAdmin])
+  }, [historicalBranch, isSuperAdmin])
 
   const fetchDashboardData = async () => {
-    const isInitialLoad = !stats
+    const isInitialLoad = !dashboardStats
     try {
       if (isInitialLoad) {
         setLoading(true)
       } else {
         setRefreshing(true)
       }
-      const params = isSuperAdmin && selectedBranch !== 'all' ? { branch: selectedBranch } : undefined
+      const params = isSuperAdmin && dashboardBranch !== 'all' ? { branch: dashboardBranch } : undefined
       const { data } = await api.get('/dashboard/summary/', { params })
-      setStats(data)
+      setDashboardStats(data)
     } catch (error) {
       console.error('Failed to fetch dashboard data:', error)
     } finally {
@@ -349,12 +361,31 @@ export default function DashboardPage() {
     }
   }
 
+  const fetchSummaryData = async () => {
+    try {
+      const params = isSuperAdmin && summaryBranch !== 'all' ? { branch: summaryBranch } : undefined
+      const { data } = await api.get('/dashboard/summary/', { params })
+      setSummaryStats(data)
+    } catch (error) {
+      console.error('Failed to fetch dashboard summary data:', error)
+    }
+  }
+
+  const fetchActionBoardStats = async () => {
+    try {
+      const { data } = await api.get('/dashboard/summary/')
+      setActionBoardStats(data)
+    } catch (error) {
+      console.error('Failed to fetch action board stats:', error)
+    }
+  }
+
   const fetchHistoricalAnalytics = async () => {
     try {
       setHistoricalLoading(true)
       const params = {}
       if (isSuperAdmin) {
-        params.branch = selectedBranch
+        params.branch = historicalBranch
       }
       const { data } = await api.get('/dashboard/historical-analytics/', { params })
       setHistoricalData(data.results || [])
@@ -372,6 +403,10 @@ export default function DashboardPage() {
     { id: 'all', name: 'All Branches' },
     ...branches.map((branch) => ({ id: String(branch.id), name: branch.name })),
   ]
+
+  const branchNameFor = (branchId) => (
+    branchTabs.find((branch) => branch.id === branchId)?.name || 'All Branches'
+  )
 
   if (loading) {
     return (
@@ -401,14 +436,18 @@ export default function DashboardPage() {
             </p>
 
             {isSuperAdmin && (
-              <div className="mt-6 flex flex-wrap gap-2">
+              <div className="mt-6">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">
+                  Dashboard and task filter
+                </p>
+                <div className="flex flex-wrap gap-2">
                 {branchTabs.map((branch) => {
-                  const active = selectedBranch === branch.id
+                  const active = dashboardBranch === branch.id
                   return (
                     <button
                       key={branch.id}
                       type="button"
-                      onClick={() => setSelectedBranch(branch.id)}
+                      onClick={() => setDashboardBranch(branch.id)}
                       className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
                         active
                           ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-950/20'
@@ -419,11 +458,12 @@ export default function DashboardPage() {
                     </button>
                   )
                 })}
+                </div>
               </div>
             )}
 
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              {highlightRows(stats).map((item) => (
+              {highlightRows(dashboardStats).map((item) => (
                 <div key={item.label} className={`rounded-[22px] border border-white/10 bg-white/6 p-5 backdrop-blur transition ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
                   <p className="mt-3 text-2xl font-black tracking-tight text-white">
@@ -458,7 +498,7 @@ export default function DashboardPage() {
               Today's Task
             </h2>
             <div className="mt-6 space-y-4">
-              {followUpRows(stats).map((item) => (
+              {followUpRows(dashboardStats).map((item) => (
                 <Link key={item.label} to={item.to} className={`block rounded-2xl bg-white p-4 transition hover:-translate-y-0.5 hover:bg-slate-50 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
                   <div className="mt-2 flex items-end justify-between gap-3">
@@ -498,26 +538,31 @@ export default function DashboardPage() {
                   </h4>
                   <p className="mt-2 text-sm font-medium text-slate-500">
                     {historicalMeta?.month_name || ''} (Across Years)
-                    {historicalMeta?.branch_name ? ` | ${historicalMeta.branch_name}` : ''}
+                    {historicalMeta?.branch_name ? ` | ${historicalMeta.branch_name}` : ` | ${branchNameFor(historicalBranch)}`}
                   </p>
                 </div>
                 {isSuperAdmin && (
-                <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
-                  {branchTabs.map((branch) => (
-                    <button
-                      key={branch.id}
-                      type="button"
-                      onClick={() => setSelectedBranch(branch.id)}
-                      className={`h-10 rounded-xl px-4 text-sm font-semibold transition ${
-                        selectedBranch === branch.id
-                          ? 'bg-slate-950 text-white'
-                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {branch.name}
-                    </button>
-                  ))}
-                </div>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      Historical chart filter
+                    </p>
+                    <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+                      {branchTabs.map((branch) => (
+                        <button
+                          key={branch.id}
+                          type="button"
+                          onClick={() => setHistoricalBranch(branch.id)}
+                          className={`h-10 rounded-xl px-4 text-sm font-semibold transition ${
+                            historicalBranch === branch.id
+                              ? 'bg-slate-950 text-white'
+                              : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {branch.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
               {historicalLoading ? (
@@ -530,13 +575,13 @@ export default function DashboardPage() {
               <div className="rounded-2xl bg-slate-50 p-5">
                 <p className="text-sm font-semibold text-slate-500">Total walk-ins</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                  {stats?.total_walkins || 0}
+                  {actionBoardStats?.total_walkins || 0}
                 </p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-5">
                 <p className="text-sm font-semibold text-slate-500">Total enrollments</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                  {stats?.total_enrollments || 0}
+                  {actionBoardStats?.total_enrollments || 0}
                 </p>
               </div>
             </div>
@@ -553,25 +598,30 @@ export default function DashboardPage() {
                 Monthly Collection Summary
               </h3>
               <p className="mt-2 text-sm font-medium text-slate-500">
-                {isSuperAdmin ? stats?.selected_branch_name || 'All Branches' : user?.branch_name || stats?.selected_branch_name || 'Assigned Branch'}
+                {isSuperAdmin ? summaryStats?.selected_branch_name || branchNameFor(summaryBranch) : user?.branch_name || summaryStats?.selected_branch_name || 'Assigned Branch'}
               </p>
             </div>
             {isSuperAdmin && (
-              <div className="flex flex-wrap gap-2">
-                {branchTabs.map((branch) => (
-                  <button
-                    key={branch.id}
-                    type="button"
-                    onClick={() => setSelectedBranch(branch.id)}
-                    className={`h-10 rounded-xl px-3 text-xs font-semibold transition ${
-                      selectedBranch === branch.id
-                        ? 'bg-slate-950 text-white'
-                        : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    {branch.name}
-                  </button>
-                ))}
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  Collection and pending-payment filter
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {branchTabs.map((branch) => (
+                    <button
+                      key={branch.id}
+                      type="button"
+                      onClick={() => setSummaryBranch(branch.id)}
+                      className={`h-10 rounded-xl px-3 text-xs font-semibold transition ${
+                        summaryBranch === branch.id
+                          ? 'bg-slate-950 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {branch.name}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -579,12 +629,12 @@ export default function DashboardPage() {
             <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
               <p className="text-sm font-semibold text-slate-500">Monthly Collection</p>
               <p className="mt-3 text-3xl font-black tracking-tight text-slate-950">
-                {formatCurrency(stats?.current_month_collected_amount ?? stats?.monthly_collection ?? 0)}
+                {formatCurrency(summaryStats?.current_month_collected_amount ?? summaryStats?.monthly_collection ?? 0)}
               </p>
             </div>
             <div className="mt-4 grid gap-4">
-              <WeeklyPendingPaymentCard amount={stats?.this_week_pending_payments || 0} />
-              {!isSuperAdmin && <BirthdayReminderCardV2 birthdays={stats?.today_birthdays || []} />}
+              <WeeklyPendingPaymentCard amount={summaryStats?.this_week_pending_payments || 0} />
+              {!isSuperAdmin && <BirthdayReminderCardV2 birthdays={summaryStats?.today_birthdays || []} />}
             </div>
           </div>
         </article>

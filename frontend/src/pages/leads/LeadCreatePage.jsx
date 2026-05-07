@@ -3,6 +3,15 @@ import { useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
 
+const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
+
+function appHref(url) {
+  if (!url || url === '#') return '#'
+  if (/^(https?:)?\/\//i.test(url)) return url
+  if (!url.startsWith('/')) return url
+  return `${appBasePath}${url}`
+}
+
 const initialForm = {
   name: '',
   phone: '',
@@ -163,7 +172,7 @@ export default function LeadCreatePage() {
               {duplicateInfo.records.map((record) => (
                 <div key={`${record.type}-${record.id}`} className="flex flex-col gap-2 rounded-xl bg-white p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                   <span className="font-semibold text-slate-900">{record.type}: {record.name} | {record.branch_name} | {record.status}</span>
-                  <a href={record.url} className="text-sm font-semibold text-slate-700 hover:text-slate-950">Merge/Update existing</a>
+                  <a href={appHref(record.url)} className="text-sm font-semibold text-slate-700 hover:text-slate-950">Merge/Update existing</a>
                 </div>
               ))}
             </div>

@@ -26,10 +26,11 @@ const adminNavigation = [
   { name: 'Lead Import History', href: '/admin/lead-import-history', short: 'LI' },
 ]
 
-function NavItem({ item, active }) {
+function NavItem({ item, active, onNavigate }) {
   return (
     <Link
       to={item.href}
+      onClick={onNavigate}
       className={`flex items-center gap-3 rounded-2xl px-3 py-3 text-sm font-semibold transition ${
         active
           ? 'bg-white/16 text-white shadow-lg shadow-slate-950/20 ring-1 ring-white/10'
@@ -48,49 +49,83 @@ function NavItem({ item, active }) {
   )
 }
 
-export default function Sidebar() {
+function SidebarContent({ onNavigate }) {
   const location = useLocation()
   const { user } = useSelector((state) => state.auth)
 
   return (
-    <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-72 md:flex-col">
-      <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-white">
-        <div className="border-b border-white/10 px-6 py-6">
-          <div className="flex items-center justify-center">
-            <img src={brandLogo} alt="IIE Logo" className="h-20 w-20 object-contain" />
-          </div>
+    <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-white">
+      <div className="border-b border-white/10 px-6 py-6">
+        <div className="flex items-center justify-center">
+          <img src={brandLogo} alt="IIE Logo" className="h-20 w-20 object-contain" />
         </div>
-
-        <div className="flex-1 overflow-y-auto px-4 py-5">
-          <nav className="space-y-2">
-            {navigation.map((item) => (
-              <NavItem
-                key={item.name}
-                item={item}
-                active={location.pathname.startsWith(item.href)}
-              />
-            ))}
-
-            {user?.role === 'super_admin' && (
-              <>
-                <div className="mb-3 mt-8 px-3">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
-                    Admin
-                  </p>
-                </div>
-                {adminNavigation.map((item) => (
-                  <NavItem
-                    key={item.name}
-                    item={item}
-                    active={location.pathname.startsWith(item.href)}
-                  />
-                ))}
-              </>
-            )}
-          </nav>
-        </div>
-
       </div>
-    </aside>
+
+      <div className="flex-1 overflow-y-auto px-4 py-5">
+        <nav className="space-y-2">
+          {navigation.map((item) => (
+            <NavItem
+              key={item.name}
+              item={item}
+              active={location.pathname.startsWith(item.href)}
+              onNavigate={onNavigate}
+            />
+          ))}
+
+          {user?.role === 'super_admin' && (
+            <>
+              <div className="mb-3 mt-8 px-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">
+                  Admin
+                </p>
+              </div>
+              {adminNavigation.map((item) => (
+                <NavItem
+                  key={item.name}
+                  item={item}
+                  active={location.pathname.startsWith(item.href)}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </>
+          )}
+        </nav>
+      </div>
+    </div>
+  )
+}
+
+export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
+  return (
+    <>
+      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-72 md:flex-col">
+        <SidebarContent />
+      </aside>
+
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            className="absolute inset-0 bg-slate-950/55 backdrop-blur-sm"
+            onClick={onClose}
+          />
+          <aside className="relative flex h-full w-[min(19rem,86vw)] flex-col shadow-2xl">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close navigation menu"
+              className="absolute right-3 top-3 z-10 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white"
+            >
+              <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M6 6l12 12" />
+                <path d="M18 6L6 18" />
+              </svg>
+            </button>
+            <SidebarContent onNavigate={onClose} />
+          </aside>
+        </div>
+      )}
+    </>
   )
 }

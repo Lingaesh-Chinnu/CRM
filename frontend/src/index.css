@@ -1307,3 +1307,161 @@ code {
     display: none;
   }
 }
+
+@layer base {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
+  }
+}
+
+@layer utilities {
+  .safe-scroll-x {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 1023px) {
+  main,
+  main > *,
+  section,
+  article,
+  form,
+  fieldset {
+    min-width: 0;
+  }
+
+  [class*="overflow-x-auto"] {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  th,
+  td {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 767px) {
+  main h1 {
+    font-size: 1.75rem;
+    line-height: 2.15rem;
+  }
+
+  main h2 {
+    font-size: 1.35rem;
+    line-height: 1.8rem;
+  }
+
+  main h3 {
+    font-size: 1.2rem;
+    line-height: 1.65rem;
+  }
+
+  main p,
+  main span,
+  main a,
+  main button,
+  main input,
+  main select,
+  main textarea {
+    overflow-wrap: anywhere;
+  }
+
+  main form {
+    width: 100%;
+  }
+
+  main label,
+  main [class*="min-w-"] {
+    min-width: 0 !important;
+  }
+
+  main input,
+  main select,
+  main textarea {
+    width: 100%;
+    min-width: 0;
+  }
+
+  main textarea {
+    min-height: 7rem;
+  }
+
+  main button,
+  main a.inline-flex {
+    min-height: 2.75rem;
+  }
+
+  main .flex.flex-wrap > button,
+  main .flex.flex-wrap > a.inline-flex,
+  main form button,
+  main form a.inline-flex {
+    width: 100%;
+  }
+
+  main [class*="rounded-[28px]"],
+  main [class*="rounded-[30px]"],
+  main [class*="rounded-[36px]"] {
+    border-radius: 1.35rem;
+  }
+
+  main [class*="p-6"],
+  main [class*="p-7"],
+  main [class*="p-8"],
+  main [class*="p-10"] {
+    padding: 1.25rem;
+  }
+
+  [class*="fixed"][class*="inset-0"] {
+    align-items: flex-start;
+    padding: 1rem;
+  }
+
+  [class*="fixed"][class*="inset-0"] > form,
+  [class*="fixed"][class*="inset-0"] > div:not([class*="absolute"]) {
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  canvas {
+    touch-action: none;
+  }
+}
+
+@media (max-width: 430px) {
+  main {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+
+  main .space-y-8 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1.25rem;
+  }
+
+  main .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1rem;
+  }
+}

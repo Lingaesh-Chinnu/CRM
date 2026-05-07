@@ -1,14 +1,17 @@
 import { Outlet } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import Sidebar from './Sidebar'
 import Header from './Header'
 import { logout } from '../../store/slices/authSlice'
 import { api } from '../../services/api'
 
+const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
+
 export default function MainLayout() {
   const dispatch = useDispatch()
   const { user } = useSelector((state) => state.auth)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!user) return undefined
@@ -32,7 +35,7 @@ export default function MainLayout() {
       window.clearTimeout(timeoutId)
       timeoutId = window.setTimeout(() => {
         dispatch(logout()).finally(() => {
-          window.location.replace('/login')
+          window.location.replace(`${appBasePath}/login`)
         })
       }, timeoutMs)
     }
@@ -47,12 +50,23 @@ export default function MainLayout() {
     }
   }, [dispatch, user])
 
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [mobileMenuOpen])
+
   return (
-    <div className="min-h-screen bg-slate-100">
-      <Sidebar />
-      <div className="flex min-h-screen flex-col md:ml-72">
-        <Header />
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen overflow-x-hidden bg-slate-100">
+      <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
+      <div className="flex min-h-screen min-w-0 flex-col md:ml-72">
+        <Header onMenuClick={() => setMobileMenuOpen(true)} />
+        <main className="min-w-0 flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
           <Outlet />
         </main>
       </div>

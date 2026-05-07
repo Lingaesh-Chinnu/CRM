@@ -76,6 +76,12 @@ from serializers import (
 User = get_user_model()
 
 
+def app_url(path):
+    """Build a URL path inside the configured application mount."""
+    base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
+    return f'{base_path}/{path.strip("/")}'
+
+
 def get_client_ip(request):
     forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
     if forwarded_for:
@@ -2115,7 +2121,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment.status = Enrollment.Status.RULES_SENT
             enrollment.save(update_fields=['status', 'updated_at'])
 
-        signing_link = request.build_absolute_uri(f'/rules-sign/{signing.token}')
+        signing_link = request.build_absolute_uri(app_url(f'rules-sign/{signing.token}'))
         message = (
             f'Hi {enrollment.name},\n\n'
             'Please review and sign the IIE Rules & Regulation form using the link below:\n\n'

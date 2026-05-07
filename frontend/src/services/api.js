@@ -3,15 +3,18 @@
 // ============================================================
 import axios from 'axios'
 
+const apiBaseURL = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseURL,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
 const refreshApi = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseURL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -52,7 +55,7 @@ api.interceptors.response.use(
       } catch (refreshError) {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
-        window.location.replace('/login')
+        window.location.replace(`${appBasePath}/login`)
         return Promise.reject(refreshError)
       }
     }
@@ -62,3 +65,4 @@ api.interceptors.response.use(
 )
 
 export { api }
+export { apiBaseURL }

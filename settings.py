@@ -7,13 +7,80 @@ import os
 from pathlib import Path
 from datetime import timedelta
 
+import dj_database_url
+
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIST_DIR = BASE_DIR / 'frontend' / 'dist'
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
+ENV_FILE = BASE_DIR / '.env'
+if ENV_FILE.exists():
+    for line in ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+try:
+    import pymysql  # type: ignore  # noqa: F401
+except ImportError:
+    pass
+else:
+    pymysql.install_as_MySQLdb()
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def env_list(name: str, default: str = '') -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(',') if item.strip()]
+
+
+def normalize_base_path(value: str | None) -> str:
+    path = (value or '').strip()
+    if not path or path == '/':
+        return ''
+    return '/' + path.strip('/')
+
+
+def prefixed_url(path: str) -> str:
+    path = '/' + path.strip('/') + '/'
+    return f'{APP_BASE_PATH}{path}' if APP_BASE_PATH else path
+
+
+REQUESTED_APP_BASE_PATH = normalize_base_path(os.environ.get('APP_BASE_PATH', ''))
 
 # ── Security ─────────────────────────────────────────────────
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-only-insecure-key-change-me')
-DEBUG      = True
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+DEBUG = env_bool('DJANGO_DEBUG', False)
+APP_BASE_PATH: str = (
+    REQUESTED_APP_BASE_PATH
+    if (not DEBUG or env_bool('ENABLE_APP_BASE_PATH_IN_DEBUG', False))
+    else ''
+)
+ALLOWED_HOSTS = env_list(
+    'ALLOWED_HOSTS',
+    '.onrender.com,localhost,127.0.0.1,wingrootechnologies.com,www.wingrootechnologies.com',
+)
+CSRF_TRUSTED_ORIGINS = env_list(
+    'CSRF_TRUSTED_ORIGINS',
+    'https://*.onrender.com,https://wingrootechnologies.com,https://www.wingrootechnologies.com',
+)
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', not DEBUG)
+CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', not DEBUG)
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', not DEBUG)
+SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000' if not DEBUG else '0'))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', not DEBUG)
+SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
+FORCE_SCRIPT_NAME = APP_BASE_PATH or None
+USE_X_FORWARDED_HOST = env_bool('USE_X_FORWARDED_HOST', not DEBUG)
 
 # ── Installed Apps ────────────────────────────────────────────
 DJANGO_APPS = [
@@ -36,12 +103,12 @@ THIRD_PARTY_APPS = [
     'django_celery_results',
 ]
 
+HAS_DRF_SPECTACULAR: bool = False
 try:
-    import drf_spectacular  # noqa: F401
+    import drf_spectacular as _  # noqa: F401  # type: ignore
+    HAS_DRF_SPECTACULAR = True  # type: ignore
 except ImportError:
-    HAS_DRF_SPECTACULAR = False
-else:
-    HAS_DRF_SPECTACULAR = True
+    pass
 
 if HAS_DRF_SPECTACULAR:
     THIRD_PARTY_APPS.append('drf_spectacular')  # OpenAPI docs
@@ -56,6 +123,7 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -70,34 +138,71 @@ AUTH_USER_MODEL  = 'crm.User'
 WSGI_APPLICATION = 'wsgi.application'
 
 # ── Templates ─────────────────────────────────────────────────
-TEMPLATES = [{
-    'BACKEND': 'django.template.backends.django.DjangoTemplates',
-    'DIRS': [BASE_DIR / 'templates', FRONTEND_DIST_DIR],
-    'APP_DIRS': True,
-    'OPTIONS': {
-        'context_processors': [
-            'django.template.context_processors.debug',
-            'django.template.context_processors.request',
-            'django.contrib.auth.context_processors.auth',
-            'django.contrib.messages.context_processors.messages',
-        ],
+TEMPLATES: list = [  # type: ignore
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [BASE_DIR / 'templates', FRONTEND_DIST_DIR],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+        },
     },
-}]
+]
 
 # ── Database — MySQL ──────────────────────────────────────────
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+DATABASE_URL = os.environ.get('DATABASE_URL')
+DB_ENGINE = os.environ.get('DB_ENGINE', 'sqlite').strip().lower()
+
+DATABASES: dict[str, dict] = {}  # type: ignore
+
+if DATABASE_URL:
+    DATABASES = {  # type: ignore
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=int(os.environ.get('DB_CONN_MAX_AGE', '600')),
+            ssl_require=env_bool('DB_SSL_REQUIRE', not DEBUG),
+        )
     }
-}
+elif DB_ENGINE == 'mysql':
+    mysql_options = {
+        'charset': 'utf8mb4',
+        'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+    }
+    if os.environ.get('DB_UNIX_SOCKET'):
+        mysql_options['unix_socket'] = os.environ['DB_UNIX_SOCKET']
+
+    DATABASES = {  # type: ignore
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('DB_NAME', os.environ.get('MYSQL_DATABASE', '')),
+            'USER': os.environ.get('DB_USER', os.environ.get('MYSQL_USER', '')),
+            'PASSWORD': os.environ.get('DB_PASSWORD', os.environ.get('MYSQL_PASSWORD', '')),
+            'HOST': os.environ.get('DB_HOST', os.environ.get('MYSQL_HOST', 'localhost')),
+            'PORT': os.environ.get('DB_PORT', os.environ.get('MYSQL_PORT', '3306')),
+            'OPTIONS': mysql_options,
+        }
+    }
+else:
+    DATABASES = {  # type: ignore
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.environ.get('SQLITE_NAME', BASE_DIR / 'db.sqlite3'),
+        }
+    }
 
 # ── Caching & Celery via Redis ────────────────────────────────
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'false').lower() == 'true'
 
+CACHES: dict[str, dict] = {}  # type: ignore
+
 if USE_REDIS_CACHE:
-    CACHES = {
+    CACHES = {  # type: ignore
         'default': {
             'BACKEND':  'django_redis.cache.RedisCache',
             'LOCATION': REDIS_URL,
@@ -106,7 +211,7 @@ if USE_REDIS_CACHE:
         }
     }
 else:
-    CACHES = {
+    CACHES = {  # type: ignore
         'default': {
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
             'LOCATION': 'crm-local-cache',
@@ -123,7 +228,7 @@ CELERY_TIMEZONE           = 'Asia/Kolkata'
 CELERY_BEAT_SCHEDULER     = 'django_celery_beat.schedulers:DatabaseScheduler'
 
 # ── Django REST Framework ─────────────────────────────────────
-REST_FRAMEWORK = {
+REST_FRAMEWORK: dict = {  # type: ignore
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
@@ -146,7 +251,7 @@ if HAS_DRF_SPECTACULAR:
     REST_FRAMEWORK['DEFAULT_SCHEMA_CLASS'] = 'drf_spectacular.openapi.AutoSchema'
 
 # ── JWT Configuration ─────────────────────────────────────────
-SIMPLE_JWT = {
+SIMPLE_JWT: dict = {  # type: ignore
     'ACCESS_TOKEN_LIFETIME':          timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME':         timedelta(days=7),
     'ROTATE_REFRESH_TOKENS':          True,
@@ -162,23 +267,28 @@ SIMPLE_JWT = {
 }
 
 # ── CORS ──────────────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = os.environ.get(
+CORS_ALLOWED_ORIGINS = env_list(
     'CORS_ALLOWED_ORIGINS',
-    'http://localhost:3000,http://localhost:5173'
-).split(',')
+    'https://wingrootechnologies.com,https://www.wingrootechnologies.com,http://localhost:3000,http://localhost:5173'
+)
+CORS_ALLOWED_ORIGIN_REGEXES = env_list(
+    'CORS_ALLOWED_ORIGIN_REGEXES',
+    r'^https://.*\.onrender\.com$',
+)
 CORS_ALLOW_CREDENTIALS = True
 
 # ── Static + Media ────────────────────────────────────────────
-STATIC_URL   = '/static/'
+STATIC_URL   = os.environ.get('STATIC_URL', prefixed_url('static'))
 STATIC_ROOT  = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [FRONTEND_DIST_DIR] if FRONTEND_DIST_DIR.exists() else []
-MEDIA_URL    = '/media/'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+MEDIA_URL    = os.environ.get('MEDIA_URL', prefixed_url('media'))
 MEDIA_ROOT   = BASE_DIR / 'media'
 
 # ── AWS S3 (production media storage) ─────────────────────────
-if not DEBUG:
+USE_S3_STORAGE = env_bool('USE_S3_STORAGE', False)
+if USE_S3_STORAGE:
     DEFAULT_FILE_STORAGE   = 'storages.backends.s3boto3.S3Boto3Storage'
-    STATICFILES_STORAGE    = 'storages.backends.s3boto3.S3StaticStorage'
     AWS_ACCESS_KEY_ID      = os.environ.get('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY  = os.environ.get('AWS_SECRET_ACCESS_KEY')
     AWS_STORAGE_BUCKET_NAME= os.environ.get('AWS_STORAGE_BUCKET_NAME', 'crm-erp-media')
@@ -208,7 +318,7 @@ USE_TZ        = True
 
 # ── API Docs ──────────────────────────────────────────────────
 if HAS_DRF_SPECTACULAR:
-    SPECTACULAR_SETTINGS = {
+    SPECTACULAR_SETTINGS: dict = {  # type: ignore
         'TITLE':       'CRM ERP API',
         'DESCRIPTION': 'Complete CRM + ERP backend for institute management',
         'VERSION':     '1.0.0',
@@ -218,7 +328,7 @@ if HAS_DRF_SPECTACULAR:
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ── Logging ───────────────────────────────────────────────────
-LOGGING = {
+LOGGING: dict = {  # type: ignore
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
@@ -227,7 +337,7 @@ LOGGING = {
     'handlers': {
         'console': {'class': 'logging.StreamHandler', 'formatter': 'verbose'},
         'file':    {'class': 'logging.handlers.RotatingFileHandler',
-                    'filename': BASE_DIR / 'logs/django.log',
+                    'filename': LOG_DIR / 'django.log',
                     'maxBytes': 10 * 1024 * 1024,  # 10 MB
                     'backupCount': 5,
                     'formatter': 'verbose'},

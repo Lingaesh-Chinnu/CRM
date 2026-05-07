@@ -12,7 +12,7 @@ function openWhatsApp(phone, message) {
   const cleanPhone = digits.length === 10 ? `91${digits}` : digits.startsWith('0') && digits.length === 11 ? `91${digits.slice(1)}` : digits
   const encodedMessage = encodeURIComponent(message)
   const url = `https://wa.me/${cleanPhone}?text=${encodedMessage}`
-  window.open(url, 'IIE_WhatsApp_Web')
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function feeReminderMessage(row) {

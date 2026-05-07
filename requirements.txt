@@ -1,51 +1,29 @@
-# ============================================================
-# requirements.txt - Python dependencies
-# ============================================================
-
-# Core
 Django==4.2.9
 djangorestframework==3.14.0
 djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.3.1
 django-filter==23.5
+dj-database-url==2.1.0
 drf-spectacular==0.27.0
 
-# Database
-# Optional for MySQL deployments. Local development uses SQLite in settings.py.
-# mysqlclient==2.2.0
+PyMySQL==1.1.0
+psycopg2-binary==2.9.9
 
-# Celery + Redis
 celery==5.3.6
 redis==5.0.1
 django-redis==5.4.0
 django-celery-beat==2.6.0
 django-celery-results==2.5.1
 
-# HTTP
 requests==2.31.0
 
-# AWS
 boto3==1.34.0
 django-storages[s3]==1.14.2
 django-ses==3.5.2
 
-# Auth
 PyJWT==2.8.0
-
-# Excel export
 openpyxl==3.1.2
 
-# Image handling
-# Optional for image-processing features. Not required for the core web app.
-# Pillow==10.4.0
-
-# Dev / Test
-pytest==7.4.4
-pytest-django==4.7.0
-factory-boy==3.3.0
-coverage==7.4.0
-
-# Production
 gunicorn==21.2.0
 whitenoise==6.6.0
 python-decouple==3.8

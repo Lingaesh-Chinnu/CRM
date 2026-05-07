@@ -7,6 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:django:local": "vite build --mode development",
+    "build:cpanel": "vite build --mode production",
     "preview": "vite preview",
     "lint": "eslint src --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0"
   },

@@ -4,6 +4,8 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
+const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
+
 const statusOptions = [
   { value: 'new', label: 'New' },
   { value: 'follow_up', label: 'Follow Up' },
@@ -109,7 +111,8 @@ export default function WalkInsListPage() {
   const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = searchParams.get('follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
-  const publicWalkInLink = `${window.location.origin}/public/walk-in`
+  const publicWalkInPath = `${appBasePath}/public/walk-in`
+  const publicWalkInLink = `${window.location.origin}${publicWalkInPath}`
 
   const copyWalkInLink = async () => {
     try {
@@ -218,7 +221,7 @@ export default function WalkInsListPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <a href="/public/walk-in" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+          <a href={publicWalkInPath} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
             Open Public Form
           </a>
           <button type="button" onClick={copyWalkInLink} className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
