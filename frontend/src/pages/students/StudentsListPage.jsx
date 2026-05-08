@@ -168,7 +168,7 @@ export default function StudentsListPage() {
         ) : (
           <>
             <div className="hidden md:block">
-              <div className="grid grid-cols-[20%_18%_14%_18%_20%_10%] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(0,1.15fr)_minmax(0,1.35fr)_150px] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 pr-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <div>Student</div>
                 <div>Contact</div>
                 <div>Date of Birth</div>
@@ -179,7 +179,7 @@ export default function StudentsListPage() {
 
               <div className="divide-y divide-slate-200">
                 {rows.map((row) => (
-                  <div key={row.id} className="grid grid-cols-[20%_18%_14%_18%_20%_10%] gap-2 px-4 py-4 text-sm">
+                  <div key={row.id} className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(0,1.15fr)_minmax(0,1.35fr)_150px] gap-2 px-4 py-4 pr-5 text-sm">
                     <div className="min-w-0 pr-2">
                       <p className="break-words text-base font-bold leading-5 tracking-tight text-slate-950">{row.name}</p>
                       <p className="mt-1 break-words text-xs text-slate-500">{row.student_number}</p>
@@ -206,13 +206,13 @@ export default function StudentsListPage() {
                       <p className="mt-1 whitespace-normal break-words text-xs leading-5">{compactValue(row.location, 'Address not added')}</p>
                     </div>
 
-                    <div className="flex min-w-0 flex-col items-start gap-2">
-                      <div className="max-w-full rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                    <div className="flex w-[150px] min-w-0 flex-col items-center justify-start gap-2 justify-self-end">
+                      <div className="max-w-[120px] whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-center text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
                         {row.status}
                       </div>
                       <Link
                         to={`/students/${row.id}`}
-                        className="w-full rounded-xl border border-slate-200 px-2 py-2 text-center text-xs font-semibold leading-4 text-slate-900 transition hover:bg-slate-50"
+                        className="max-w-[120px] whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-center text-xs font-semibold leading-4 text-slate-900 transition hover:bg-slate-50"
                       >
                         View Profile
                       </Link>

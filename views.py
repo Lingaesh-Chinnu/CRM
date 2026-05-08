@@ -2608,7 +2608,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                   <td>{escape(str(item.get('label') or 'Installment'))}</td>
                   <td>{escape(due_date_display)}</td>
                   <td class="amount">Rs {int(float(item.get('amount') or 0)):,.2f}</td>
-                  <td><span class="badge {status_class}">{escape(row_status)}</span></td>
+                  <td class="status-cell"><span class="badge {status_class}">{escape(row_status)}</span></td>
                 </tr>
                 """
             )
@@ -2631,37 +2631,39 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     <title>{escape(installment.bill_number or 'Installment Bill')}</title>
     <style>
       * {{ box-sizing: border-box; }}
-      body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 18px; background: #F8FAFC; }}
+      body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
       .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
-      .header {{ display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 22px; align-items: center; padding: 16px 26px; background: #1E3A5F; color: white; }}
+      .header {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 18px; align-items: center; padding: 11px 22px; background: #1E3A5F; color: white; }}
       .logo {{ display: flex; align-items: center; justify-content: flex-start; }}
-      .logo img {{ width: auto; height: 56px; object-fit: contain; display: block; }}
-      .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 72px; }}
-      .brand h1 {{ margin: 0 0 5px; font-size: 22px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
-      .brand .tagline {{ margin: 0 0 7px; font-size: 14px; font-weight: 600; color: #F8FAFC; }}
-      .brand .address {{ margin: 0 0 7px; }}
-      .brand .address p {{ margin: 1px 0; font-size: 11.5px; line-height: 1.35; color: #F8FAFC; }}
-      .brand .phone {{ margin: 0; font-size: 12px; line-height: 1.3; color: #F8FAFC; }}
-      .receipt-bar {{ display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
-      .receipt-title {{ font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; }}
-      .receipt-no {{ font-size: 13px; font-weight: 800; color: #1E3A5F; }}
-      .section {{ padding: 17px 20px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
-      .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }}
-      .field {{ display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: baseline; min-height: 25px; }}
-      .label {{ font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: #334155; }}
-      .value {{ font-size: 13px; font-weight: 800; color: #111827; }}
-      .section h2 {{ margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em; color: #111827; }}
+      .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
+      .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 68px; }}
+      .brand h1 {{ margin: 0 0 3px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
+      .brand .tagline {{ margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; }}
+      .brand .address {{ margin: 0 0 4px; }}
+      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.22; color: #F8FAFC; }}
+      .brand .phone {{ margin: 0; font-size: 11px; line-height: 1.2; color: #F8FAFC; }}
+      .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
+      .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
+      .section {{ padding: 11px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .grid {{ display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; row-gap: 7px; }}
+      .field {{ display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 8px; align-items: baseline; min-height: 20px; }}
+      .label {{ font-size: 9.8px; text-transform: uppercase; letter-spacing: 0.07em; color: #334155; line-height: 1.2; }}
+      .value {{ font-size: 12.2px; font-weight: 800; color: #111827; line-height: 1.25; }}
+      .section h2 {{ margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.12em; color: #111827; }}
       table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-      th, td {{ padding: 10px 11px; border: 1px solid #CBD5E1; text-align: left; vertical-align: middle; }}
-      th {{ background: #F8FAFC; color: #334155; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }}
+      th, td {{ padding: 6px 9px; border: 1px solid #CBD5E1; text-align: left; vertical-align: middle; }}
+      th {{ background: #F8FAFC; color: #334155; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }}
       tr:nth-child(even) td {{ background: #F8FAFC; }}
       .amount {{ text-align: right; font-weight: 800; color: #1E3A5F; }}
-      .badge {{ display: inline-block; min-width: 76px; border-radius: 999px; padding: 3px 9px; text-align: center; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; }}
+      td.status-cell {{ text-align: center; }}
+      .badge {{ display: inline-block; min-width: 70px; border-radius: 999px; padding: 2px 8px; text-align: center; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; line-height: 1.25; }}
       .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
       .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
-      .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; background: #F8FAFC; color: #334155; font-size: 12px; }}
-      .footer p {{ margin: 2px 0; }}
-      .bottom {{ display: flex; justify-content: space-between; gap: 16px; padding: 12px 20px; background: #F8FAFC; border-top: 1px solid #CBD5E1; color: #334155; font-size: 11px; }}
+      .generated {{ padding-top: 8px; padding-bottom: 8px; }}
+      .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 0; color: #334155; font-size: 11px; }}
+      .footer p {{ margin: 1px 0; line-height: 1.25; }}
+      .bottom {{ display: flex; justify-content: space-between; gap: 16px; padding: 8px 18px; background: #1E3A5F; border-top: 1px solid #1E3A5F; color: white; font-size: 10.5px; line-height: 1.25; }}
       @media print {{
         body {{ margin: 0; background: white; }}
         .sheet {{ border: 1px solid #CBD5E1; max-width: none; box-shadow: none; }}
@@ -2720,7 +2722,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           </tbody>
         </table>
       </div>
-      <div class="section footer">
+      <div class="section footer generated">
         <div>
           <p><strong>GENERATED BY:</strong> Indra Institute of Education</p>
           <p><strong>GENERATED ON:</strong> {escape(receipt_date(installment.bill_generated_at))}</p>
