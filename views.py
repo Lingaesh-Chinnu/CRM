@@ -2661,10 +2661,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       .badge {{ display: inline-block; min-width: 70px; border-radius: 999px; padding: 2px 8px; text-align: center; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; line-height: 1.25; }}
       .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
       .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
-      .generated {{ padding-top: 12px; padding-bottom: 12px; border-bottom: 0; }}
+      .generated {{ padding: 12px 20px 14px; border-bottom: 1px solid #CBD5E1; }}
       .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 0; color: #334155; font-size: 11px; }}
-      .footer p {{ margin: 1px 0; line-height: 1.25; }}
-      .bottom {{ display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 34px; padding: 9px 20px; background: #1E3A5F; border-top: 1px solid #1E3A5F; color: white; font-size: 10.5px; line-height: 1.25; }}
+      .footer p {{ margin: 2px 0; line-height: 1.35; }}
+      .footer strong {{ font-weight: 700; }}
+      .bottom {{ display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 42px; padding: 10px 24px; background: #1E3A5F; border-top: 1px solid #1E3A5F; color: white; font-size: 10.5px; line-height: 1.3; }}
       @media print {{
         body {{ margin: 0; background: white; }}
         .sheet {{ border: 1px solid #CBD5E1; max-width: none; box-shadow: none; }}
