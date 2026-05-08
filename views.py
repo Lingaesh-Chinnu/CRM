@@ -42,6 +42,7 @@ from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
+from django.shortcuts import render
 from django.db import transaction
 from django.db.models import Sum, Count, Q, F, Exists, OuterRef
 from django.utils import timezone
@@ -80,6 +81,24 @@ def app_url(path):
     """Build a URL path inside the configured application mount."""
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
     return f'{base_path}/{path.strip("/")}'
+
+
+def rules_sign_view(request, token):
+    """Serve the Rules signing SPA route with share-preview metadata."""
+    title = 'IIE Rules & Regulations'
+    description = 'Review and sign the IIE Rules & Regulations form.'
+    html = render(request, 'index.html').content.decode('utf-8')
+
+    html = re.sub(r'<title>.*?</title>', f'<title>{title}</title>', html, count=1, flags=re.IGNORECASE | re.DOTALL)
+    meta = (
+        f'<meta name="description" content="{description}" />\n'
+        f'    <meta property="og:title" content="{title}" />\n'
+        f'    <meta property="og:description" content="{description}" />\n'
+        '    <meta property="og:type" content="website" />'
+    )
+    if 'property="og:title"' not in html:
+        html = html.replace('<meta name="viewport" content="width=device-width, initial-scale=1.0" />', '<meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    ' + meta)
+    return HttpResponse(html)
 
 
 def get_client_ip(request):
@@ -436,7 +455,23 @@ def wrap_text(draw, text, font, max_width):
     return lines or ['']
 
 
-def build_signed_rules_pdf(enrollment, signature_bytes):
+def validate_data_image(image_data, label):
+    if not image_data or ',' not in image_data:
+        raise ValueError(f'{label} is required.')
+    try:
+        image_bytes = base64.b64decode(image_data.split(',', 1)[1])
+        from PIL import Image
+        Image.open(io.BytesIO(image_bytes)).verify()
+        return image_bytes
+    except ImportError:
+        raise RuntimeError('Pillow is required to process form images. Please install Pillow in the active virtual environment.')
+    except ValueError:
+        raise
+    except Exception:
+        raise ValueError(f'Invalid {label.lower()} image.')
+
+
+def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submitted_at=None):
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as exc:
@@ -466,14 +501,24 @@ def build_signed_rules_pdf(enrollment, signature_bytes):
             draw.text((margin, y), line, fill='black', font=font)
             y += spacing
 
-    draw.text((margin, y), 'IIE Rules & Regulation Form', fill='black', font=title_font)
+    draw.text((margin, y), 'IIE Rules & Regulations Form', fill='black', font=title_font)
     y += 45
+    if selfie_bytes:
+        selfie = Image.open(io.BytesIO(selfie_bytes)).convert('RGB')
+        selfie.thumbnail((180, 220))
+        selfie_x = width - margin - 180
+        draw.rectangle((selfie_x - 8, margin - 8, selfie_x + 188, margin + 228), outline='black')
+        page.paste(selfie, (selfie_x, margin))
+        draw.text((selfie_x, margin + 205), 'Student Selfie', fill='black', font=font)
     details = [
         f'Name: {enrollment.name}',
+        f'Phone: {enrollment.phone}',
         f'Course Enrolled: {enrollment.course.name if enrollment.course else ""}',
         f'Batch Timing: {enrollment.batch_timing or enrollment.get_preferred_timing_display() or ""}',
         f'Batch Start Date: {enrollment.start_date or ""}',
         f'Duration: {enrollment.course.duration_months if enrollment.course and enrollment.course.duration_months else ""}',
+        f'Actual Fees: Rs {enrollment.actual_fees}',
+        f'Discount: Rs {enrollment.discount_amount}',
         f'Total Course Fee: Rs {enrollment.final_fees}',
     ]
     for detail in details:
@@ -492,7 +537,8 @@ def build_signed_rules_pdf(enrollment, signature_bytes):
     signature = Image.open(io.BytesIO(signature_bytes)).convert('RGBA')
     signature.thumbnail((420, 180))
     page.paste(signature, (margin, y + 55), signature)
-    draw.text((margin, y + 245), f'Submitted At: {timezone.localtime(timezone.now()).strftime("%d %b %Y %I:%M %p")}', fill='black', font=font)
+    submitted_value = submitted_at or timezone.now()
+    draw.text((margin, y + 245), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill='black', font=font)
     pages.append(page)
 
     output = io.BytesIO()
@@ -2022,6 +2068,7 @@ class PublicRulesSigningView(APIView):
             'rules_paragraphs': extract_rules_template_text(),
             'rules_content': extract_rules_template_text(),
             'signed_pdf_url': request.build_absolute_uri(signing.signed_pdf.url) if signing.signed_pdf else None,
+            'selfie_url': request.build_absolute_uri(signing.selfie_image.url) if signing.selfie_image else None,
         })
 
     def post(self, request, token):
@@ -2031,31 +2078,43 @@ class PublicRulesSigningView(APIView):
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
             return Response({'detail': 'Rules & Regulation form has already been submitted.'}, status=400)
 
-        signature_data = request.data.get('signature')
-        if not signature_data or ',' not in signature_data:
-            return Response({'detail': 'Signature is required.'}, status=400)
-
         try:
-            signature_bytes = base64.b64decode(signature_data.split(',', 1)[1])
-            from PIL import Image
-            Image.open(io.BytesIO(signature_bytes)).verify()
-        except ImportError:
-            return Response({'detail': 'Pillow is required to process the signature image. Please install Pillow in the active virtual environment.'}, status=503)
-        except Exception:
-            return Response({'detail': 'Invalid signature image.'}, status=400)
+            selfie_bytes = validate_data_image(request.data.get('selfie'), 'Selfie')
+            signature_bytes = validate_data_image(request.data.get('signature'), 'Signature')
+        except RuntimeError as exc:
+            return Response({'detail': str(exc)}, status=503)
+        except ValueError as exc:
+            detail = str(exc)
+            if detail == 'Selfie is required.':
+                detail = 'Selfie is required before signing the form.'
+            return Response({'detail': detail}, status=400)
 
         enrollment = signing.enrollment
+        submitted_at = timezone.now()
+        selfie_name = f'rules-selfie-{enrollment.id}.jpg'
         signature_name = f'rules-signature-{enrollment.id}.png'
         pdf_name = f'rules-regulations-{enrollment.student_number or enrollment.id}.pdf'
+        signing.selfie_image.save(selfie_name, ContentFile(selfie_bytes), save=False)
         signing.signature_image.save(signature_name, ContentFile(signature_bytes), save=False)
         try:
-            pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes)
+            pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
         signing.signed_pdf.save(pdf_name, ContentFile(pdf_bytes), save=False)
         signing.status = RulesSigningRequest.Status.SUBMITTED
-        signing.submitted_at = timezone.now()
-        signing.save(update_fields=['signature_image', 'signed_pdf', 'status', 'submitted_at', 'updated_at'])
+        signing.submitted_at = submitted_at
+        signing.submitted_ip = get_client_ip(request)
+        signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
+        signing.save(update_fields=[
+            'selfie_image',
+            'signature_image',
+            'signed_pdf',
+            'status',
+            'submitted_at',
+            'submitted_ip',
+            'submitted_user_agent',
+            'updated_at',
+        ])
         if enrollment.status != Enrollment.Status.ENROLLED:
             enrollment.status = Enrollment.Status.RULES_SUBMITTED
             enrollment.save(update_fields=['status', 'updated_at'])
@@ -2063,6 +2122,8 @@ class PublicRulesSigningView(APIView):
             'detail': 'Rules & Regulation form submitted successfully.',
             'status': signing.status,
             'signed_pdf_url': request.build_absolute_uri(signing.signed_pdf.url),
+            'selfie_url': request.build_absolute_uri(signing.selfie_image.url),
+            'submitted_at': signing.submitted_at,
         })
 
 
@@ -2121,10 +2182,12 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment.status = Enrollment.Status.RULES_SENT
             enrollment.save(update_fields=['status', 'updated_at'])
 
-        signing_link = request.build_absolute_uri(app_url(f'rules-sign/{signing.token}'))
+        signing_path = f'{app_url(f"IIE-Rules-Regulations/{signing.token}")}/'
+        signing_link = request.build_absolute_uri(signing_path)
         message = (
             f'Hi {enrollment.name},\n\n'
-            'Please review and sign the IIE Rules & Regulation form using the link below:\n\n'
+            'Please review and sign the IIE Rules & Regulations form using the link below:\n\n'
+            'IIE Rules & Regulations Form:\n'
             f'{signing_link}\n\n'
             'After signing, our team will proceed with your enrollment.\n\n'
             '-Team IIE'

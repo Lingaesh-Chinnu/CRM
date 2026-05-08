@@ -18,12 +18,25 @@ function formatDate(value) {
 export default function RulesSigningPage() {
   const { token } = useParams()
   const canvasRef = useRef(null)
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
   const drawingRef = useRef(false)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [hasSignature, setHasSignature] = useState(false)
+  const [selfie, setSelfie] = useState('')
+  const [cameraActive, setCameraActive] = useState(false)
+  const [cameraError, setCameraError] = useState('')
   const [message, setMessage] = useState('')
+
+  const stopCamera = (updateState = true) => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    if (updateState) {
+      setCameraActive(false)
+    }
+  }
 
   useEffect(() => {
     api
@@ -32,6 +45,8 @@ export default function RulesSigningPage() {
       .catch(() => setMessage('This signing link is invalid or unavailable.'))
       .finally(() => setLoading(false))
   }, [token])
+
+  useEffect(() => () => stopCamera(false), [])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -73,7 +88,7 @@ export default function RulesSigningPage() {
   }
 
   const startDrawing = (event) => {
-    if (data?.status === 'submitted') return
+    if (data?.status === 'submitted' || !selfie) return
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     const point = pointFromEvent(event)
@@ -84,7 +99,7 @@ export default function RulesSigningPage() {
   }
 
   const draw = (event) => {
-    if (!drawingRef.current || data?.status === 'submitted') return
+    if (!drawingRef.current || data?.status === 'submitted' || !selfie) return
     const ctx = canvasRef.current.getContext('2d')
     const point = pointFromEvent(event)
     ctx.lineTo(point.x, point.y)
@@ -104,7 +119,51 @@ export default function RulesSigningPage() {
     setMessage('')
   }
 
+  const openCamera = async () => {
+    setCameraError('')
+    setMessage('')
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('Camera access is required to complete the signing process. Please allow camera permission.')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+      setCameraActive(true)
+    } catch {
+      setCameraError('Camera access is required to complete the signing process. Please allow camera permission.')
+    }
+  }
+
+  const captureSelfie = () => {
+    const video = videoRef.current
+    if (!video) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 640
+    canvas.height = video.videoHeight || 480
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
+    setSelfie(canvas.toDataURL('image/jpeg', 0.9))
+    clearSignature()
+    stopCamera()
+  }
+
+  const retakeSelfie = () => {
+    setSelfie('')
+    clearSignature()
+    openCamera()
+  }
+
   const submitSignature = async () => {
+    if (!selfie) {
+      setMessage('Selfie is required before signing the form.')
+      return
+    }
     if (!hasSignature) {
       setMessage('Please add your signature before submitting.')
       return
@@ -114,13 +173,15 @@ export default function RulesSigningPage() {
     setMessage('')
     try {
       const signature = canvasRef.current.toDataURL('image/png')
-      const { data: response } = await api.post(`/public/rules-sign/${token}/`, { signature })
+      const { data: response } = await api.post(`/public/rules-sign/${token}/`, { selfie, signature })
       setData((current) => ({
         ...current,
         status: 'submitted',
         submitted_at: response.submitted_at,
         signed_pdf_url: response.signed_pdf_url,
+        selfie_url: response.selfie_url,
       }))
+      stopCamera()
       setMessage('Signed form submitted successfully.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
@@ -140,6 +201,52 @@ export default function RulesSigningPage() {
   const details = data.candidate || {}
   const submitted = data.status === 'submitted'
 
+  if (submitted) {
+    return (
+      <main className="min-h-screen bg-slate-100 px-4 py-6 sm:px-6">
+        <section className="mx-auto max-w-4xl rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-700">Submitted</p>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+            IIE Rules & Regulations
+          </h1>
+          <p className="mt-2 text-sm text-slate-600">
+            This form has already been submitted and is locked.
+          </p>
+          {data.signed_pdf_url ? (
+            <>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a
+                  href={data.signed_pdf_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+                >
+                  View Signed PDF
+                </a>
+                <a
+                  href={data.signed_pdf_url}
+                  download
+                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+                >
+                  Download PDF
+                </a>
+              </div>
+              <iframe
+                title="Signed Rules PDF"
+                src={data.signed_pdf_url}
+                className="mt-6 h-[70vh] w-full rounded-2xl border border-slate-200"
+              />
+            </>
+          ) : (
+            <p className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+              Signed PDF is not available.
+            </p>
+          )}
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-5 sm:px-6">
       <div className="mx-auto max-w-4xl space-y-5">
@@ -151,11 +258,6 @@ export default function RulesSigningPage() {
           <p className="mt-2 text-sm text-slate-600">
             Please review the form details and sign in the signature box.
           </p>
-          {submitted && (
-            <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
-              This form has already been submitted.
-            </div>
-          )}
         </section>
 
         <section className="grid gap-4 rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:grid-cols-2 sm:p-8">
@@ -198,10 +300,62 @@ export default function RulesSigningPage() {
         </section>
 
         <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
+          <h2 className="text-lg font-black text-slate-950">Take Selfie</h2>
+          <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+            {selfie ? (
+              <img src={selfie} alt="Captured selfie preview" className="mx-auto max-h-80 w-full object-contain" />
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`mx-auto max-h-80 w-full bg-slate-900 object-contain ${cameraActive ? 'block' : 'hidden'}`}
+              />
+            )}
+            {!selfie && !cameraActive && (
+              <div className="flex min-h-48 items-center justify-center px-4 py-8 text-center text-sm font-semibold text-slate-500">
+                Camera preview will appear here.
+              </div>
+            )}
+          </div>
+          {cameraError && <p className="mt-4 text-sm font-semibold text-rose-700">{cameraError}</p>}
+          <div className="mt-5 flex flex-wrap gap-3">
+            {!selfie && !cameraActive && (
+              <button
+                type="button"
+                onClick={openCamera}
+                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+              >
+                Take Selfie
+              </button>
+            )}
+            {!selfie && cameraActive && (
+              <button
+                type="button"
+                onClick={captureSelfie}
+                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+              >
+                Capture Selfie
+              </button>
+            )}
+            {selfie && (
+              <button
+                type="button"
+                onClick={retakeSelfie}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+              >
+                Retake Selfie
+              </button>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
           <h2 className="text-lg font-black text-slate-950">Student Signature</h2>
           <canvas
             ref={canvasRef}
-            className="mt-4 h-48 w-full touch-none rounded-2xl border border-slate-300 bg-white"
+            className={`mt-4 h-48 w-full touch-none rounded-2xl border border-slate-300 bg-white ${!selfie ? 'opacity-50' : ''}`}
             onPointerDown={startDrawing}
             onPointerMove={draw}
             onPointerUp={stopDrawing}
@@ -215,6 +369,7 @@ export default function RulesSigningPage() {
                 <button
                   type="button"
                   onClick={clearSignature}
+                  disabled={!selfie}
                   className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
                 >
                   Clear Signature
@@ -222,8 +377,8 @@ export default function RulesSigningPage() {
                 <button
                   type="button"
                   onClick={submitSignature}
-                  disabled={submitting}
-                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                  disabled={submitting || !selfie || !hasSignature}
+                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {submitting ? 'Submitting...' : 'Submit Signed Form'}
                 </button>

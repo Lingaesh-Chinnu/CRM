@@ -499,6 +499,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     discount_name = serializers.CharField(source='discount.name', read_only=True)
     rules_signing_status = serializers.SerializerMethodField()
     rules_signed_pdf_url = serializers.SerializerMethodField()
+    rules_selfie_url = serializers.SerializerMethodField()
     rules_submitted_at = serializers.SerializerMethodField()
     installment_schedule = serializers.SerializerMethodField()
 
@@ -521,6 +522,14 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         if not signing or not signing.signed_pdf:
             return None
         url = signing.signed_pdf.url
+        return request.build_absolute_uri(url) if request else url
+
+    def get_rules_selfie_url(self, obj):
+        signing = getattr(obj, 'rules_signing', None)
+        request = self.context.get('request')
+        if not signing or not signing.selfie_image:
+            return None
+        url = signing.selfie_image.url
         return request.build_absolute_uri(url) if request else url
 
     def get_rules_submitted_at(self, obj):

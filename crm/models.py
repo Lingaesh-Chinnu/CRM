@@ -759,8 +759,11 @@ class RulesSigningRequest(TimeStampedModel):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
     sent_at = models.DateTimeField(null=True, blank=True)
     submitted_at = models.DateTimeField(null=True, blank=True)
+    selfie_image = models.FileField(upload_to='rules_selfies/', null=True, blank=True)
     signature_image = models.FileField(upload_to='rules_signatures/', null=True, blank=True)
     signed_pdf = models.FileField(upload_to='signed_rules/', null=True, blank=True)
+    submitted_ip = models.GenericIPAddressField(null=True, blank=True)
+    submitted_user_agent = models.TextField(blank=True)
     sent_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                 related_name='rules_forms_sent')
 

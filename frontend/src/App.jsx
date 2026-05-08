@@ -78,6 +78,7 @@ export default function App() {
       <Route path="/"                  element={<RootRedirect />} />
       <Route path="/login"             element={<LoginPage />} />
       <Route path="/public/walk-in"    element={<PublicWalkInForm />} />
+      <Route path="/IIE-Rules-Regulations/:token" element={<RulesSigningPage />} />
       <Route path="/rules-sign/:token" element={<RulesSigningPage />} />
 
       {/* Protected routes inside MainLayout */}

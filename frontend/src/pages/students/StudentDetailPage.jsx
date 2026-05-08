@@ -69,6 +69,16 @@ export default function StudentDetailPage() {
               View Signed Rules PDF
             </a>
           )}
+          {row.rules_selfie_url && (
+            <a
+              href={row.rules_selfie_url}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+            >
+              View Selfie
+            </a>
+          )}
         </div>
       </section>
 
