@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import { openProtectedFile } from '../../utils/protectedFiles'
 
 function prettyValue(value, fallback = 'Not provided') {
   return value || fallback
@@ -31,6 +32,7 @@ export default function StudentDetailPage() {
   const { id } = useParams()
   const [row, setRow] = useState(null)
   const [loadError, setLoadError] = useState('')
+  const [message, setMessage] = useState('')
 
   useEffect(() => {
     setLoadError('')
@@ -65,26 +67,25 @@ export default function StudentDetailPage() {
             Open Enrollment
           </Link>
           {row.rules_signed_pdf_url && (
-            <a
-              href={row.rules_signed_pdf_url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => openProtectedFile(api, row.rules_signed_pdf_url, 'Signed PDF is not available. Please resend and collect the signed form again.', setMessage)}
               className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
             >
               View Signed Rules PDF
-            </a>
+            </button>
           )}
           {row.rules_selfie_url && (
-            <a
-              href={row.rules_selfie_url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => openProtectedFile(api, row.rules_selfie_url, 'Selfie is not available.', setMessage)}
               className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Selfie
-            </a>
+            </button>
           )}
         </div>
+        {message && <p className="mt-4 text-sm font-semibold text-slate-600">{message}</p>}
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -26,6 +26,7 @@ from views import (
     UserPerformanceReportView, UserRatingReportView, ConversionFunnelReportView,
     BranchPerformanceComparisonReportView, PublicWalkInFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
+    RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView,
 )
 
 router = DefaultRouter()
@@ -77,6 +78,9 @@ api_urlpatterns = [
 urlpatterns = [
     path('IIE-Rules-Regulations/<uuid:token>/', rules_sign_view, name='rules_sign_public'),
     path('rules-sign/<uuid:token>/', rules_sign_view, name='rules_sign_legacy'),
+    path('rules-signed-pdf/<int:enrollment_id>/', RulesSignedPdfView.as_view(), name='rules_signed_pdf'),
+    path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
+    path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
     re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|user-monitoring|lead-import-history)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),

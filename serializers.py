@@ -4,6 +4,7 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db.utils import OperationalError, ProgrammingError
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog
@@ -518,6 +519,8 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
             data = RulesSigningRequest.objects.filter(enrollment=obj).values(
                 *base_fields,
                 'selfie_image',
+                'signed_pdf_file',
+                'selfie_image_file',
             ).first()
         except (OperationalError, ProgrammingError):
             try:
@@ -537,6 +540,15 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         return request.build_absolute_uri(url) if request else url
 
+    def _proof_url(self, obj, field_name, legacy_field_name, path_name):
+        data = self._rules_signing_data(obj)
+        if not data.get(field_name) and not data.get(legacy_field_name):
+            return None
+        base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
+        url = f'{base_path}/{path_name}/{obj.id}/'
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
     def get_payment_info(self, obj):
         if hasattr(obj, 'payment'):
             return PaymentSerializer(obj.payment).data
@@ -546,10 +558,10 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         return self._rules_signing_data(obj).get('status') or 'pending'
 
     def get_rules_signed_pdf_url(self, obj):
-        return self._file_url(self._rules_signing_data(obj).get('signed_pdf'))
+        return self._proof_url(obj, 'signed_pdf_file', 'signed_pdf', 'rules-signed-pdf')
 
     def get_rules_selfie_url(self, obj):
-        return self._file_url(self._rules_signing_data(obj).get('selfie_image'))
+        return self._proof_url(obj, 'selfie_image_file', 'selfie_image', 'rules-selfie')
 
     def get_rules_submitted_at(self, obj):
         return self._rules_signing_data(obj).get('submitted_at')

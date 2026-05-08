@@ -2081,12 +2081,24 @@ class PublicRulesSigningView(APIView):
     def get_signing(self, token):
         return RulesSigningRequest.objects.defer(
             'selfie_image',
+            'selfie_image_file',
+            'signature_image_file',
+            'signed_pdf_file',
             'submitted_ip',
             'submitted_user_agent',
         ).select_related(
             'enrollment__course',
             'enrollment__branch',
         ).filter(token=token).first()
+
+    def public_pdf_url(self, request, signing):
+        try:
+            has_pdf = bool(getattr(signing, 'signed_pdf_file', None) or signing.signed_pdf)
+        except (OperationalError, ProgrammingError):
+            has_pdf = bool(signing.signed_pdf)
+        if not has_pdf:
+            return None
+        return request.build_absolute_uri(f'{app_url(f"public/rules-signed-pdf/{signing.token}")}/')
 
     def get(self, request, token):
         signing = self.get_signing(token)
@@ -2115,7 +2127,7 @@ class PublicRulesSigningView(APIView):
             'installments': installments,
             'rules_paragraphs': extract_rules_template_text(),
             'rules_content': extract_rules_template_text(),
-            'signed_pdf_url': self.file_url(request, signing, 'signed_pdf'),
+            'signed_pdf_url': self.public_pdf_url(request, signing),
             'selfie_url': self.file_url(request, signing, 'selfie_image'),
         })
 
@@ -2146,25 +2158,22 @@ class PublicRulesSigningView(APIView):
 
         enrollment = signing.enrollment
         submitted_at = timezone.now()
-        selfie_name = f'rules-selfie-{enrollment.id}.jpg'
-        signature_name = f'rules-signature-{enrollment.id}.png'
-        pdf_name = f'rules-regulations-{enrollment.student_number or enrollment.id}.pdf'
         try:
-            signing.selfie_image.save(selfie_name, ContentFile(selfie_bytes), save=False)
-            signing.signature_image.save(signature_name, ContentFile(signature_bytes), save=False)
             try:
                 pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
             except RuntimeError as exc:
                 return Response({'detail': str(exc)}, status=503)
-            signing.signed_pdf.save(pdf_name, ContentFile(pdf_bytes), save=False)
+            signing.selfie_image_file = selfie_bytes
+            signing.signature_image_file = signature_bytes
+            signing.signed_pdf_file = pdf_bytes
             signing.status = RulesSigningRequest.Status.SUBMITTED
             signing.submitted_at = submitted_at
             signing.submitted_ip = get_client_ip(request)
             signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
             signing.save(update_fields=[
-                'selfie_image',
-                'signature_image',
-                'signed_pdf',
+                'selfie_image_file',
+                'signature_image_file',
+                'signed_pdf_file',
                 'status',
                 'submitted_at',
                 'submitted_ip',
@@ -2179,10 +2188,113 @@ class PublicRulesSigningView(APIView):
         return Response({
             'detail': 'Rules & Regulation form submitted successfully.',
             'status': signing.status,
-            'signed_pdf_url': self.file_url(request, signing, 'signed_pdf'),
-            'selfie_url': self.file_url(request, signing, 'selfie_image'),
+            'signed_pdf_url': self.public_pdf_url(request, signing),
+            'selfie_url': None,
             'submitted_at': signing.submitted_at,
         })
+
+
+def proof_filename(enrollment):
+    student_id = enrollment.student_number or enrollment.id
+    return f'IIE-Rules-Regulations-{student_id}.pdf'
+
+
+def proof_unavailable_response():
+    return Response(
+        {'detail': 'Signed PDF is not available. Please resend and collect the signed form again.'},
+        status=404,
+    )
+
+
+def binary_or_legacy_file(signing, binary_field, legacy_field):
+    try:
+        binary_value = getattr(signing, binary_field, None)
+    except (OperationalError, ProgrammingError):
+        binary_value = None
+    if binary_value:
+        return bytes(binary_value)
+    try:
+        field = getattr(signing, legacy_field, None)
+        if field:
+            with field.open('rb') as handle:
+                return handle.read()
+    except Exception:
+        return None
+    return None
+
+
+class RulesSignedPdfView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, enrollment_id):
+        signing = RulesSigningRequest.objects.defer(
+            'selfie_image',
+            'selfie_image_file',
+            'signature_image_file',
+            'signed_pdf_file',
+            'submitted_ip',
+            'submitted_user_agent',
+        ).select_related('enrollment__branch').filter(enrollment_id=enrollment_id).first()
+        if not signing:
+            return proof_unavailable_response()
+        enrollment = signing.enrollment
+        if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
+            return Response({'detail': 'You do not have permission to view this signed PDF.'}, status=403)
+        pdf_bytes = binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+        if not pdf_bytes:
+            return proof_unavailable_response()
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
+        return response
+
+
+class RulesSelfieView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, enrollment_id):
+        signing = RulesSigningRequest.objects.defer(
+            'selfie_image',
+            'selfie_image_file',
+            'signature_image_file',
+            'signed_pdf_file',
+            'submitted_ip',
+            'submitted_user_agent',
+        ).select_related('enrollment__branch').filter(enrollment_id=enrollment_id).first()
+        if not signing:
+            return Response({'detail': 'Selfie is not available.'}, status=404)
+        enrollment = signing.enrollment
+        if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
+            return Response({'detail': 'You do not have permission to view this selfie.'}, status=403)
+        image_bytes = binary_or_legacy_file(signing, 'selfie_image_file', 'selfie_image')
+        if not image_bytes:
+            return Response({'detail': 'Selfie is not available.'}, status=404)
+        return HttpResponse(image_bytes, content_type='image/jpeg')
+
+
+class PublicRulesSignedPdfView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, token):
+        signing = RulesSigningRequest.objects.defer(
+            'selfie_image',
+            'selfie_image_file',
+            'signature_image_file',
+            'signed_pdf_file',
+            'submitted_ip',
+            'submitted_user_agent',
+        ).select_related('enrollment').filter(
+            token=token,
+            status=RulesSigningRequest.Status.SUBMITTED,
+        ).first()
+        if not signing:
+            return proof_unavailable_response()
+        pdf_bytes = binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+        if not pdf_bytes:
+            return proof_unavailable_response()
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{proof_filename(signing.enrollment)}"'
+        return response
 
 
 # ============================================================

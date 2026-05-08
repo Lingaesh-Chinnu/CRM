@@ -4,6 +4,7 @@ import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { openWhatsApp } from '../../utils/whatsappTemplates'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import { openProtectedFile } from '../../utils/protectedFiles'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -237,24 +238,27 @@ export default function EnrollmentDetailPage() {
             {isFinalEnrollment ? 'Student Enrolled' : 'Enroll Student'}
           </button>
           {row.rules_signed_pdf_url && (
-            <a
-              href={row.rules_signed_pdf_url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => openProtectedFile(api, row.rules_signed_pdf_url, 'Signed PDF is not available. Please resend and collect the signed form again.', setMessage)}
               className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Signed PDF
-            </a>
+            </button>
           )}
           {row.rules_selfie_url && (
-            <a
-              href={row.rules_selfie_url}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              type="button"
+              onClick={() => openProtectedFile(api, row.rules_selfie_url, 'Selfie is not available.', setMessage)}
               className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Selfie
-            </a>
+            </button>
+          )}
+          {rulesStatus === 'submitted' && !row.rules_signed_pdf_url && (
+            <span className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              Signed PDF is not available. Please resend and collect the signed form again.
+            </span>
           )}
         </div>
         {!canEnroll && (
