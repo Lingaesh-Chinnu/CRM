@@ -83,6 +83,49 @@ def app_url(path):
     return f'{base_path}/{path.strip("/")}'
 
 
+WHATSAPP_PLACEHOLDERS = [
+    'student_name',
+    'candidate_name',
+    'course_name',
+    'branch_name',
+    'phone_number',
+    'total_fee',
+    'paid_amount',
+    'pending_amount',
+    'installment_number',
+    'installment_amount',
+    'due_date',
+    'next_payment_date',
+    'follow_up_date',
+    'rules_link',
+    'institute_name',
+]
+
+
+def whatsapp_currency(value):
+    if value in (None, ''):
+        return ''
+    return f'₹{float(value):,.0f}'
+
+
+def whatsapp_date(value):
+    if not value:
+        return ''
+    if isinstance(value, str):
+        value = parse_date(value)
+    if not value:
+        return ''
+    return value.strftime('%d %b %Y')
+
+
+def render_whatsapp_template(body, values):
+    message = body or ''
+    normalized = {key: str(values.get(key) or '') for key in WHATSAPP_PLACEHOLDERS}
+    for key, value in normalized.items():
+        message = re.sub(r'{{\s*' + re.escape(key) + r'\s*}}', value, message)
+    return re.sub(r'{{\s*[\w]+\s*}}', '', message).strip()
+
+
 def rules_sign_view(request, token):
     """Serve the Rules signing SPA route with share-preview metadata."""
     title = 'IIE Rules & Regulations'
@@ -2184,7 +2227,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
         signing_path = f'{app_url(f"IIE-Rules-Regulations/{signing.token}")}/'
         signing_link = request.build_absolute_uri(signing_path)
-        message = (
+        default_message = (
             f'Hi {enrollment.name},\n\n'
             'Please review and sign the IIE Rules & Regulations form using the link below:\n\n'
             'IIE Rules & Regulations Form:\n'
@@ -2192,6 +2235,25 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'After signing, our team will proceed with your enrollment.\n\n'
             '-Team IIE'
         )
+        template = WhatsAppTemplate.objects.filter(
+            template_type=WhatsAppTemplate.TemplateType.RULES_FORM_LINK,
+            is_active=True,
+        ).order_by('name').first()
+        payment = getattr(enrollment, 'payment', None)
+        message = render_whatsapp_template(template.message_body if template else default_message, {
+            'student_name': enrollment.name,
+            'candidate_name': enrollment.name,
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else '',
+            'phone_number': enrollment.phone,
+            'total_fee': whatsapp_currency(enrollment.final_fees),
+            'paid_amount': whatsapp_currency(payment.paid_amount if payment else 0),
+            'pending_amount': whatsapp_currency((payment.balance if payment else enrollment.final_fees)),
+            'due_date': whatsapp_date(enrollment.start_date),
+            'next_payment_date': whatsapp_date(payment.next_payment_date if payment else None),
+            'rules_link': signing_link,
+            'institute_name': 'IIE',
+        })
         return Response({
             'detail': 'Rules & Regulation form link generated.',
             'signing_link': signing_link,

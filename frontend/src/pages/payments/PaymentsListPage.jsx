@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../services/api'
+import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function openWhatsApp(phone, message) {
-  const digits = String(phone || '').replace(/\D/g, '')
-  const cleanPhone = digits.length === 10 ? `91${digits}` : digits.startsWith('0') && digits.length === 11 ? `91${digits.slice(1)}` : digits
-  const encodedMessage = encodeURIComponent(message)
-  const url = `https://wa.me/${cleanPhone}?text=${encodedMessage}`
-  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function feeReminderMessage(row) {
@@ -20,30 +13,13 @@ function feeReminderMessage(row) {
 
 This is a gentle reminder regarding your pending course fee payment.
 
-Total Fee: Rs ${Number(row.total_fees || 0).toLocaleString('en-IN')}
-Paid: Rs ${Number(row.paid_amount || 0).toLocaleString('en-IN')}
-Balance: Rs ${Number(row.balance || 0).toLocaleString('en-IN')}
+Total Fee: {{total_fee}}
+Paid: {{paid_amount}}
+Balance: {{pending_amount}}
 
 Kindly complete the pending payment at your earliest convenience.
 
 -Team IIE`
-}
-
-function renderTemplate(template, row) {
-  const values = {
-    candidate_name: row.student_name || '',
-    course_name: '',
-    branch_name: row.branch_name || '',
-    follow_up_date: '',
-    pending_amount: `Rs ${Number(row.balance || 0).toLocaleString('en-IN')}`,
-    next_payment_date: row.next_payment_date || '',
-    rules_link: '',
-    institute_name: 'IIE',
-  }
-  return Object.entries(values).reduce(
-    (message, [key, value]) => message.replaceAll(`{{${key}}}`, value),
-    template?.message_body || feeReminderMessage(row)
-  )
 }
 
 function formatDate(value) {
@@ -134,7 +110,7 @@ export default function PaymentsListPage() {
                           type="button"
                           onClick={() => {
                             const template = templates.find((item) => String(item.id) === String(selectedTemplate))
-                            openWhatsApp(row.student_phone, renderTemplate(template, row))
+                            openWhatsApp(row.student_phone, renderWhatsAppTemplate(template, row, feeReminderMessage(row)))
                           }}
                           className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                         >

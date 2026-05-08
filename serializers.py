@@ -594,13 +594,14 @@ class PaymentSerializer(serializers.ModelSerializer):
     student_name  = serializers.CharField(source='enrollment.name',          read_only=True)
     student_number= serializers.CharField(source='enrollment.student_number', read_only=True)
     student_phone = serializers.CharField(source='enrollment.phone', read_only=True)
+    course_name = serializers.CharField(source='enrollment.course.name', read_only=True)
     branch_name = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
-                  'branch_name','total_fees','paid_amount','balance','status',
+                  'course_name','branch_name','total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','manual_installment_schedule',
                   'installments','updated_at']
         read_only_fields = ['paid_amount','balance','status']

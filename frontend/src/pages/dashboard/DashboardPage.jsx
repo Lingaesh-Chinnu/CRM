@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import LoginAnimatedBackground from '../../components/common/LoginAnimatedBackground'
+import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 const dashboardQuotes = [
   'Make today count. Every lead matters.',
@@ -126,14 +127,6 @@ function branchSortIndex(branch) {
   return index === -1 ? preferredBranchOrder.length : index
 }
 
-function openWhatsApp(phone, message) {
-  const digits = String(phone || '').replace(/\D/g, '')
-  const cleanPhone = digits.length === 10 ? `91${digits}` : digits.startsWith('0') && digits.length === 11 ? `91${digits.slice(1)}` : digits
-  const encodedMessage = encodeURIComponent(message)
-  const url = `https://wa.me/${cleanPhone}?text=${encodedMessage}`
-  window.open(url, '_blank', 'noopener,noreferrer')
-}
-
 function HistoricalAnalyticsChart({ rows }) {
   const maxValue = Math.max(
     1,
@@ -183,6 +176,14 @@ function HistoricalAnalyticsChart({ rows }) {
 }
 
 function BirthdayReminderCardV2({ birthdays }) {
+  const [templates, setTemplates] = useState([])
+
+  useEffect(() => {
+    api.get('/whatsapp-templates/', { params: { template_type: 'birthday_wish', is_active: true } })
+      .then(({ data }) => setTemplates(data.results || data))
+      .catch(() => setTemplates([]))
+  }, [])
+
   const messageTemplates = {
     6: `Hi {{student_name}}! 🎉
 Only 6 days to go for your special day.
@@ -223,8 +224,11 @@ Enjoy your special day, {{student_name}}!
   }
 
   const birthdayMessageFor = (student) => (
-    (messageTemplates[Number(student.days_left || 0)] || messageTemplates[0])
-      .replaceAll('{{student_name}}', student.name || 'Student')
+    renderWhatsAppTemplate(
+      templates[0],
+      student,
+      messageTemplates[Number(student.days_left || 0)] || messageTemplates[0]
+    )
   )
 
   const birthdayLabelFor = (student) => {

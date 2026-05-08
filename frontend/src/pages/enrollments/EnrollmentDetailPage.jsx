@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import { openWhatsApp } from '../../utils/whatsappTemplates'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -92,12 +93,7 @@ export default function EnrollmentDetailPage() {
         rules_signed_pdf_url: updatedEnrollment.rules_signed_pdf_url,
       })
 
-      const digits = String(data.phone || updatedEnrollment.phone || row.phone || '').replace(/\D/g, '')
-      const whatsappPhone = digits.length === 10 ? `91${digits}` : digits
-      const whatsappUrl = whatsappPhone
-        ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(data.whatsapp_message)}`
-        : `https://wa.me/?text=${encodeURIComponent(data.whatsapp_message)}`
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
+      openWhatsApp(data.phone || updatedEnrollment.phone || row.phone, data.whatsapp_message)
       setMessage('Rules & Regulation signing link is ready and opened in WhatsApp Web.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to send Rules & Regulation form.')
