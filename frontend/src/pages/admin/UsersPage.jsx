@@ -49,67 +49,13 @@ function normaliseListResponse(data) {
   return data.results || data
 }
 
-function formatDate(value) {
-  if (!value) return 'Date not set'
-
-  return new Date(value).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
-function getStatusLabel(value) {
-  if (value === 'active') return 'Active'
-  if (value === 'completed') return 'Completed'
-  if (value === 'dropped') return 'Inactive'
-  if (value === 'on_hold') return 'On Hold'
-  return 'Unknown'
-}
-
-function getPaymentLabel(value) {
-  if (value === 'paid') return 'Fully Paid'
-  if (value === 'partial') return 'Partial'
-  if (value === 'unpaid') return 'Pending'
-  return 'Payment pending'
-}
-
 export default function UsersPage() {
   const [users, setUsers] = useState([])
-  const [students, setStudents] = useState([])
   const [branches, setBranches] = useState([])
-  const [studentFilters, setStudentFilters] = useState({
-    branch: '',
-    course: '',
-    status: '',
-    search: '',
-  })
   const [form, setForm] = useState(initialForm)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [updatingStudentId, setUpdatingStudentId] = useState(null)
   const [message, setMessage] = useState('')
-
-  const courseOptions = Array.from(
-    new Set(students.map((student) => student.course_name).filter(Boolean))
-  ).sort((left, right) => left.localeCompare(right))
-
-  const filteredStudents = students.filter((student) => {
-    const matchesBranch = !studentFilters.branch || String(student.branch_name || '') === String(
-      branches.find((branch) => String(branch.id) === String(studentFilters.branch))?.name || ''
-    )
-    const matchesCourse = !studentFilters.course || student.course_name === studentFilters.course
-    const matchesStatus = !studentFilters.status || student.status === studentFilters.status
-    const searchValue = studentFilters.search.trim().toLowerCase()
-    const matchesSearch =
-      !searchValue ||
-      student.name?.toLowerCase().includes(searchValue) ||
-      student.student_number?.toLowerCase().includes(searchValue) ||
-      student.phone?.toLowerCase().includes(searchValue) ||
-      student.email?.toLowerCase().includes(searchValue)
-
-    return matchesBranch && matchesCourse && matchesStatus && matchesSearch
-  })
 
   useEffect(() => {
     loadPage()
@@ -118,14 +64,12 @@ export default function UsersPage() {
   const loadPage = async () => {
     setLoading(true)
     try {
-      const [usersRes, branchesRes, enrollmentsRes] = await Promise.all([
+      const [usersRes, branchesRes] = await Promise.all([
         api.get('/users/'),
         api.get('/branches/'),
-        api.get('/enrollments/'),
       ])
       setUsers(normaliseListResponse(usersRes.data))
       setBranches(normaliseListResponse(branchesRes.data))
-      setStudents(normaliseListResponse(enrollmentsRes.data))
     } catch {
       setMessage('Failed to load users page.')
     } finally {
@@ -227,29 +171,6 @@ export default function UsersPage() {
     } catch (error) {
       const details = error.response?.data
       setMessage(typeof details === 'object' ? JSON.stringify(details) : `Failed to delete ${user.username}.`)
-    }
-  }
-
-  const updateStudentField = (studentId, field, value) => {
-    setStudents((current) =>
-      current.map((student) =>
-        student.id === studentId ? { ...student, [field]: value } : student
-      )
-    )
-  }
-
-  const saveStudentStatus = async (studentId, status) => {
-    setUpdatingStudentId(studentId)
-    setMessage('')
-
-    try {
-      await api.patch(`/enrollments/${studentId}/`, { status })
-      setMessage('Student status updated.')
-    } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to update student status.')
-      await loadPage()
-    } finally {
-      setUpdatingStudentId(null)
     }
   }
 
@@ -450,157 +371,6 @@ export default function UsersPage() {
         </section>
       </section>
 
-      <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Students</p>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Enrolled students</h2>
-          </div>
-          <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            {filteredStudents.length} Students
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-4 border-b border-slate-200 px-6 py-5">
-          <label className="min-w-[180px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Branch
-            </span>
-            <select
-              value={studentFilters.branch}
-              onChange={(event) => setStudentFilters((current) => ({ ...current, branch: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            >
-              <option value="">All branches</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="min-w-[180px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Course
-            </span>
-            <select
-              value={studentFilters.course}
-              onChange={(event) => setStudentFilters((current) => ({ ...current, course: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            >
-              <option value="">All courses</option>
-              {courseOptions.map((course) => (
-                <option key={course} value={course}>
-                  {course}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="min-w-[160px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Status
-            </span>
-            <select
-              value={studentFilters.status}
-              onChange={(event) => setStudentFilters((current) => ({ ...current, status: event.target.value }))}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            >
-              <option value="">All status</option>
-              <option value="active">Active</option>
-              <option value="completed">Completed</option>
-              <option value="dropped">Inactive</option>
-              <option value="on_hold">On Hold</option>
-            </select>
-          </label>
-
-          <label className="min-w-[240px] flex-[1.3]">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Search
-            </span>
-            <input
-              value={studentFilters.search}
-              onChange={(event) => setStudentFilters((current) => ({ ...current, search: event.target.value }))}
-              placeholder="Student name, number, phone, email"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-          </label>
-        </div>
-
-        {loading ? (
-          <div className="p-6 text-slate-500">Loading students...</div>
-        ) : filteredStudents.length === 0 ? (
-          <div className="p-6 text-slate-500">No enrolled students match the current filters.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[1220px]">
-              <div className="grid grid-cols-[1.25fr_1.1fr_1fr_1fr_0.95fr_1fr_0.95fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <div>Student</div>
-                <div>Course</div>
-                <div>Enrollment Date</div>
-                <div>Contact</div>
-                <div>Branch</div>
-                <div>Status</div>
-                <div>Payment</div>
-              </div>
-
-              <div className="divide-y divide-slate-200">
-                {filteredStudents.map((student) => (
-                  <div key={student.id} className="grid grid-cols-[1.25fr_1.1fr_1fr_1fr_0.95fr_1fr_0.95fr] gap-4 px-6 py-5">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-950">{student.name}</p>
-                      <p className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
-                        {student.student_number}
-                      </p>
-                    </div>
-
-                    <div className="text-sm text-slate-700">
-                      {student.course_name || 'Course pending'}
-                    </div>
-
-                    <div className="text-sm text-slate-700">
-                      {formatDate(student.enrollment_date)}
-                    </div>
-
-                    <div className="space-y-1 text-sm text-slate-700">
-                      <p>{student.phone || 'Phone not added'}</p>
-                      <p className="text-slate-500">{student.email || 'Email not added'}</p>
-                    </div>
-
-                    <div className="text-sm text-slate-700">
-                      {student.branch_name || 'No branch'}
-                    </div>
-
-                    <div className="space-y-2">
-                      <select
-                        value={student.status || 'active'}
-                        disabled={updatingStudentId === student.id}
-                        onChange={async (event) => {
-                          const nextStatus = event.target.value
-                          updateStudentField(student.id, 'status', nextStatus)
-                          await saveStudentStatus(student.id, nextStatus)
-                        }}
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
-                      >
-                        <option value="active">Active</option>
-                        <option value="completed">Completed</option>
-                        <option value="dropped">Inactive</option>
-                        <option value="on_hold">On Hold</option>
-                      </select>
-                      <p className="text-xs text-slate-500">{getStatusLabel(student.status)}</p>
-                    </div>
-
-                    <div className="space-y-1 text-sm text-slate-700">
-                      <p className="font-semibold text-slate-900">{getPaymentLabel(student.payment_status)}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
     </div>
   )
 }

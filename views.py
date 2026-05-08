@@ -2642,28 +2642,29 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       .brand .address {{ margin: 0 0 4px; }}
       .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.22; color: #F8FAFC; }}
       .brand .phone {{ margin: 0; font-size: 11px; line-height: 1.2; color: #F8FAFC; }}
-      .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
       .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
       .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
-      .section {{ padding: 11px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
-      .grid {{ display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; row-gap: 7px; }}
-      .field {{ display: grid; grid-template-columns: 138px minmax(0, 1fr); gap: 8px; align-items: baseline; min-height: 20px; }}
+      .section {{ padding: 12px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .grid {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; row-gap: 9px; }}
+      .field {{ display: grid; grid-template-columns: 150px minmax(0, 220px); gap: 10px; align-items: baseline; min-height: 22px; }}
       .label {{ font-size: 9.8px; text-transform: uppercase; letter-spacing: 0.07em; color: #334155; line-height: 1.2; }}
-      .value {{ font-size: 12.2px; font-weight: 800; color: #111827; line-height: 1.25; }}
+      .value {{ font-size: 12.2px; font-weight: 800; color: #111827; line-height: 1.25; text-align: left; }}
+      .field .amount {{ text-align: left; color: #111827; }}
       .section h2 {{ margin: 0 0 8px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.12em; color: #111827; }}
       table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
       th, td {{ padding: 6px 9px; border: 1px solid #CBD5E1; text-align: left; vertical-align: middle; }}
       th {{ background: #F8FAFC; color: #334155; text-transform: uppercase; letter-spacing: 0.08em; font-size: 9.5px; }}
       tr:nth-child(even) td {{ background: #F8FAFC; }}
-      .amount {{ text-align: right; font-weight: 800; color: #1E3A5F; }}
+      table .amount {{ text-align: right; font-weight: 800; color: #1E3A5F; }}
       td.status-cell {{ text-align: center; }}
       .badge {{ display: inline-block; min-width: 70px; border-radius: 999px; padding: 2px 8px; text-align: center; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; line-height: 1.25; }}
       .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
       .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
-      .generated {{ padding-top: 8px; padding-bottom: 8px; }}
+      .generated {{ padding-top: 12px; padding-bottom: 12px; border-bottom: 0; }}
       .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 0; color: #334155; font-size: 11px; }}
       .footer p {{ margin: 1px 0; line-height: 1.25; }}
-      .bottom {{ display: flex; justify-content: space-between; gap: 16px; padding: 8px 18px; background: #1E3A5F; border-top: 1px solid #1E3A5F; color: white; font-size: 10.5px; line-height: 1.25; }}
+      .bottom {{ display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 34px; padding: 9px 20px; background: #1E3A5F; border-top: 1px solid #1E3A5F; color: white; font-size: 10.5px; line-height: 1.25; }}
       @media print {{
         body {{ margin: 0; background: white; }}
         .sheet {{ border: 1px solid #CBD5E1; max-width: none; box-shadow: none; }}
