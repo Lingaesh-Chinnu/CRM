@@ -44,6 +44,7 @@ from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.db import transaction
+from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Count, Q, F, Exists, OuterRef
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -2078,7 +2079,11 @@ class PublicRulesSigningView(APIView):
     authentication_classes = []
 
     def get_signing(self, token):
-        return RulesSigningRequest.objects.select_related(
+        return RulesSigningRequest.objects.defer(
+            'selfie_image',
+            'submitted_ip',
+            'submitted_user_agent',
+        ).select_related(
             'enrollment__course',
             'enrollment__branch',
         ).filter(token=token).first()
@@ -2110,9 +2115,16 @@ class PublicRulesSigningView(APIView):
             'installments': installments,
             'rules_paragraphs': extract_rules_template_text(),
             'rules_content': extract_rules_template_text(),
-            'signed_pdf_url': request.build_absolute_uri(signing.signed_pdf.url) if signing.signed_pdf else None,
-            'selfie_url': request.build_absolute_uri(signing.selfie_image.url) if signing.selfie_image else None,
+            'signed_pdf_url': self.file_url(request, signing, 'signed_pdf'),
+            'selfie_url': self.file_url(request, signing, 'selfie_image'),
         })
+
+    def file_url(self, request, signing, field_name):
+        try:
+            field = getattr(signing, field_name)
+            return request.build_absolute_uri(field.url) if field else None
+        except (OperationalError, ProgrammingError, ValueError):
+            return None
 
     def post(self, request, token):
         signing = self.get_signing(token)
@@ -2137,35 +2149,38 @@ class PublicRulesSigningView(APIView):
         selfie_name = f'rules-selfie-{enrollment.id}.jpg'
         signature_name = f'rules-signature-{enrollment.id}.png'
         pdf_name = f'rules-regulations-{enrollment.student_number or enrollment.id}.pdf'
-        signing.selfie_image.save(selfie_name, ContentFile(selfie_bytes), save=False)
-        signing.signature_image.save(signature_name, ContentFile(signature_bytes), save=False)
         try:
-            pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
-        except RuntimeError as exc:
-            return Response({'detail': str(exc)}, status=503)
-        signing.signed_pdf.save(pdf_name, ContentFile(pdf_bytes), save=False)
-        signing.status = RulesSigningRequest.Status.SUBMITTED
-        signing.submitted_at = submitted_at
-        signing.submitted_ip = get_client_ip(request)
-        signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
-        signing.save(update_fields=[
-            'selfie_image',
-            'signature_image',
-            'signed_pdf',
-            'status',
-            'submitted_at',
-            'submitted_ip',
-            'submitted_user_agent',
-            'updated_at',
-        ])
+            signing.selfie_image.save(selfie_name, ContentFile(selfie_bytes), save=False)
+            signing.signature_image.save(signature_name, ContentFile(signature_bytes), save=False)
+            try:
+                pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
+            except RuntimeError as exc:
+                return Response({'detail': str(exc)}, status=503)
+            signing.signed_pdf.save(pdf_name, ContentFile(pdf_bytes), save=False)
+            signing.status = RulesSigningRequest.Status.SUBMITTED
+            signing.submitted_at = submitted_at
+            signing.submitted_ip = get_client_ip(request)
+            signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
+            signing.save(update_fields=[
+                'selfie_image',
+                'signature_image',
+                'signed_pdf',
+                'status',
+                'submitted_at',
+                'submitted_ip',
+                'submitted_user_agent',
+                'updated_at',
+            ])
+        except (OperationalError, ProgrammingError):
+            return Response({'detail': 'Rules signing storage is not ready. Please run database migrations and try again.'}, status=503)
         if enrollment.status != Enrollment.Status.ENROLLED:
             enrollment.status = Enrollment.Status.RULES_SUBMITTED
             enrollment.save(update_fields=['status', 'updated_at'])
         return Response({
             'detail': 'Rules & Regulation form submitted successfully.',
             'status': signing.status,
-            'signed_pdf_url': request.build_absolute_uri(signing.signed_pdf.url),
-            'selfie_url': request.build_absolute_uri(signing.selfie_image.url),
+            'signed_pdf_url': self.file_url(request, signing, 'signed_pdf'),
+            'selfie_url': self.file_url(request, signing, 'selfie_image'),
             'submitted_at': signing.submitted_at,
         })
 

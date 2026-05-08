@@ -39,11 +39,15 @@ export default function RulesSigningPage() {
   }
 
   useEffect(() => {
+    document.title = 'IIE Rules & Regulations'
     api
       .get(`/public/rules-sign/${token}/`)
       .then(({ data: response }) => setData(response))
       .catch(() => setMessage('This signing link is invalid or unavailable.'))
       .finally(() => setLoading(false))
+    return () => {
+      document.title = 'Indra Institute of Education'
+    }
   }, [token])
 
   useEffect(() => () => stopCamera(false), [])

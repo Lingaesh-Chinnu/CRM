@@ -4,6 +4,8 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
+from django.db.utils import OperationalError, ProgrammingError
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog
 
 User = get_user_model()
@@ -467,7 +469,7 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import Enrollment, get_default_installment_schedule
+from crm.models import Enrollment, RulesSigningRequest, get_default_installment_schedule
 
 
 class EnrollmentListSerializer(serializers.ModelSerializer):
@@ -508,33 +510,49 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['student_number', 'final_fees', 'enrolled_by', 'created_by']
 
+    def _rules_signing_data(self, obj):
+        if hasattr(obj, '_rules_signing_data_cache'):
+            return obj._rules_signing_data_cache
+        base_fields = ['status', 'submitted_at', 'signed_pdf']
+        try:
+            data = RulesSigningRequest.objects.filter(enrollment=obj).values(
+                *base_fields,
+                'selfie_image',
+            ).first()
+        except (OperationalError, ProgrammingError):
+            try:
+                data = RulesSigningRequest.objects.filter(enrollment=obj).values(*base_fields).first()
+            except (OperationalError, ProgrammingError):
+                data = None
+        obj._rules_signing_data_cache = data or {}
+        return obj._rules_signing_data_cache
+
+    def _file_url(self, path):
+        if not path:
+            return None
+        try:
+            url = default_storage.url(path)
+        except Exception:
+            return None
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
+
     def get_payment_info(self, obj):
         if hasattr(obj, 'payment'):
             return PaymentSerializer(obj.payment).data
         return None
 
     def get_rules_signing_status(self, obj):
-        return getattr(getattr(obj, 'rules_signing', None), 'status', 'pending')
+        return self._rules_signing_data(obj).get('status') or 'pending'
 
     def get_rules_signed_pdf_url(self, obj):
-        signing = getattr(obj, 'rules_signing', None)
-        request = self.context.get('request')
-        if not signing or not signing.signed_pdf:
-            return None
-        url = signing.signed_pdf.url
-        return request.build_absolute_uri(url) if request else url
+        return self._file_url(self._rules_signing_data(obj).get('signed_pdf'))
 
     def get_rules_selfie_url(self, obj):
-        signing = getattr(obj, 'rules_signing', None)
-        request = self.context.get('request')
-        if not signing or not signing.selfie_image:
-            return None
-        url = signing.selfie_image.url
-        return request.build_absolute_uri(url) if request else url
+        return self._file_url(self._rules_signing_data(obj).get('selfie_image'))
 
     def get_rules_submitted_at(self, obj):
-        signing = getattr(obj, 'rules_signing', None)
-        return signing.submitted_at if signing else None
+        return self._rules_signing_data(obj).get('submitted_at')
 
     def get_installment_schedule(self, obj):
         schedule = get_default_installment_schedule(obj)

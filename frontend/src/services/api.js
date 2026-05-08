@@ -8,6 +8,7 @@ const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, ''
 
 const api = axios.create({
   baseURL: apiBaseURL,
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -15,6 +16,7 @@ const api = axios.create({
 
 const refreshApi = axios.create({
   baseURL: apiBaseURL,
+  timeout: 20000,
   headers: {
     'Content-Type': 'application/json',
   },

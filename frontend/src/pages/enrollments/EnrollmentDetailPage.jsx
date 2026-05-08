@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { openWhatsApp } from '../../utils/whatsappTemplates'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -65,17 +66,27 @@ export default function EnrollmentDetailPage() {
   const [startDate, setStartDate] = useState('')
   const [batchTiming, setBatchTiming] = useState('')
   const [message, setMessage] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    api.get(`/enrollments/${id}/`).then(({ data }) => {
-      setRow(data)
-      setStartDate(data.start_date || '')
-      setBatchTiming(data.batch_timing || '')
-    })
+    setLoadError('')
+    api.get(`/enrollments/${id}/`)
+      .then(({ data }) => {
+        setRow(data)
+        setStartDate(data.start_date || '')
+        setBatchTiming(data.batch_timing || '')
+      })
+      .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
   }, [id])
 
-  if (!row) return <div className="p-6 text-slate-500">Loading enrollment...</div>
+  if (!row) {
+    return (
+      <div className="p-6 text-slate-500">
+        {loadError || 'Loading enrollment...'}
+      </div>
+    )
+  }
 
   const sendRulesForm = async () => {
     setSaving(true)

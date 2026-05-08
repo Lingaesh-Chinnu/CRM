@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 function prettyValue(value, fallback = 'Not provided') {
   return value || fallback
@@ -29,13 +30,17 @@ function DetailCard({ label, value }) {
 export default function StudentDetailPage() {
   const { id } = useParams()
   const [row, setRow] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
-    api.get(`/enrollments/${id}/`).then(({ data }) => setRow(data))
+    setLoadError('')
+    api.get(`/enrollments/${id}/`)
+      .then(({ data }) => setRow(data))
+      .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load student profile.')))
   }, [id])
 
   if (!row) {
-    return <div className="p-6 text-slate-500">Loading student profile...</div>
+    return <div className="p-6 text-slate-500">{loadError || 'Loading student profile...'}</div>
   }
 
   return (

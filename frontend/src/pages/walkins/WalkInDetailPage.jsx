@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 function prettyValue(value, fallback = '') {
   return value || fallback
@@ -105,6 +106,7 @@ export default function WalkInDetailPage() {
     transfer_reason: '',
   })
   const [message, setMessage] = useState('')
+  const [loadError, setLoadError] = useState('')
   const isSuperAdmin = user?.role === 'super_admin'
 
   const selectedCourse = courses.find((course) => String(course.id) === String(form.course))
@@ -115,6 +117,7 @@ export default function WalkInDetailPage() {
   const finalFees = selectedDiscount ? Math.max(discountBaseFee - appliedDiscount, 0) : courseFee
 
   useEffect(() => {
+    setLoadError('')
     Promise.all([
       api.get(`/walkins/${id}/`),
       api.get('/courses/'),
@@ -143,7 +146,7 @@ export default function WalkInDetailPage() {
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
       }))
       setBranchCorrection({ branch: data.branch || '', reason: '' })
-    })
+    }).catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load walk-in details.')))
   }, [id])
 
   useEffect(() => {
@@ -166,7 +169,7 @@ export default function WalkInDetailPage() {
       .catch(() => setAvailableDiscounts([]))
   }, [form.course, form.branch])
 
-  if (!walkin) return <div className="p-6 text-slate-500">Loading walk-in details...</div>
+  if (!walkin) return <div className="p-6 text-slate-500">{loadError || 'Loading walk-in details...'}</div>
 
   const updateCourse = (courseId) => {
     const nextCourse = courses.find((course) => String(course.id) === String(courseId))

@@ -67,6 +67,7 @@ export default function App() {
   const { initialized } = useSelector((state) => state.auth)
 
   useEffect(() => {
+    document.title = 'Indra Institute of Education'
     if (localStorage.getItem('access_token')) {
       dispatch(fetchMe())
     }

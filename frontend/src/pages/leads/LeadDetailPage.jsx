@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
 
@@ -354,19 +355,21 @@ export default function LeadDetailPage() {
   const [detailErrors, setDetailErrors] = useState({})
   const [savingDetails, setSavingDetails] = useState(false)
   const [message, setMessage] = useState('')
+  const [loadError, setLoadError] = useState('')
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
+    setLoadError('')
     Promise.all([api.get(`/leads/${id}/`), api.get('/courses/'), api.get('/branches/')]).then(([leadRes, coursesRes, branchesRes]) => {
       const data = leadRes.data
       setLead(data)
       setCourses(coursesRes.data.results || coursesRes.data)
       setBranches(branchesRes.data.results || branchesRes.data)
       setDetailsForm(buildConversionForm(data))
-    })
+    }).catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load lead.')))
   }, [id])
 
-  if (!lead) return <div className="p-6 text-slate-500">Loading lead...</div>
+  if (!lead) return <div className="p-6 text-slate-500">{loadError || 'Loading lead...'}</div>
 
   const handleConverted = (data, type) => {
     setMessage(type === 'enrollment' ? 'Lead converted to enrollment successfully.' : 'Lead converted to walk-in successfully.')

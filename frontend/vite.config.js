@@ -4,9 +4,10 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const staticBase = process.env.VITE_STATIC_BASE || env.VITE_STATIC_BASE || '/'
 
   return {
-    base: env.VITE_STATIC_BASE || '/',
+    base: staticBase,
     plugins: [react()],
     build: {
       outDir: 'dist',
