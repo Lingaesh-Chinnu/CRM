@@ -204,19 +204,50 @@ class UserMonitoringSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/courses/serializers.py
 # ============================================================
-from crm.models import Course
+from crm.models import Course, Enrollment, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+
+
+COURSE_LINKED_DELETE_MESSAGE = (
+    'This course is already linked with existing records, so it cannot be deleted. '
+    'You can mark it as Inactive instead.'
+)
+
+
+def course_linked_record_flags(course):
+    return {
+        'enrollments': Enrollment.objects.filter(course=course).exists(),
+        'students': Enrollment.objects.filter(course=course, student_number__isnull=False).exists(),
+        'payments': Payment.objects.filter(enrollment__course=course).exists(),
+        'walk_ins': WalkIn.objects.filter(course=course).exists(),
+        'leads': Lead.objects.filter(course=course).exists(),
+        'rules_forms': RulesSigningRequest.objects.filter(enrollment__course=course).exists(),
+        'receipts': PaymentInstallment.objects.filter(enrollment__course=course).exists(),
+    }
+
+
+def course_is_linked(course):
+    return any(course_linked_record_flags(course).values())
 
 
 class CourseSerializer(serializers.ModelSerializer):
     final_fees   = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
+    can_delete = serializers.SerializerMethodField()
+    linked_record_count = serializers.SerializerMethodField()
 
     class Meta:
         model  = Course
         fields = ['id','name','description','duration_months','actual_fees',
                   'discount_amount','final_fees','is_active','created_by',
-                  'created_by_name','created_at','updated_at']
+                  'created_by_name','can_delete','linked_record_count',
+                  'created_at','updated_at']
         read_only_fields = ['created_by']
+
+    def get_can_delete(self, obj):
+        return not course_is_linked(obj)
+
+    def get_linked_record_count(self, obj):
+        return sum(1 for linked in course_linked_record_flags(obj).values() if linked)
 
 
 # ============================================================

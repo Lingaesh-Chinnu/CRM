@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api } from '../../services/api'
+import { useLocation } from 'react-router-dom'
 import { useSelector } from 'react-redux'
+import { api } from '../../services/api'
 
 const initialForm = {
   name: '',
@@ -20,9 +21,19 @@ function durationLabel(durationMonths) {
   return months === 1 ? '1 Month' : `${months} Months`
 }
 
+function money(value) {
+  return Number(value || 0).toLocaleString('en-IN')
+}
+
+function apiErrorMessage(error, fallback) {
+  return error.response?.data?.detail || fallback
+}
+
 export default function CoursesPage() {
+  const location = useLocation()
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
+  const canManageCourses = isSuperAdmin && location.pathname.startsWith('/admin/courses')
   const [courses, setCourses] = useState([])
   const [form, setForm] = useState(initialForm)
   const [message, setMessage] = useState('')
@@ -31,11 +42,13 @@ export default function CoursesPage() {
 
   useEffect(() => {
     fetchCourses()
-  }, [])
+  }, [canManageCourses])
 
   const fetchCourses = async () => {
+    setLoading(true)
     try {
-      const { data } = await api.get('/courses/')
+      const params = canManageCourses ? { include_inactive: 1 } : {}
+      const { data } = await api.get('/courses/', { params })
       setCourses(data.results || data)
     } finally {
       setLoading(false)
@@ -44,6 +57,7 @@ export default function CoursesPage() {
 
   const createCourse = async (e) => {
     e.preventDefault()
+    if (!canManageCourses) return
     setSaving(true)
     setMessage('')
     try {
@@ -57,8 +71,8 @@ export default function CoursesPage() {
       setForm(initialForm)
       setMessage('Course created successfully.')
       fetchCourses()
-    } catch {
-      setMessage('Failed to create course.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to create course.'))
     } finally {
       setSaving(false)
     }
@@ -71,6 +85,7 @@ export default function CoursesPage() {
   }
 
   const saveCourse = async (course) => {
+    if (!canManageCourses) return
     setMessage('')
     try {
       await api.patch(`/courses/${course.id}/`, {
@@ -82,12 +97,13 @@ export default function CoursesPage() {
       })
       setMessage(`Updated ${course.name} successfully.`)
       fetchCourses()
-    } catch {
-      setMessage(`Failed to update ${course.name}.`)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, `Failed to update ${course.name}.`))
     }
   }
 
   const deleteCourse = async (course) => {
+    if (!canManageCourses || !course.can_delete) return
     const confirmed = window.confirm(`Delete course "${course.name}"?`)
     if (!confirmed) return
     setMessage('')
@@ -95,8 +111,8 @@ export default function CoursesPage() {
       await api.delete(`/courses/${course.id}/`)
       setMessage(`Deleted ${course.name}.`)
       fetchCourses()
-    } catch {
-      setMessage(`Failed to delete ${course.name}.`)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, `Failed to delete ${course.name}.`))
     }
   }
 
@@ -104,83 +120,55 @@ export default function CoursesPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
-          {isSuperAdmin ? 'Courses' : 'Course Fees'}
+          {canManageCourses ? 'Courses' : 'Course Fees'}
         </p>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">
-          {isSuperAdmin ? 'Course and fee management' : 'Course Fees'}
+          {canManageCourses ? 'Course management' : 'Course Fees'}
         </h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          {isSuperAdmin
-            ? 'Add new courses, control fee structure, apply discounts, and switch courses between active and inactive status.'
-            : 'View available courses, actual fees, discounts, final fees, and active status in read-only mode.'}
+          {canManageCourses
+            ? 'Create courses, update fee structure, and switch courses between active and inactive status.'
+            : 'View course name, duration, actual fees, discounts, final fees, and status.'}
         </p>
       </section>
 
       <section className="space-y-6">
-        {isSuperAdmin && (
-        <form onSubmit={createCourse} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-xl font-black tracking-tight text-slate-950">Add course</h2>
-            <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              Admin
+        {canManageCourses && (
+          <form onSubmit={createCourse} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xl font-black tracking-tight text-slate-950">Add course</h2>
+              <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Admin
+              </div>
             </div>
-          </div>
 
-          <div className="mt-5 grid gap-4 lg:grid-cols-[1.5fr_0.8fr_0.8fr_0.8fr_0.7fr]">
-            <input
-              placeholder="Course name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-              required
-            />
-            <input
-              placeholder="Duration in months"
-              value={form.duration_months}
-              onChange={(e) => setForm({ ...form, duration_months: e.target.value })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-            <input
-              placeholder="Actual fees"
-              value={form.actual_fees}
-              onChange={(e) => setForm({ ...form, actual_fees: e.target.value })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-            <input
-              placeholder="Discount"
-              value={form.discount_amount}
-              onChange={(e) => setForm({ ...form, discount_amount: e.target.value })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-            <select
-              value={form.is_active ? 'active' : 'inactive'}
-              onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            >
-              <option value="active">Active</option>
-              <option value="inactive">In-Active</option>
-            </select>
-          </div>
-
-          <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center">
-            <div className="flex-1 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
-              Final Fees: {finalFees(form.actual_fees, form.discount_amount).toLocaleString()}
+            <div className="mt-5 grid gap-4 lg:grid-cols-[1.5fr_0.8fr_0.8fr_0.8fr_0.7fr]">
+              <input placeholder="Course name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" required />
+              <input placeholder="Duration in months" value={form.duration_months} onChange={(e) => setForm({ ...form, duration_months: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+              <input placeholder="Actual fees" value={form.actual_fees} onChange={(e) => setForm({ ...form, actual_fees: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+              <input placeholder="Discount" value={form.discount_amount} onChange={(e) => setForm({ ...form, discount_amount: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+              <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
             </div>
-            <button
-              disabled={saving}
-              className="inline-flex min-h-[48px] items-center justify-center rounded-2xl bg-slate-950 px-8 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-            >
-              {saving ? 'Creating...' : 'Create Course'}
-            </button>
-          </div>
 
-          {message && <p className="mt-4 text-sm text-slate-600">{message}</p>}
-        </form>
+            <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="flex-1 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
+                Final Fees: {money(finalFees(form.actual_fees, form.discount_amount))}
+              </div>
+              <button disabled={saving} className="inline-flex min-h-[48px] items-center justify-center rounded-2xl bg-slate-950 px-8 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                {saving ? 'Creating...' : 'Create Course'}
+              </button>
+            </div>
+          </form>
         )}
+
+        {message && <p className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-semibold text-slate-700">{message}</p>}
 
         <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
-            <h2 className="text-xl font-black tracking-tight text-slate-950">Course Catalogue</h2>
+            <h2 className="text-xl font-black tracking-tight text-slate-950">{canManageCourses ? 'Course Catalogue' : 'Course Fee Catalogue'}</h2>
             <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
               {courses.length} Courses
             </div>
@@ -190,37 +178,29 @@ export default function CoursesPage() {
             <div className="p-6 text-slate-500">Loading courses...</div>
           ) : courses.length === 0 ? (
             <div className="px-6 py-16 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 text-sm font-black tracking-[0.24em] text-white">
-                CO
-              </div>
-              <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950">No courses added yet</h3>
-              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">
-                Add your first course with fees, discount, final fees, and status to start using the admissions workflow.
-              </p>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 text-sm font-black tracking-[0.24em] text-white">CO</div>
+              <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950">No courses available</h3>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">Active courses will appear here after they are added from the Courses page.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <div className="min-w-[1120px]">
-                <div className={`grid gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 ${isSuperAdmin ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
+                <div className={`grid gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 ${canManageCourses ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
                   <div>Course</div>
                   <div>Duration</div>
                   <div>Actual Fees</div>
                   <div>Discount</div>
                   <div>Final Fees</div>
                   <div>Status</div>
-                  {isSuperAdmin && <div>Actions</div>}
+                  {canManageCourses && <div>Actions</div>}
                 </div>
 
                 <div className="divide-y divide-slate-200">
                   {courses.map((course, index) => (
-                    <div key={course.id} className={`grid gap-4 px-6 py-5 ${isSuperAdmin ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
-                      <div className="space-y-3">
-                        {isSuperAdmin ? (
-                          <input
-                            value={course.name || ''}
-                            onChange={(e) => updateCourseField(index, 'name', e.target.value)}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950"
-                          />
+                    <div key={course.id} className={`grid gap-4 px-6 py-5 ${canManageCourses ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
+                      <div>
+                        {canManageCourses ? (
+                          <input value={course.name || ''} onChange={(e) => updateCourseField(index, 'name', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950" />
                         ) : (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                             <p className="text-sm font-semibold text-slate-950">{course.name || 'Untitled course'}</p>
@@ -229,80 +209,51 @@ export default function CoursesPage() {
                       </div>
 
                       <div>
-                        {isSuperAdmin ? (
-                          <input
-                            value={course.duration_months ?? ''}
-                            onChange={(e) => updateCourseField(index, 'duration_months', e.target.value)}
-                            placeholder="Months"
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                          />
+                        {canManageCourses ? (
+                          <input value={course.duration_months ?? ''} onChange={(e) => updateCourseField(index, 'duration_months', e.target.value)} placeholder="Months" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                            {durationLabel(course.duration_months)}
-                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{durationLabel(course.duration_months)}</div>
                         )}
                       </div>
 
                       <div>
-                        {isSuperAdmin ? (
-                          <input
-                            value={course.actual_fees ?? ''}
-                            onChange={(e) => updateCourseField(index, 'actual_fees', e.target.value)}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                          />
+                        {canManageCourses ? (
+                          <input value={course.actual_fees ?? ''} onChange={(e) => updateCourseField(index, 'actual_fees', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                            {Number(course.actual_fees || 0).toLocaleString()}
-                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{money(course.actual_fees)}</div>
                         )}
                       </div>
 
                       <div>
-                        {isSuperAdmin ? (
-                          <input
-                            value={course.discount_amount ?? ''}
-                            onChange={(e) => updateCourseField(index, 'discount_amount', e.target.value)}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                          />
+                        {canManageCourses ? (
+                          <input value={course.discount_amount ?? ''} onChange={(e) => updateCourseField(index, 'discount_amount', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                            {Number(course.discount_amount || 0).toLocaleString()}
-                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{money(course.discount_amount)}</div>
                         )}
                       </div>
 
-                      <div className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">
-                        {finalFees(course.actual_fees, course.discount_amount).toLocaleString()}
-                      </div>
+                      <div className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">{money(finalFees(course.actual_fees, course.discount_amount))}</div>
 
                       <div>
-                        {isSuperAdmin ? (
-                          <select
-                            value={course.is_active ? 'active' : 'inactive'}
-                            onChange={(e) => updateCourseField(index, 'is_active', e.target.value === 'active')}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                          >
+                        {canManageCourses ? (
+                          <select value={course.is_active ? 'active' : 'inactive'} onChange={(e) => updateCourseField(index, 'is_active', e.target.value === 'active')} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                             <option value="active">Active</option>
-                            <option value="inactive">In-Active</option>
+                            <option value="inactive">Inactive</option>
                           </select>
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
-                            {course.is_active ? 'Active' : 'In-Active'}
-                          </div>
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{course.is_active ? 'Active' : 'Inactive'}</div>
                         )}
                       </div>
 
-                      {isSuperAdmin && (
+                      {canManageCourses && (
                         <div className="flex flex-col gap-3">
+                          <button type="button" onClick={() => saveCourse(course)} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">Save</button>
                           <button
-                            onClick={() => saveCourse(course)}
-                            className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-                          >
-                            Save
-                          </button>
-                          <button
+                            type="button"
                             onClick={() => deleteCourse(course)}
-                            className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+                            disabled={!course.can_delete}
+                            title={!course.can_delete ? 'Cannot delete course linked to existing records.' : ''}
+                            className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                           >
                             Delete
                           </button>

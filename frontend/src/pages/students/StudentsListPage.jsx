@@ -166,9 +166,9 @@ export default function StudentsListPage() {
         ) : rows.length === 0 ? (
           <div className="p-6 text-slate-500">No students found for the current filters.</div>
         ) : (
-          <div className="overflow-x-auto">
-            <div className="min-w-[1220px]">
-              <div className="grid grid-cols-[1.2fr_0.95fr_0.85fr_1fr_1.2fr_0.85fr] gap-5 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <>
+            <div className="hidden md:block">
+              <div className="grid grid-cols-[20%_18%_14%_18%_20%_10%] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <div>Student</div>
                 <div>Contact</div>
                 <div>Date of Birth</div>
@@ -179,49 +179,95 @@ export default function StudentsListPage() {
 
               <div className="divide-y divide-slate-200">
                 {rows.map((row) => (
-                  <div key={row.id} className="grid grid-cols-[1.2fr_0.95fr_0.85fr_1fr_1.2fr_0.85fr] gap-5 px-6 py-5">
-                <div>
-                  <p className="text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
-                  <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
-                  <p className="mt-3 text-sm font-medium text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
-                </div>
+                  <div key={row.id} className="grid grid-cols-[20%_18%_14%_18%_20%_10%] gap-2 px-4 py-4 text-sm">
+                    <div className="min-w-0 pr-2">
+                      <p className="break-words text-base font-bold leading-5 tracking-tight text-slate-950">{row.name}</p>
+                      <p className="mt-1 break-words text-xs text-slate-500">{row.student_number}</p>
+                      <p className="mt-2 break-words text-sm font-medium leading-5 text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
+                    </div>
 
-                <div className="space-y-1 text-sm text-slate-700">
-                  <PhoneNumberEditor recordType="student" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentPhone(row.id, phone)} />
-                  <p>{compactValue(row.email, 'Email not added')}</p>
-                </div>
+                    <div className="min-w-0 space-y-1 pr-2 text-slate-700">
+                      <PhoneNumberEditor recordType="student" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentPhone(row.id, phone)} />
+                      <p className="break-words text-xs leading-5">{compactValue(row.email, 'Email not added')}</p>
+                    </div>
 
-                <div className="text-sm font-medium text-slate-700">
-                  {formatDate(row.dob)}
-                </div>
+                    <div className="min-w-0 break-words pr-2 font-medium leading-5 text-slate-700">
+                      {formatDate(row.dob)}
+                    </div>
 
-                <div className="space-y-1 text-sm text-slate-700">
-                  <p className="font-semibold text-slate-900">{compactValue(row.branch_name, 'No branch')}</p>
-                  <p>{compactValue(row.pincode, 'Pincode not added')}</p>
-                  <p>{compactValue(row.preferred_timing_display, 'Timing not added')}</p>
-                </div>
+                    <div className="min-w-0 space-y-1 pr-2 text-slate-700">
+                      <p className="break-words font-semibold leading-5 text-slate-900">{compactValue(row.branch_name, 'No branch')}</p>
+                      <p className="break-words text-xs leading-5">{compactValue(row.pincode, 'Pincode not added')}</p>
+                      <p className="break-words text-xs leading-5">{compactValue(row.preferred_timing_display, 'Timing not added')}</p>
+                    </div>
 
-                <div className="text-sm text-slate-700">
-                  <p className="font-semibold text-slate-900">Address</p>
-                  <p className="mt-1 leading-6">{compactValue(row.location, 'Address not added')}</p>
-                </div>
+                    <div className="min-w-0 pr-2 text-slate-700">
+                      <p className="font-semibold leading-5 text-slate-900">Address</p>
+                      <p className="mt-1 whitespace-normal break-words text-xs leading-5">{compactValue(row.location, 'Address not added')}</p>
+                    </div>
 
-                <div className="flex items-start justify-between gap-3 xl:flex-col xl:items-end">
-                  <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    {row.status}
-                  </div>
-                  <Link
-                    to={`/students/${row.id}`}
-                    className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
-                  >
-                    View Profile
-                  </Link>
-                </div>
+                    <div className="flex min-w-0 flex-col items-start gap-2">
+                      <div className="max-w-full rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
+                        {row.status}
+                      </div>
+                      <Link
+                        to={`/students/${row.id}`}
+                        className="w-full rounded-xl border border-slate-200 px-2 py-2 text-center text-xs font-semibold leading-4 text-slate-900 transition hover:bg-slate-50"
+                      >
+                        View Profile
+                      </Link>
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
+
+            <div className="divide-y divide-slate-200 md:hidden">
+              {rows.map((row) => (
+                <article key={row.id} className="space-y-4 px-4 py-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="break-words text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
+                      <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
+                      <p className="mt-2 break-words text-sm font-medium text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
+                    </div>
+                    <div className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {row.status}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 text-sm text-slate-700">
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Contact</p>
+                      <PhoneNumberEditor recordType="student" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentPhone(row.id, phone)} />
+                      <p className="mt-1 break-words">{compactValue(row.email, 'Email not added')}</p>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Date of Birth</p>
+                      <p className="font-medium text-slate-900">{formatDate(row.dob)}</p>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Branch & Timing</p>
+                      <p className="font-semibold text-slate-900">{compactValue(row.branch_name, 'No branch')}</p>
+                      <p>{compactValue(row.pincode, 'Pincode not added')}</p>
+                      <p>{compactValue(row.preferred_timing_display, 'Timing not added')}</p>
+                    </div>
+                    <div>
+                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Address</p>
+                      <p className="break-words leading-6">{compactValue(row.location, 'Address not added')}</p>
+                    </div>
+                  </div>
+
+                  <Link
+                    to={`/students/${row.id}`}
+                    className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+                  >
+                    View Profile
+                  </Link>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </section>
     </div>

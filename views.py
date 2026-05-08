@@ -952,7 +952,7 @@ class UserMonitoringView(APIView):
 # backend/apps/courses/views.py
 # ============================================================
 from crm.models import Course
-from serializers import CourseSerializer
+from serializers import COURSE_LINKED_DELETE_MESSAGE, CourseSerializer, course_is_linked
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -969,12 +969,19 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = Course.objects.order_by('name')
-        if self.request.user.is_super_admin:
+        include_inactive = self.request.query_params.get('include_inactive') in ('1', 'true', 'yes')
+        if self.request.user.is_super_admin and (include_inactive or self.request.method not in SAFE_METHODS):
             return queryset
         return queryset.filter(is_active=True)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        course = self.get_object()
+        if course_is_linked(course):
+            return Response({'detail': COURSE_LINKED_DELETE_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
 
 
 # ============================================================
@@ -2576,23 +2583,32 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch_address_line_2 = 'Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008'
         branch_phone = branch.phone if branch and branch.phone else 'Phone number not set'
         schedule = get_payment_installment_schedule(payment)
+
+        def receipt_date(value):
+            if not value:
+                return 'Not set'
+            if isinstance(value, str):
+                value = parse_date(value)
+            if hasattr(value, 'date') and not hasattr(value, 'day'):
+                value = value.date()
+            if hasattr(value, 'strftime'):
+                return value.strftime('%d/%m/%Y')
+            return str(value)
+
         paid_running_total = 0
         schedule_rows = []
         for item in schedule:
             paid_running_total += int(float(item.get('amount') or 0))
-            due_date = item.get('due_date')
-            if hasattr(due_date, 'strftime'):
-                due_date_display = due_date.strftime('%d %b %Y')
-            else:
-                due_date_display = str(due_date or 'Not set')
+            due_date_display = receipt_date(item.get('due_date'))
             row_status = 'Paid' if payment.paid_amount >= paid_running_total else 'Upcoming'
+            status_class = 'paid' if row_status == 'Paid' else 'upcoming'
             schedule_rows.append(
                 f"""
                 <tr>
                   <td>{escape(str(item.get('label') or 'Installment'))}</td>
                   <td>{escape(due_date_display)}</td>
                   <td class="amount">Rs {int(float(item.get('amount') or 0)):,.2f}</td>
-                  <td>{escape(row_status)}</td>
+                  <td><span class="badge {status_class}">{escape(row_status)}</span></td>
                 </tr>
                 """
             )
@@ -2615,37 +2631,42 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     <title>{escape(installment.bill_number or 'Installment Bill')}</title>
     <style>
       * {{ box-sizing: border-box; }}
-      body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #0f172a; margin: 18px; background: #f8fafc; }}
-      .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #cbd5e1; background: white; }}
-      .header {{ display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 24px; align-items: center; padding: 16px 24px; background: #0f172a; color: white; }}
+      body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 18px; background: #F8FAFC; }}
+      .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
+      .header {{ display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 22px; align-items: center; padding: 16px 26px; background: #1E3A5F; color: white; }}
       .logo {{ display: flex; align-items: center; justify-content: flex-start; }}
       .logo img {{ width: auto; height: 56px; object-fit: contain; display: block; }}
       .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 72px; }}
       .brand h1 {{ margin: 0 0 5px; font-size: 22px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
-      .brand .tagline {{ margin: 0 0 7px; font-size: 14px; font-weight: 600; color: #e2e8f0; }}
+      .brand .tagline {{ margin: 0 0 7px; font-size: 14px; font-weight: 600; color: #F8FAFC; }}
       .brand .address {{ margin: 0 0 7px; }}
-      .brand .address p {{ margin: 1px 0; font-size: 11.5px; line-height: 1.32; color: #cbd5e1; }}
-      .brand .phone {{ margin: 0; font-size: 12px; line-height: 1.3; color: #e2e8f0; }}
-      .receipt-bar {{ display: flex; justify-content: space-between; gap: 16px; padding: 10px 20px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }}
-      .receipt-title {{ font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; }}
-      .receipt-no {{ font-size: 13px; font-weight: 800; }}
-      .section {{ padding: 14px 20px; border-bottom: 1px solid #e2e8f0; }}
-      .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }}
-      .field {{ display: grid; grid-template-columns: 145px 1fr; gap: 8px; align-items: baseline; min-height: 24px; }}
-      .label {{ font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #64748b; }}
-      .value {{ font-size: 13px; font-weight: 700; color: #0f172a; }}
-      .section h2 {{ margin: 0 0 10px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em; }}
+      .brand .address p {{ margin: 1px 0; font-size: 11.5px; line-height: 1.35; color: #F8FAFC; }}
+      .brand .phone {{ margin: 0; font-size: 12px; line-height: 1.3; color: #F8FAFC; }}
+      .receipt-bar {{ display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .receipt-title {{ font-size: 15px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; }}
+      .receipt-no {{ font-size: 13px; font-weight: 800; color: #1E3A5F; }}
+      .section {{ padding: 17px 20px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px; }}
+      .field {{ display: grid; grid-template-columns: 150px 1fr; gap: 8px; align-items: baseline; min-height: 25px; }}
+      .label {{ font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: #334155; }}
+      .value {{ font-size: 13px; font-weight: 800; color: #111827; }}
+      .section h2 {{ margin: 0 0 12px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.12em; color: #111827; }}
       table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-      th, td {{ padding: 8px 10px; border: 1px solid #e2e8f0; text-align: left; }}
-      th {{ background: #f8fafc; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }}
-      .amount {{ text-align: right; font-weight: 700; }}
-      .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 12px 20px; color: #475569; font-size: 12px; }}
+      th, td {{ padding: 10px 11px; border: 1px solid #CBD5E1; text-align: left; vertical-align: middle; }}
+      th {{ background: #F8FAFC; color: #334155; text-transform: uppercase; letter-spacing: 0.08em; font-size: 10px; }}
+      tr:nth-child(even) td {{ background: #F8FAFC; }}
+      .amount {{ text-align: right; font-weight: 800; color: #1E3A5F; }}
+      .badge {{ display: inline-block; min-width: 76px; border-radius: 999px; padding: 3px 9px; text-align: center; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; }}
+      .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
+      .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
+      .footer {{ display: flex; justify-content: space-between; gap: 16px; padding: 13px 20px; background: #F8FAFC; color: #334155; font-size: 12px; }}
       .footer p {{ margin: 2px 0; }}
-      .bottom {{ display: flex; justify-content: space-between; gap: 16px; padding: 10px 20px; background: #0f172a; color: white; font-size: 11px; }}
+      .bottom {{ display: flex; justify-content: space-between; gap: 16px; padding: 12px 20px; background: #F8FAFC; border-top: 1px solid #CBD5E1; color: #334155; font-size: 11px; }}
       @media print {{
         body {{ margin: 0; background: white; }}
-        .sheet {{ border: 0; max-width: none; }}
-        .header, .bottom {{ print-color-adjust: exact; -webkit-print-color-adjust: exact; }}
+        .sheet {{ border: 1px solid #CBD5E1; max-width: none; box-shadow: none; }}
+        .header {{ print-color-adjust: exact; -webkit-print-color-adjust: exact; }}
+        .bottom, .footer, th, tr:nth-child(even) td {{ print-color-adjust: exact; -webkit-print-color-adjust: exact; }}
       }}
     </style>
   </head>
@@ -2671,16 +2692,16 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       </div>
       <div class="section">
         <div class="grid">
-          <div class="field"><div class="label">Student Name</div><div class="value">{escape(enrollment.name)}</div></div>
-          <div class="field"><div class="label">Student ID</div><div class="value">{escape(enrollment.student_number)}</div></div>
-          <div class="field"><div class="label">Course</div><div class="value">{escape(enrollment.course.name)}</div></div>
-          <div class="field"><div class="label">Branch</div><div class="value">{escape(branch.name if branch else 'No branch')}</div></div>
-          <div class="field"><div class="label">Payment Mode</div><div class="value">{escape(installment.get_payment_mode_display())}</div></div>
-          <div class="field"><div class="label">Payment Date</div><div class="value">{escape(installment.payment_date.strftime('%d %b %Y'))}</div></div>
-          <div class="field"><div class="label">Installment Amount</div><div class="value">Rs {installment.amount:,.2f}</div></div>
-          <div class="field"><div class="label">Total Fees</div><div class="value">Rs {payment.total_fees:,.2f}</div></div>
-          <div class="field"><div class="label">Paid Amount</div><div class="value">Rs {payment.paid_amount:,.2f}</div></div>
-          <div class="field"><div class="label">Balance</div><div class="value">Rs {payment.balance:,.2f}</div></div>
+          <div class="field"><div class="label">STUDENT NAME</div><div class="value">{escape(enrollment.name)}</div></div>
+          <div class="field"><div class="label">STUDENT ID</div><div class="value">{escape(enrollment.student_number)}</div></div>
+          <div class="field"><div class="label">COURSE</div><div class="value">{escape(enrollment.course.name)}</div></div>
+          <div class="field"><div class="label">BRANCH</div><div class="value">{escape(branch.name if branch else 'No branch')}</div></div>
+          <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(installment.get_payment_mode_display())}</div></div>
+          <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(receipt_date(installment.payment_date))}</div></div>
+          <div class="field"><div class="label">INSTALLMENT AMOUNT</div><div class="value amount">Rs {installment.amount:,.2f}</div></div>
+          <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {payment.total_fees:,.2f}</div></div>
+          <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {payment.paid_amount:,.2f}</div></div>
+          <div class="field"><div class="label">BALANCE</div><div class="value amount">Rs {payment.balance:,.2f}</div></div>
         </div>
       </div>
       <div class="section">
@@ -2688,10 +2709,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         <table>
           <thead>
             <tr>
-              <th>Installment</th>
-              <th>Due Date</th>
+              <th>INSTALLMENT</th>
+              <th>DUE DATE</th>
               <th class="amount">Amount</th>
-              <th>Status</th>
+              <th>STATUS</th>
             </tr>
           </thead>
           <tbody>
@@ -2701,13 +2722,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       </div>
       <div class="section footer">
         <div>
-          <p><strong>Generated by:</strong> Indra Institute of Education</p>
-          <p><strong>Generated on:</strong> {escape(installment.bill_generated_at.strftime('%d %b %Y') if installment.bill_generated_at else '')}</p>
+          <p><strong>GENERATED BY:</strong> Indra Institute of Education</p>
+          <p><strong>GENERATED ON:</strong> {escape(receipt_date(installment.bill_generated_at))}</p>
         </div>
       </div>
       <div class="bottom">
-        <div>Fees once paid cannot be refunded</div>
-        <div>This is a computer-generated bill. No signature required</div>
+        <div>Fees once paid cannot be refunded.</div>
+        <div>This is a computer-generated bill, no signature required.</div>
       </div>
     </div>
   </body>

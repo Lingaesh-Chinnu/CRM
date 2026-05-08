@@ -76,7 +76,7 @@ export default function PhoneNumberEditor({ recordType, recordId, phone, onSaved
   return (
     <div className="space-y-2">
       {editing ? (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-nowrap items-center gap-2">
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -91,7 +91,7 @@ export default function PhoneNumberEditor({ recordType, recordId, phone, onSaved
           </button>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-nowrap items-center gap-2">
           <span className="font-semibold text-slate-900">{currentPhone || 'Phone not added'}</span>
           <button type="button" onClick={startEdit} className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600 hover:bg-slate-50">
             Edit
