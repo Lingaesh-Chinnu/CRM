@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 import brandLogo from '../../assets/brand-logo.png'
 
+const REDIRECT_URL = 'https://www.indrainstitute.com'
+
 const initialForm = {
   full_name: '',
   mobile_number: '',
@@ -62,16 +64,20 @@ export default function PublicLeadForm() {
 
   const submit = async (event) => {
     event.preventDefault()
+    if (saving) return
     setSaving(true)
     setMessage('')
     try {
-      const { data } = await api.post('/public/lead-form/', form)
-      setMessage(data.detail || 'Thank you! Our team will contact you shortly.')
+      await api.post('/public/lead-form/', form)
+      setMessage('Thanks for your enquiry, our team will reach you soon.')
       setForm((current) => ({
         ...initialForm,
         branch: current.branch,
         course_interested: current.course_interested,
       }))
+      window.setTimeout(() => {
+        window.location.href = REDIRECT_URL
+      }, 2500)
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to submit your enquiry.')
     } finally {
@@ -82,41 +88,12 @@ export default function PublicLeadForm() {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,#e0f2fe_0%,#f8fafc_30%,#fff7ed_100%)] px-4 py-10 sm:px-8">
       <div className="mx-auto max-w-6xl">
-        <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
-          <section className="overflow-hidden rounded-[32px] border border-sky-100 bg-slate-950 text-white shadow-[0_30px_80px_-35px_rgba(15,23,42,0.9)]">
-            <div className="bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.28),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(249,115,22,0.24),transparent_32%)] px-8 py-10 md:px-10">
-              <div className="flex items-center gap-4">
-                <div className="flex h-20 w-20 items-center justify-center rounded-3xl border border-white/10 bg-white/10">
-                  <img src={brandLogo} alt="IIE Logo" className="h-16 w-16 object-contain" />
-                </div>
-                <div>
-                  <p className="text-2xl font-black tracking-tight">Indra Institute of Education</p>
-                  <p className="mt-1 text-sm text-slate-300">Course enquiry form</p>
-                </div>
-              </div>
-
-              <p className="mt-10 text-xs font-semibold uppercase tracking-[0.32em] text-sky-300">Lead Capture</p>
-              <h1 className="mt-4 text-4xl font-black tracking-tight">Start your enquiry with the right branch.</h1>
-              <p className="mt-5 max-w-xl text-base leading-8 text-slate-300">
-                Share your course interest and preferred joining timeline. Your selected branch team will receive the lead directly and follow up with you shortly.
-              </p>
-
-              <div className="mt-10 grid gap-4 sm:grid-cols-3">
-                {['Gandhipuram', 'Hopes', 'Kuniyamuthur'].map((branchName) => (
-                  <div key={branchName} className="rounded-3xl border border-white/10 bg-white/10 px-4 py-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Branch</p>
-                    <p className="mt-3 text-lg font-bold tracking-tight text-white">{branchName}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
+        <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">          
           <section className="rounded-[32px] border border-slate-200 bg-white p-7 shadow-[0_30px_80px_-35px_rgba(15,23,42,0.25)] sm:p-10">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Public Lead Form</p>
-                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Register your enquiry</h2>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Get a Call from our Team</h2>
               </div>
               <div className="rounded-full bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
                 IIE
