@@ -11,6 +11,7 @@ import { fetchMe } from './store/slices/authSlice'
 
 // Auth pages
 import LoginPage from './pages/auth/LoginPage'
+import ChangePasswordPage from './pages/auth/ChangePasswordPage'
 
 // Dashboard
 import DashboardPage from './pages/dashboard/DashboardPage'
@@ -43,6 +44,7 @@ import TargetsPage   from './pages/admin/TargetsPage'
 import HistoricalAnalyticsPage from './pages/admin/HistoricalAnalyticsPage'
 import BranchesPage  from './pages/admin/BranchesPage'
 import ReportsPage   from './pages/admin/ReportsPage'
+import ReceiptsPage  from './pages/admin/ReceiptsPage'
 import UserMonitoringPage from './pages/admin/UserMonitoringPage'
 import LeadImportHistoryPage from './pages/admin/LeadImportHistoryPage'
 import LeadInboxPage from './pages/admin/LeadInboxPage'
@@ -78,6 +80,7 @@ export default function App() {
       {/* Public routes */}
       <Route path="/"                  element={<RootRedirect />} />
       <Route path="/login"             element={<LoginPage />} />
+      <Route path="/change-password"   element={<PrivateRoute><ChangePasswordPage /></PrivateRoute>} />
       <Route path="/public/walk-in"    element={<PublicWalkInForm />} />
       <Route path="/IIE-Rules-Regulations/:token" element={<RulesSigningPage />} />
       <Route path="/rules-sign/:token" element={<RulesSigningPage />} />
@@ -120,6 +123,7 @@ export default function App() {
           <Route path="admin/historical-analytics" element={<HistoricalAnalyticsPage />} />
           <Route path="admin/branches" element={<BranchesPage />} />
           <Route path="admin/reports"  element={<ReportsPage />} />
+          <Route path="admin/receipts" element={<ReceiptsPage />} />
           <Route path="admin/user-monitoring" element={<UserMonitoringPage />} />
           <Route path="admin/lead-import-history" element={<LeadImportHistoryPage />} />
           <Route path="admin/lead-inbox" element={<LeadInboxPage />} />

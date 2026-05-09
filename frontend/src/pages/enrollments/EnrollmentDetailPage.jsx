@@ -105,8 +105,12 @@ export default function EnrollmentDetailPage() {
         rules_signed_pdf_url: updatedEnrollment.rules_signed_pdf_url,
       })
 
-      openWhatsApp(data.phone || updatedEnrollment.phone || row.phone, data.whatsapp_message)
-      setMessage('Rules & Regulation signing link is ready and opened in WhatsApp Web.')
+      if (data.whatsapp_sent) {
+        setMessage('Rules & Regulation signing link sent on WhatsApp.')
+      } else {
+        openWhatsApp(data.phone || updatedEnrollment.phone || row.phone, data.whatsapp_message)
+        setMessage(data.whatsapp_error ? `Automatic WhatsApp failed. Opened WhatsApp Web fallback. ${data.whatsapp_error}` : 'Rules & Regulation signing link is ready and opened in WhatsApp Web.')
+      }
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to send Rules & Regulation form.')
     } finally {

@@ -36,6 +36,8 @@ export default function PaymentsListPage() {
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
+  const [sendingId, setSendingId] = useState(null)
   const [searchParams] = useSearchParams()
   const statusFilter = searchParams.get('status') || ''
   const dueThisWeek = searchParams.get('due_this_week') || ''
@@ -57,6 +59,29 @@ export default function PaymentsListPage() {
       .catch(() => setTemplates([]))
   }, [])
 
+  const sendReminder = async (row) => {
+    setSendingId(row.id)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/payments/${row.id}/send-reminder/`, {
+        template_id: selectedTemplate || undefined,
+      })
+      if (data.whatsapp_sent) {
+        setMessage(`Reminder sent to ${row.student_name}.`)
+        return
+      }
+      const template = templates.find((item) => String(item.id) === String(selectedTemplate))
+      openWhatsApp(row.student_phone, data.whatsapp_message || renderWhatsAppTemplate(template, row, feeReminderMessage(row)))
+      setMessage(data.whatsapp_error ? `Automatic send failed. Opened WhatsApp Web fallback. ${data.whatsapp_error}` : 'Opened WhatsApp Web fallback.')
+    } catch (error) {
+      const template = templates.find((item) => String(item.id) === String(selectedTemplate))
+      openWhatsApp(row.student_phone, renderWhatsAppTemplate(template, row, feeReminderMessage(row)))
+      setMessage(error.response?.data?.detail || 'Automatic send failed. Opened WhatsApp Web fallback.')
+    } finally {
+      setSendingId(null)
+    }
+  }
+
   if (loading) return <div className="p-6 text-slate-500">Loading payments...</div>
 
   return (
@@ -70,6 +95,11 @@ export default function PaymentsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+        {message && (
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-medium text-slate-600">
+            {message}
+          </div>
+        )}
         {statusFilter && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-medium text-slate-600">
             Showing {dueThisWeek ? 'this week due ' : ''}{statusLabel(statusFilter)} payment records.
@@ -108,13 +138,11 @@ export default function PaymentsListPage() {
                         )}
                         <button
                           type="button"
-                          onClick={() => {
-                            const template = templates.find((item) => String(item.id) === String(selectedTemplate))
-                            openWhatsApp(row.student_phone, renderWhatsAppTemplate(template, row, feeReminderMessage(row)))
-                          }}
+                          onClick={() => sendReminder(row)}
+                          disabled={sendingId === row.id}
                           className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
                         >
-                          Send Reminder
+                          {sendingId === row.id ? 'Sending...' : 'Send Reminder'}
                         </button>
                       </>
                     )}

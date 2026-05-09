@@ -39,7 +39,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
+from django.core.mail import send_mail
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.shortcuts import render
@@ -58,6 +61,7 @@ import base64
 import io
 import re
 import zipfile
+from whatsapp_service import send_candidate_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
@@ -65,14 +69,14 @@ from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     PhoneNumberChangeHistory,
-    PaymentInstallment, FollowUp, Enrollment, get_default_installment_schedule,
+    PaymentInstallment, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
     BranchTargetSerializer, HistoricalAnalyticsEntrySerializer,
     CustomTokenObtainPairSerializer, UserPerformanceReportSerializer,
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
-    WhatsAppTemplateSerializer, NotificationSerializer,
+    WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
 )
 
 User = get_user_model()
@@ -82,6 +86,29 @@ def app_url(path):
     """Build a URL path inside the configured application mount."""
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
     return f'{base_path}/{path.strip("/")}'
+
+
+def build_login_url(request):
+    return request.build_absolute_uri(app_url('login'))
+
+
+def send_login_credentials_email(user, plain_password, login_url):
+    body = (
+        f'Hi {user.full_name},\n\n'
+        'Your Indra Institute CRM account has been created.\n\n'
+        f'Login URL: {login_url}\n'
+        f'Username: {user.username}\n'
+        f'Password: {plain_password}\n\n'
+        'Please keep these credentials safe and do not share them with anyone.\n\n'
+        '-Team IIE'
+    )
+    send_mail(
+        subject='Indra Institute CRM - Login Credentials',
+        message=body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
 
 
 WHATSAPP_PLACEHOLDERS = [
@@ -101,6 +128,16 @@ WHATSAPP_PLACEHOLDERS = [
     'rules_link',
     'institute_name',
 ]
+
+
+WHATSAPP_MESSAGE_TYPE_MAP = {
+    WhatsAppTemplate.TemplateType.LEAD_FOLLOW_UP: WhatsAppMessage.MsgType.FOLLOW_UP,
+    WhatsAppTemplate.TemplateType.WALKIN_FOLLOW_UP: WhatsAppMessage.MsgType.WALKIN_REMIND,
+    WhatsAppTemplate.TemplateType.PAYMENT_REMINDER: WhatsAppMessage.MsgType.PAYMENT_REMINDER,
+    WhatsAppTemplate.TemplateType.BIRTHDAY_WISH: WhatsAppMessage.MsgType.BIRTHDAY,
+    WhatsAppTemplate.TemplateType.RULES_FORM_LINK: WhatsAppMessage.MsgType.RULES_FORM_LINK,
+    WhatsAppTemplate.TemplateType.OFFER_MESSAGE: WhatsAppMessage.MsgType.OFFER_MESSAGE,
+}
 
 
 def whatsapp_currency(value):
@@ -125,6 +162,63 @@ def render_whatsapp_template(body, values):
     for key, value in normalized.items():
         message = re.sub(r'{{\s*' + re.escape(key) + r'\s*}}', value, message)
     return re.sub(r'{{\s*[\w]+\s*}}', '', message).strip()
+
+
+def active_whatsapp_template(template_type):
+    return WhatsAppTemplate.objects.filter(
+        template_type=template_type,
+        is_active=True,
+    ).order_by('name').first()
+
+
+def whatsapp_send_payload(log):
+    return {
+        'whatsapp_sent': log.status == WhatsAppMessage.MsgStatus.SENT,
+        'whatsapp_status': log.status,
+        'whatsapp_error': log.error_message,
+        'whatsapp_log_id': log.id,
+    }
+
+
+def candidate_values(record, extra=None):
+    course = getattr(record, 'course', None)
+    branch = getattr(record, 'branch', None)
+    values = {
+        'student_name': getattr(record, 'name', ''),
+        'candidate_name': getattr(record, 'name', ''),
+        'course_name': course.name if course else '',
+        'branch_name': branch.name if branch else '',
+        'phone_number': getattr(record, 'phone', ''),
+        'follow_up_date': whatsapp_date(getattr(record, 'next_follow_up_date', None) or getattr(record, 'follow_up_date', None)),
+        'institute_name': 'IIE',
+    }
+    values.update(extra or {})
+    return values
+
+
+def send_candidate_template(record, template_type, message_type, request, related_model):
+    template = active_whatsapp_template(template_type)
+    if not template:
+        return None, Response({'detail': 'No active WhatsApp template configured for this message type.'}, status=400)
+    values = candidate_values(record)
+    log = send_candidate_message(
+        candidate_name=getattr(record, 'name', ''),
+        phone=getattr(record, 'phone', ''),
+        message_type=message_type,
+        message_body=template.message_body,
+        template=template,
+        values=values,
+        sent_by=request.user,
+        related_model=related_model,
+        related_id=record.id,
+        dedupe=False,
+    )
+    return log, Response({
+        'detail': 'WhatsApp message processed.',
+        'phone': getattr(record, 'phone', ''),
+        'whatsapp_message': render_whatsapp_template(template.message_body, values),
+        **whatsapp_send_payload(log),
+    })
 
 
 def rules_sign_view(request, token):
@@ -696,6 +790,31 @@ class MeView(generics.RetrieveUpdateAPIView):
         return self.request.user
 
 
+class ChangePasswordView(APIView):
+    """POST /api/auth/change-password/ - lets users clear first-login password change."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def post(self, request):
+        user = request.user
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+
+        if not current_password or not user.check_password(current_password):
+            return Response({'current_password': 'Current password is incorrect.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not new_password:
+            return Response({'new_password': 'New password is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as exc:
+            return Response({'new_password': list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.must_change_password = False
+        user.save(update_fields=['password', 'must_change_password', 'updated_at'])
+        return Response({'detail': 'Password changed successfully.'})
+
+
 class BranchViewSet(viewsets.ModelViewSet):
     """CRUD for branches. Only super admin can write."""
     serializer_class   = BranchSerializer
@@ -721,6 +840,39 @@ class UserViewSet(viewsets.ModelViewSet):
     pagination_class   = None
     search_fields      = ['username', 'email', 'first_name', 'last_name']
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        headers = self.get_success_headers(serializer.data)
+
+        try:
+            send_login_credentials_email(
+                user=user,
+                plain_password=user._plain_password,
+                login_url=build_login_url(request),
+            )
+        except Exception:
+            return Response(
+                {
+                    **serializer.data,
+                    'detail': 'User created, but credential email failed to send.',
+                    'credential_email_sent': False,
+                },
+                status=status.HTTP_201_CREATED,
+                headers=headers,
+            )
+
+        return Response(
+            {
+                **serializer.data,
+                'detail': 'User created successfully. Login credentials sent to email.',
+                'credential_email_sent': True,
+            },
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
     @action(detail=True, methods=['post'], url_path='reset-password')
     def reset_password(self, request, pk=None):
         user = self.get_object()
@@ -728,7 +880,7 @@ class UserViewSet(viewsets.ModelViewSet):
         if not new_password or len(new_password) < 8:
             return Response({'error': 'Password must be at least 8 characters.'}, status=400)
         user.set_password(new_password)
-        user.save()
+        user.save(update_fields=['password', 'updated_at'])
         return Response({'detail': 'Password reset successfully.'})
 
 
@@ -1097,6 +1249,28 @@ class LeadViewSet(viewsets.ModelViewSet):
         if self.action in ('partial_update',) and not self.request.user.is_super_admin:
             return LeadDetailSerializer
         return LeadDetailSerializer
+
+    @action(detail=True, methods=['post'], url_path='send-follow-up-whatsapp')
+    def send_follow_up_whatsapp(self, request, pk=None):
+        _, response = send_candidate_template(
+            self.get_object(),
+            WhatsAppTemplate.TemplateType.LEAD_FOLLOW_UP,
+            WhatsAppMessage.MsgType.FOLLOW_UP,
+            request,
+            'lead',
+        )
+        return response
+
+    @action(detail=True, methods=['post'], url_path='send-offer-whatsapp')
+    def send_offer_whatsapp(self, request, pk=None):
+        _, response = send_candidate_template(
+            self.get_object(),
+            WhatsAppTemplate.TemplateType.OFFER_MESSAGE,
+            WhatsAppMessage.MsgType.OFFER_MESSAGE,
+            request,
+            'lead',
+        )
+        return response
 
     def perform_create(self, serializer):
         # Auto-set branch + created_by for staff
@@ -1747,6 +1921,28 @@ class WalkInViewSet(viewsets.ModelViewSet):
             )
         return qs
 
+    @action(detail=True, methods=['post'], url_path='send-follow-up-whatsapp')
+    def send_follow_up_whatsapp(self, request, pk=None):
+        _, response = send_candidate_template(
+            self.get_object(),
+            WhatsAppTemplate.TemplateType.WALKIN_FOLLOW_UP,
+            WhatsAppMessage.MsgType.WALKIN_REMIND,
+            request,
+            'walkin',
+        )
+        return response
+
+    @action(detail=True, methods=['post'], url_path='send-offer-whatsapp')
+    def send_offer_whatsapp(self, request, pk=None):
+        _, response = send_candidate_template(
+            self.get_object(),
+            WhatsAppTemplate.TemplateType.OFFER_MESSAGE,
+            WhatsAppMessage.MsgType.OFFER_MESSAGE,
+            request,
+            'walkin',
+        )
+        return response
+
     def get_serializer_class(self):
         return WalkInListSerializer if self.action == 'list' else WalkInDetailSerializer
 
@@ -2369,12 +2565,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'After signing, our team will proceed with your enrollment.\n\n'
             '-Team IIE'
         )
-        template = WhatsAppTemplate.objects.filter(
-            template_type=WhatsAppTemplate.TemplateType.RULES_FORM_LINK,
-            is_active=True,
-        ).order_by('name').first()
+        template = active_whatsapp_template(WhatsAppTemplate.TemplateType.RULES_FORM_LINK)
         payment = getattr(enrollment, 'payment', None)
-        message = render_whatsapp_template(template.message_body if template else default_message, {
+        values = {
             'student_name': enrollment.name,
             'candidate_name': enrollment.name,
             'course_name': enrollment.course.name if enrollment.course else '',
@@ -2387,7 +2580,20 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'next_payment_date': whatsapp_date(payment.next_payment_date if payment else None),
             'rules_link': signing_link,
             'institute_name': 'IIE',
-        })
+        }
+        message = render_whatsapp_template(template.message_body if template else default_message, values)
+        log = send_candidate_message(
+            candidate_name=enrollment.name,
+            phone=enrollment.phone,
+            message_type=WhatsAppMessage.MsgType.RULES_FORM_LINK,
+            message_body=template.message_body if template else default_message,
+            template=template,
+            values=values,
+            sent_by=request.user,
+            related_model='enrollment',
+            related_id=enrollment.id,
+            dedupe=False,
+        )
         return Response({
             'detail': 'Rules & Regulation form link generated.',
             'signing_link': signing_link,
@@ -2395,6 +2601,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'phone': enrollment.phone,
             'status': signing.status,
             'enrollment_status': enrollment.status,
+            **whatsapp_send_payload(log),
         })
 
     @action(detail=True, methods=['post'], url_path='enroll-student')
@@ -2494,6 +2701,62 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         return qs
+
+    @action(detail=True, methods=['post'], url_path='send-reminder')
+    def send_reminder(self, request, pk=None):
+        payment = self.get_object()
+        if payment.status == Payment.Status.PAID or payment.balance <= 0:
+            return Response({'detail': 'This payment has no pending balance.'}, status=400)
+        enrollment = payment.enrollment
+        template_id = request.data.get('template_id')
+        template = None
+        if template_id:
+            template = WhatsAppTemplate.objects.filter(
+                pk=template_id,
+                template_type=WhatsAppTemplate.TemplateType.PAYMENT_REMINDER,
+                is_active=True,
+            ).first()
+        template = template or active_whatsapp_template(WhatsAppTemplate.TemplateType.PAYMENT_REMINDER)
+        default_message = (
+            'Hi {{student_name}},\n\n'
+            'This is a gentle reminder regarding your pending course fee payment.\n\n'
+            'Total Fee: {{total_fee}}\n'
+            'Paid: {{paid_amount}}\n'
+            'Balance: {{pending_amount}}\n\n'
+            'Kindly complete the pending payment at your earliest convenience.\n\n'
+            '-Team IIE'
+        )
+        values = {
+            'student_name': enrollment.name,
+            'candidate_name': enrollment.name,
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else '',
+            'phone_number': enrollment.phone,
+            'total_fee': whatsapp_currency(payment.total_fees),
+            'paid_amount': whatsapp_currency(payment.paid_amount),
+            'pending_amount': whatsapp_currency(payment.balance),
+            'next_payment_date': whatsapp_date(payment.next_payment_date),
+            'institute_name': 'IIE',
+        }
+        body = template.message_body if template else default_message
+        log = send_candidate_message(
+            candidate_name=enrollment.name,
+            phone=enrollment.phone,
+            message_type=WhatsAppMessage.MsgType.PAYMENT_REMINDER,
+            message_body=body,
+            template=template,
+            values=values,
+            sent_by=request.user,
+            related_model='payment',
+            related_id=payment.id,
+            dedupe=False,
+        )
+        return Response({
+            'detail': 'Payment reminder processed.',
+            'phone': enrollment.phone,
+            'whatsapp_message': render_whatsapp_template(body, values),
+            **whatsapp_send_payload(log),
+        })
 
     @action(detail=True, methods=['post'], url_path='update-schedule')
     def update_schedule(self, request, pk=None):
@@ -2797,6 +3060,257 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
         response = HttpResponse(self._build_bill_html(installment), content_type='text/html; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{installment.bill_number}.html"'
+        return response
+
+
+class AdminReceiptViewSet(viewsets.ModelViewSet):
+    """Admin-only standalone receipts for miscellaneous payments."""
+    serializer_class = AdminReceiptSerializer
+    permission_classes = [IsSuperAdmin]
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['purpose', 'payment_mode', 'payment_date']
+    search_fields = ['receipt_number', 'name', 'phone', 'purpose']
+    ordering_fields = ['payment_date', 'generated_on', 'amount', 'name', 'purpose']
+    ordering = ['-payment_date', '-created_at']
+
+    def get_queryset(self):
+        return AdminReceipt.objects.select_related('generated_by').all()
+
+    def _generate_receipt_number(self):
+        year = timezone.localdate().year
+        prefix = f'IIE-REC-{year}-'
+        count = AdminReceipt.objects.filter(receipt_number__startswith=prefix).count()
+        return f'{prefix}{count + 1:04d}'
+
+    def perform_create(self, serializer):
+        receipt_number = self._generate_receipt_number()
+        while AdminReceipt.objects.filter(receipt_number=receipt_number).exists():
+            sequence = int(receipt_number.rsplit('-', 1)[1]) + 1
+            receipt_number = f'IIE-REC-{timezone.localdate().year}-{sequence:04d}'
+        serializer.save(
+            receipt_number=receipt_number,
+            generated_by=self.request.user,
+            generated_on=timezone.now(),
+        )
+
+    def _receipt_date(self, value):
+        if not value:
+            return 'Not set'
+        if isinstance(value, str):
+            value = parse_date(value)
+        if hasattr(value, 'strftime'):
+            return value.strftime('%d/%m/%Y')
+        return str(value)
+
+    def _logo_src(self):
+        logo_candidates = [
+            Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'dist' / 'iie-white.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'brand-logo.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'dist' / 'brand-logo.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'dist' / 'receipt-logo.png',
+        ]
+        for logo_path in logo_candidates:
+            if logo_path.exists():
+                return f"data:image/png;base64,{base64.b64encode(logo_path.read_bytes()).decode('ascii')}"
+        return ''
+
+    def _build_receipt_html(self, receipt):
+        logo_src = self._logo_src()
+        generated_by = receipt.generated_by.full_name if receipt.generated_by else 'Admin'
+        amount = Decimal(str(receipt.amount or 0))
+        notes_row = ''
+        if receipt.notes:
+            notes_row = f'<div class="field field-wide"><div class="label">NOTES</div><div class="value">{escape(receipt.notes)}</div></div>'
+        return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{escape(receipt.receipt_number or 'Receipt')}</title>
+    <style>
+      * {{ box-sizing: border-box; }}
+      body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
+      .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
+      .header {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 18px; align-items: center; padding: 11px 22px; background: #1E3A5F; color: white; }}
+      .logo {{ display: flex; align-items: center; justify-content: flex-start; }}
+      .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
+      .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 68px; }}
+      .brand h1 {{ margin: 0 0 3px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
+      .brand .tagline {{ margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; }}
+      .brand .address {{ margin: 0 0 4px; }}
+      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.22; color: #F8FAFC; }}
+      .brand .phone {{ margin: 0; font-size: 11px; line-height: 1.2; color: #F8FAFC; }}
+      .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
+      .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
+      .section {{ padding: 14px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
+      .grid {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; row-gap: 10px; }}
+      .field {{ display: grid; grid-template-columns: 145px minmax(0, 220px); gap: 10px; align-items: baseline; min-height: 22px; }}
+      .field-wide {{ grid-column: 1 / -1; grid-template-columns: 145px minmax(0, 1fr); }}
+      .label {{ font-size: 9.8px; text-transform: uppercase; letter-spacing: 0.07em; color: #334155; line-height: 1.2; }}
+      .value {{ font-size: 12.2px; font-weight: 800; color: #111827; line-height: 1.35; text-align: left; }}
+      .amount {{ color: #1E3A5F; }}
+      .generated-info {{ padding: 18px 24px; background: white; color: #334155; font-size: 11.5px; line-height: 1.8; }}
+      .generated-info p {{ margin: 0; }}
+      .generated-info .info-label {{ font-weight: 700; }}
+      .generated-info .info-value {{ font-weight: 400; color: #111827; }}
+      .bottom {{ display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 52px; margin-top: 8px; padding: 10px 24px; background: #1E3A5F; border-top: 1px solid #d6dce5; color: white; font-size: 13px; line-height: 1.35; }}
+      @media print {{
+        body {{ margin: 0; background: white; }}
+        .sheet {{ border: 1px solid #CBD5E1; max-width: none; box-shadow: none; }}
+        .header, .bottom {{ print-color-adjust: exact; -webkit-print-color-adjust: exact; }}
+      }}
+    </style>
+  </head>
+  <body>
+    <div class="sheet">
+      <div class="header">
+        <div class="logo">
+          {'<img src="' + logo_src + '" alt="Indra Institute of Education logo">' if logo_src else ''}
+        </div>
+        <div class="brand">
+          <h1>Indra Institute of Education</h1>
+          <div class="tagline">IT Training &amp; Testing Services</div>
+          <div class="address">
+            <p>First Floor, AAKIFAH 2017 Complex, Palghat Main Road,</p>
+            <p>Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008</p>
+          </div>
+          <p class="phone">Phone number not set</p>
+        </div>
+      </div>
+      <div class="receipt-bar">
+        <div class="receipt-title">PAYMENT RECEIPT</div>
+        <div class="receipt-no">Receipt No: {escape(receipt.receipt_number)}</div>
+      </div>
+      <div class="section">
+        <div class="grid">
+          <div class="field"><div class="label">RECEIPT NO</div><div class="value">{escape(receipt.receipt_number)}</div></div>
+          <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(self._receipt_date(receipt.payment_date))}</div></div>
+          <div class="field"><div class="label">NAME</div><div class="value">{escape(receipt.name)}</div></div>
+          <div class="field"><div class="label">PHONE NUMBER</div><div class="value">{escape(receipt.phone)}</div></div>
+          <div class="field"><div class="label">PURPOSE</div><div class="value">{escape(receipt.purpose)}</div></div>
+          <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(receipt.get_payment_mode_display())}</div></div>
+          <div class="field"><div class="label">AMOUNT</div><div class="value amount">Rs {amount:,.2f}</div></div>
+          {notes_row}
+        </div>
+      </div>
+      <div class="generated-info">
+        <p><span class="info-label">GENERATED BY:</span> <span class="info-value">{escape(generated_by)}</span></p>
+        <p><span class="info-label">GENERATED ON:</span> <span class="info-value">{escape(self._receipt_date(receipt.generated_on))}</span></p>
+      </div>
+      <div class="bottom">
+        <div>Fees once paid cannot be refunded.</div>
+        <div>This is a computer-generated bill, no signature required.</div>
+      </div>
+    </div>
+  </body>
+</html>"""
+
+    def _build_receipt_pdf(self, receipt):
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError as exc:
+            raise RuntimeError('Pillow is required to generate receipt PDFs.') from exc
+
+        width, height = 1240, 1754
+        margin = 82
+        navy = '#1E3A5F'
+        slate = '#334155'
+        border = '#CBD5E1'
+        page = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(page)
+        font = ImageFont.load_default()
+        title_font = ImageFont.load_default()
+        label_font = ImageFont.load_default()
+
+        draw.rectangle((0, 0, width, 170), fill=navy)
+        logo_candidates = [
+            Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'brand-logo.png',
+        ]
+        for logo_path in logo_candidates:
+            if logo_path.exists():
+                logo = Image.open(logo_path).convert('RGBA')
+                logo.thumbnail((112, 112))
+                page.paste(logo, (margin, 28), logo)
+                break
+
+        def center_text(text, y, fill='white'):
+            bbox = draw.textbbox((0, 0), text, font=title_font)
+            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=title_font)
+
+        center_text('INDRA INSTITUTE OF EDUCATION', 34)
+        center_text('IT Training & Testing Services', 66)
+        center_text('First Floor, AAKIFAH 2017 Complex, Palghat Main Road,', 98)
+        center_text('Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008', 124)
+
+        y = 170
+        draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
+        draw.text((margin, y + 24), 'PAYMENT RECEIPT', fill='black', font=title_font)
+        receipt_label = f'Receipt No: {receipt.receipt_number}'
+        receipt_bbox = draw.textbbox((0, 0), receipt_label, font=title_font)
+        draw.text((width - margin - (receipt_bbox[2] - receipt_bbox[0]), y + 24), receipt_label, fill=navy, font=title_font)
+
+        y += 110
+        amount = Decimal(str(receipt.amount or 0))
+        fields = [
+            ('RECEIPT NO', receipt.receipt_number),
+            ('PAYMENT DATE', self._receipt_date(receipt.payment_date)),
+            ('NAME', receipt.name),
+            ('PHONE NUMBER', receipt.phone),
+            ('PURPOSE', receipt.purpose),
+            ('PAYMENT MODE', receipt.get_payment_mode_display()),
+            ('AMOUNT', f'Rs {amount:,.2f}'),
+        ]
+        if receipt.notes:
+            fields.append(('NOTES', receipt.notes))
+
+        col_width = (width - (margin * 2) - 40) / 2
+        row_height = 76
+        for index, (label, value) in enumerate(fields):
+            col = index % 2
+            row = index // 2
+            x = margin + col * (col_width + 40)
+            row_y = y + row * row_height
+            if label == 'NOTES':
+                x = margin
+                col_width = width - (margin * 2)
+            draw.text((x, row_y), label, fill=slate, font=label_font)
+            lines = wrap_text(draw, str(value), font, int(col_width))
+            for line_index, line in enumerate(lines[:3]):
+                draw.text((x, row_y + 26 + (line_index * 22)), line, fill='black', font=font)
+
+        generated_by = receipt.generated_by.full_name if receipt.generated_by else 'Admin'
+        info_y = y + (((len(fields) + 1) // 2) * row_height) + 55
+        draw.line((margin, info_y - 24, width - margin, info_y - 24), fill=border, width=2)
+        draw.text((margin, info_y), f'GENERATED BY: {generated_by}', fill=slate, font=font)
+        draw.text((margin, info_y + 34), f'GENERATED ON: {self._receipt_date(receipt.generated_on)}', fill=slate, font=font)
+
+        footer_y = height - 92
+        draw.rectangle((0, footer_y, width, height), fill=navy)
+        draw.text((margin, footer_y + 34), 'Fees once paid cannot be refunded.', fill='white', font=font)
+        footer_text = 'This is a computer-generated bill, no signature required.'
+        footer_bbox = draw.textbbox((0, 0), footer_text, font=font)
+        draw.text((width - margin - (footer_bbox[2] - footer_bbox[0]), footer_y + 34), footer_text, fill='white', font=font)
+
+        output = io.BytesIO()
+        page.save(output, format='PDF')
+        output.seek(0)
+        return output.read()
+
+    @action(detail=True, methods=['get'], url_path='view-receipt')
+    def view_receipt(self, request, pk=None):
+        receipt = self.get_object()
+        response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{receipt.receipt_number}.pdf"'
+        return response
+
+    @action(detail=True, methods=['get'], url_path='download-receipt')
+    def download_receipt(self, request, pk=None):
+        receipt = self.get_object()
+        response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{receipt.receipt_number}.pdf"'
         return response
 
 

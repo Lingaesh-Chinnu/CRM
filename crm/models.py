@@ -96,6 +96,7 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     role       = models.CharField(max_length=20, choices=Role.choices, default=Role.STAFF)
     is_active  = models.BooleanField(default=True)
     is_staff   = models.BooleanField(default=False)  # Django admin access
+    must_change_password = models.BooleanField(default=False)
 
     objects    = UserManager()
 
@@ -896,15 +897,49 @@ class PaymentInstallment(models.Model):
         return f'₹{self.amount} on {self.payment_date}'
 
 
+class AdminReceipt(TimeStampedModel):
+    """Standalone receipt for payments not tied to course installments."""
+
+    class Mode(models.TextChoices):
+        CASH         = 'cash',          'Cash'
+        UPI          = 'upi',           'UPI'
+        BANK         = 'bank_transfer', 'Bank Transfer'
+        CHEQUE       = 'cheque',        'Cheque'
+        CARD         = 'card',          'Card'
+        OTHER        = 'other',         'Other'
+
+    receipt_number = models.CharField(max_length=50, unique=True, editable=False)
+    name           = models.CharField(max_length=200)
+    phone          = models.CharField(max_length=20)
+    purpose        = models.CharField(max_length=200)
+    amount         = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_mode   = models.CharField(max_length=20, choices=Mode.choices, default=Mode.CASH)
+    payment_date   = models.DateField(default=timezone.now)
+    notes          = models.TextField(blank=True)
+    generated_by   = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                       related_name='admin_receipts_generated')
+    generated_on   = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'admin_receipts'
+        ordering = ['-payment_date', '-created_at']
+
+    def __str__(self):
+        return f'{self.receipt_number} - {self.name}'
+
+
 class WhatsAppMessage(models.Model):
     """Log of all WhatsApp messages dispatched by the system."""
 
     class MsgType(models.TextChoices):
         FEE_REMINDER   = 'fee_reminder',   'Fee Reminder'
+        PAYMENT_REMINDER = 'payment_reminder', 'Payment Reminder'
         BIRTHDAY       = 'birthday',       'Birthday Wish'
         FIRST_CLASS    = 'first_class',    'First Class Reminder'
         WALKIN_REMIND  = 'walkin_reminder','Walk-in Reminder'
         FOLLOW_UP      = 'follow_up',      'Follow-up Reminder'
+        RULES_FORM_LINK = 'rules_form_link', 'Rules Form Link'
+        OFFER_MESSAGE = 'offer_message', 'Offer Message'
         MANUAL         = 'manual',         'Manual'
 
     class MsgStatus(models.TextChoices):
@@ -914,10 +949,11 @@ class WhatsAppMessage(models.Model):
         READ      = 'read',      'Read'
         FAILED    = 'failed',    'Failed'
 
+    candidate_name  = models.CharField(max_length=200, blank=True)
     recipient_phone = models.CharField(max_length=20)
     template_name   = models.CharField(max_length=100, blank=True)
     message_body    = models.TextField()
-    message_type    = models.CharField(max_length=20, choices=MsgType.choices)
+    message_type    = models.CharField(max_length=30, choices=MsgType.choices)
     status          = models.CharField(max_length=15, choices=MsgStatus.choices,
                                        default=MsgStatus.PENDING, db_index=True)
     wa_message_id   = models.CharField(max_length=100, blank=True)
@@ -926,6 +962,8 @@ class WhatsAppMessage(models.Model):
                                         related_name='whatsapp_sent')
     related_model   = models.CharField(max_length=50, blank=True)
     related_id      = models.PositiveIntegerField(null=True, blank=True)
+    provider        = models.CharField(max_length=30, blank=True, default='wati')
+    provider_response = models.JSONField(default=dict, blank=True)
     created_at      = models.DateTimeField(auto_now_add=True)
     sent_at         = models.DateTimeField(null=True, blank=True)
 
@@ -951,6 +989,8 @@ class WhatsAppTemplate(TimeStampedModel):
     name = models.CharField(max_length=150, unique=True)
     template_type = models.CharField(max_length=30, choices=TemplateType.choices, db_index=True)
     message_body = models.TextField()
+    wati_template_name = models.CharField(max_length=150, blank=True)
+    wati_language_code = models.CharField(max_length=20, default='en', blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name='whatsapp_templates_created')

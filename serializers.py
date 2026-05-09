@@ -36,6 +36,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'role':       self.user.role,
             'branch_id':  self.user.branch_id,
             'branch_name': self.user.branch.name if self.user.branch else None,
+            'must_change_password': self.user.must_change_password,
         }
         return data
 
@@ -62,25 +63,27 @@ class BranchSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     full_name   = serializers.SerializerMethodField()
-    password    = serializers.CharField(write_only=True, required=False, allow_blank=False)
+    password    = serializers.CharField(write_only=True, required=True, allow_blank=False)
 
     class Meta:
         model  = User
         fields = ['id','username','email','first_name','last_name','full_name',
-                  'phone','role','branch','branch_name','is_active','created_at','password']
+                  'phone','role','branch','branch_name','is_active',
+                  'must_change_password','created_at','password']
+        read_only_fields = ['must_change_password']
 
     def get_full_name(self, obj):
         return obj.full_name
 
     def create(self, validated_data):
-        password = validated_data.pop('password', None)
+        password = validated_data.pop('password')
         user     = User(**validated_data)
         if user.role == User.Role.SUPER_ADMIN:
             user.is_staff = True
             user.is_superuser = True
-        if password:
-            user.set_password(password)
+        user.set_password(password)
         user.save()
+        user._plain_password = password
         return user
 
     def update(self, instance, validated_data):
@@ -90,6 +93,9 @@ class UserSerializer(serializers.ModelSerializer):
         if instance.role == User.Role.SUPER_ADMIN:
             instance.is_staff = True
             instance.is_superuser = True
+        else:
+            instance.is_staff = False
+            instance.is_superuser = False
         if password:
             instance.set_password(password)
         instance.save()
@@ -632,7 +638,7 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/payments/serializers.py
 # ============================================================
-from crm.models import Payment, PaymentInstallment, get_payment_installment_schedule
+from crm.models import Payment, PaymentInstallment, AdminReceipt, get_payment_installment_schedule
 
 
 class PaymentInstallmentSerializer(serializers.ModelSerializer):
@@ -681,6 +687,24 @@ class PaymentSerializer(serializers.ModelSerializer):
         ]
 
 
+class AdminReceiptSerializer(serializers.ModelSerializer):
+    generated_by_name = serializers.CharField(source='generated_by.full_name', read_only=True)
+    payment_mode_display = serializers.CharField(source='get_payment_mode_display', read_only=True)
+
+    class Meta:
+        model = AdminReceipt
+        fields = [
+            'id', 'receipt_number', 'name', 'phone', 'purpose', 'amount',
+            'payment_mode', 'payment_mode_display', 'payment_date', 'notes',
+            'generated_by', 'generated_by_name', 'generated_on', 'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'receipt_number', 'generated_by', 'generated_by_name',
+            'generated_on', 'created_at', 'updated_at',
+        ]
+
+
 # ============================================================
 # backend/apps/automation/serializers.py
 # ============================================================
@@ -700,6 +724,7 @@ class WhatsAppTemplateSerializer(serializers.ModelSerializer):
     class Meta:
         model = WhatsAppTemplate
         fields = ['id', 'name', 'template_type', 'template_type_display', 'message_body',
+                  'wati_template_name', 'wati_language_code',
                   'is_active', 'created_by', 'created_at', 'updated_at']
         read_only_fields = ['created_by', 'created_at', 'updated_at']
 

@@ -5,6 +5,7 @@
 import requests
 import logging
 import os
+from whatsapp_service import send_candidate_message
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'settings')
 
@@ -19,6 +20,19 @@ from rest_framework.views import APIView
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
+
+def _active_template(template_type):
+    from crm.models import WhatsAppTemplate
+    return WhatsAppTemplate.objects.filter(template_type=template_type, is_active=True).order_by('name').first()
+
+
+def _currency(value):
+    return f'Rs {float(value or 0):,.0f}'
+
+
+def _date(value):
+    return value.strftime('%d %b %Y') if hasattr(value, 'strftime') else str(value or '')
 
 
 class WhatsAppClient:
@@ -183,6 +197,152 @@ def send_followup_reminder(lead):
                  related_model='lead', related_id=lead.id)
 
 
+def send_candidate_payment_reminder(enrollment):
+    from crm.models import Payment, WhatsAppMessage, WhatsAppTemplate
+    payment = getattr(enrollment, 'payment', None)
+    if not payment or payment.status == Payment.Status.PAID:
+        return None
+    template = _active_template(WhatsAppTemplate.TemplateType.PAYMENT_REMINDER)
+    body = template.message_body if template else (
+        'Dear {{student_name}},\n\n'
+        'This is a reminder that your fee balance for {{course_name}} is {{pending_amount}}.\n\n'
+        'Please clear your dues at the earliest.\n\n'
+        'Regards,\n{{branch_name}}'
+    )
+    return send_candidate_message(
+        candidate_name=enrollment.name,
+        phone=enrollment.phone,
+        message_type=WhatsAppMessage.MsgType.PAYMENT_REMINDER,
+        message_body=body,
+        template=template,
+        values={
+            'student_name': enrollment.name,
+            'candidate_name': enrollment.name,
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else 'Indra Institute of Education',
+            'phone_number': enrollment.phone,
+            'total_fee': _currency(payment.total_fees),
+            'paid_amount': _currency(payment.paid_amount),
+            'pending_amount': _currency(payment.balance),
+            'next_payment_date': _date(payment.next_payment_date),
+            'institute_name': 'IIE',
+        },
+        related_model='enrollment',
+        related_id=enrollment.id,
+    )
+
+
+def send_candidate_birthday_wish(enrollment_or_walkin):
+    from crm.models import WhatsAppMessage, WhatsAppTemplate
+    template = _active_template(WhatsAppTemplate.TemplateType.BIRTHDAY_WISH)
+    body = template.message_body if template else (
+        'Happy Birthday, {{candidate_name}}!\n\n'
+        'Wishing you a wonderful day filled with joy and success.\n\n'
+        '-Team IIE'
+    )
+    return send_candidate_message(
+        candidate_name=enrollment_or_walkin.name,
+        phone=enrollment_or_walkin.phone,
+        message_type=WhatsAppMessage.MsgType.BIRTHDAY,
+        message_body=body,
+        template=template,
+        values={
+            'candidate_name': enrollment_or_walkin.name,
+            'student_name': enrollment_or_walkin.name,
+            'phone_number': enrollment_or_walkin.phone,
+            'institute_name': 'IIE',
+        },
+        related_model=enrollment_or_walkin.__class__.__name__.lower(),
+        related_id=enrollment_or_walkin.id,
+    )
+
+
+def send_candidate_walkin_reminder(walkin):
+    from crm.models import WhatsAppMessage, WhatsAppTemplate
+    template = _active_template(WhatsAppTemplate.TemplateType.WALKIN_FOLLOW_UP)
+    body = template.message_body if template else (
+        'Dear {{candidate_name}},\n\n'
+        'This is a reminder for your visit scheduled at {{branch_name}}.\n\n'
+        'We look forward to seeing you!\n\n'
+        'Regards,\nAdmissions Team'
+    )
+    return send_candidate_message(
+        candidate_name=walkin.name,
+        phone=walkin.phone,
+        message_type=WhatsAppMessage.MsgType.WALKIN_REMIND,
+        message_body=body,
+        template=template,
+        values={
+            'candidate_name': walkin.name,
+            'student_name': walkin.name,
+            'branch_name': walkin.branch.name if walkin.branch else 'our branch',
+            'phone_number': walkin.phone,
+            'follow_up_date': _date(getattr(walkin, 'follow_up_date', None)),
+            'institute_name': 'IIE',
+        },
+        related_model='walkin',
+        related_id=walkin.id,
+    )
+
+
+def send_candidate_lead_followup(lead):
+    from crm.models import WhatsAppMessage, WhatsAppTemplate
+    template = _active_template(WhatsAppTemplate.TemplateType.LEAD_FOLLOW_UP)
+    body = template.message_body if template else (
+        'Hi {{candidate_name}},\n\n'
+        'We noticed you enquired about {{course_name}}.\n\n'
+        'Would you like to schedule a free demo class? Reply to this message or call us.\n\n'
+        'Regards,\nAdmissions Team'
+    )
+
+
+def send_candidate_walkin_reminder_for_lead(lead):
+    from crm.models import WhatsAppMessage, WhatsAppTemplate
+    template = _active_template(WhatsAppTemplate.TemplateType.WALKIN_FOLLOW_UP)
+    body = template.message_body if template else (
+        'Dear {{candidate_name}},\n\n'
+        'Reminder: Your visit to {{branch_name}} is scheduled for {{follow_up_date}}.\n\n'
+        'Looking forward to meeting you!\n\n'
+        'Regards,\nAdmissions Team'
+    )
+    return send_candidate_message(
+        candidate_name=lead.name,
+        phone=lead.phone,
+        message_type=WhatsAppMessage.MsgType.WALKIN_REMIND,
+        message_body=body,
+        template=template,
+        values={
+            'candidate_name': lead.name,
+            'student_name': lead.name,
+            'course_name': lead.course.name if lead.course else '',
+            'branch_name': lead.branch.name if lead.branch else 'our branch',
+            'phone_number': lead.phone,
+            'follow_up_date': _date(getattr(lead, 'walkin_date', None)),
+            'institute_name': 'IIE',
+        },
+        related_model='lead',
+        related_id=lead.id,
+    )
+    return send_candidate_message(
+        candidate_name=lead.name,
+        phone=lead.phone,
+        message_type=WhatsAppMessage.MsgType.FOLLOW_UP,
+        message_body=body,
+        template=template,
+        values={
+            'candidate_name': lead.name,
+            'student_name': lead.name,
+            'course_name': lead.course.name if lead.course else 'our courses',
+            'branch_name': lead.branch.name if lead.branch else '',
+            'phone_number': lead.phone,
+            'follow_up_date': _date(getattr(lead, 'next_follow_up_date', None)),
+            'institute_name': 'IIE',
+        },
+        related_model='lead',
+        related_id=lead.id,
+    )
+
+
 # ============================================================
 # backend/apps/automation/tasks.py
 # Celery tasks — triggered by Celery Beat (scheduled) or on-demand
@@ -212,7 +372,7 @@ def send_fee_reminders_task(self):
     count = 0
     for enrollment in enrollments:
         try:
-            send_fee_reminder(enrollment)
+            send_candidate_payment_reminder(enrollment)
             count += 1
         except Exception as exc:
             logger.error(f'Fee reminder failed for {enrollment.student_number}: {exc}')
@@ -240,7 +400,7 @@ def send_birthday_wishes_task(self):
     )
     for student in students:
         try:
-            send_birthday_wish(student)
+            send_candidate_birthday_wish(student)
         except Exception as exc:
             logger.error(f'Birthday wish failed for {student.student_number}: {exc}')
 
@@ -252,7 +412,7 @@ def send_birthday_wishes_task(self):
     )
     for visitor in visitors:
         try:
-            send_birthday_wish(visitor)
+            send_candidate_birthday_wish(visitor)
         except Exception as exc:
             logger.error(f'Birthday wish failed for {visitor.candidate_number}: {exc}')
 
@@ -294,7 +454,7 @@ def send_walkin_reminders_task(self):
 
     for lead in leads:
         try:
-            send_walkin_reminder_for_lead(lead)
+            send_candidate_walkin_reminder_for_lead(lead)
         except Exception as exc:
             logger.error(f'Walk-in reminder failed for {lead.lead_number}: {exc}')
 
@@ -330,7 +490,7 @@ def send_followup_reminders_task(self):
 
     for lead in leads:
         try:
-            send_followup_reminder(lead)
+            send_candidate_lead_followup(lead)
         except Exception as exc:
             logger.error(f'Follow-up reminder failed for {lead.lead_number}: {exc}')
 

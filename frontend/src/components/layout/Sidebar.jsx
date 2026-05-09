@@ -22,6 +22,7 @@ const adminNavigation = [
   { name: 'WhatsApp Templates', href: '/admin/whatsapp-templates', short: 'WT' },
   { name: 'Branches', href: '/admin/branches', short: 'BR' },
   { name: 'Reports', href: '/admin/reports', short: 'RE' },
+  { name: 'Receipts', href: '/admin/receipts', short: 'RC' },
   { name: 'User Monitoring', href: '/admin/user-monitoring', short: 'UM' },
   { name: 'Lead Import History', href: '/admin/lead-import-history', short: 'LI' },
 ]

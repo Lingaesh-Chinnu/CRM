@@ -83,12 +83,13 @@ export default function UsersPage() {
     setMessage('')
 
     try {
-      await api.post('/users/', {
+      const payload = {
         ...form,
         branch: form.branch ? Number(form.branch) : null,
-      })
+      }
+      const { data } = await api.post('/users/', payload)
       setForm(initialForm)
-      setMessage('User created successfully.')
+      setMessage(data.detail || 'User created successfully. Login credentials sent to email.')
       await loadPage()
     } catch (error) {
       const details = error.response?.data

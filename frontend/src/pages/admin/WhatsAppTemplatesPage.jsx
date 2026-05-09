@@ -11,7 +11,14 @@ const templateTypes = [
   ['offer_message', 'Offer Message'],
 ]
 
-const initialForm = { name: '', template_type: 'lead_follow_up', message_body: '', is_active: true }
+const initialForm = {
+  name: '',
+  template_type: 'lead_follow_up',
+  message_body: '',
+  wati_template_name: '',
+  wati_language_code: 'en',
+  is_active: true,
+}
 
 export default function WhatsAppTemplatesPage() {
   const [templates, setTemplates] = useState([])
@@ -46,6 +53,8 @@ export default function WhatsAppTemplatesPage() {
       name: template.name,
       template_type: template.template_type,
       message_body: template.message_body,
+      wati_template_name: template.wati_template_name || '',
+      wati_language_code: template.wati_language_code || 'en',
       is_active: template.is_active,
     })
   }
@@ -67,6 +76,8 @@ export default function WhatsAppTemplatesPage() {
             <select value={form.template_type} onChange={(event) => setForm({ ...form, template_type: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               {templateTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
+            <input value={form.wati_template_name} onChange={(event) => setForm({ ...form, wati_template_name: event.target.value })} placeholder="WATI approved template name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+            <input value={form.wati_language_code} onChange={(event) => setForm({ ...form, wati_language_code: event.target.value })} placeholder="WATI language code" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
             <textarea value={form.message_body} onChange={(event) => setForm({ ...form, message_body: event.target.value })} placeholder="Message body" required className="min-h-[180px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
             <label className="flex items-center gap-3 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} />
@@ -84,6 +95,9 @@ export default function WhatsAppTemplatesPage() {
                   <div>
                     <p className="font-bold text-slate-950">{template.name}</p>
                     <p className="text-sm text-slate-500">{template.template_type_display}</p>
+                    {template.wati_template_name && (
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">WATI: {template.wati_template_name}</p>
+                    )}
                   </div>
                   <button onClick={() => edit(template)} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white">Edit</button>
                 </div>

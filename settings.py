@@ -303,12 +303,19 @@ WHATSAPP_PHONE_ID    = os.environ.get('WHATSAPP_PHONE_ID', '')
 WHATSAPP_API_VERSION = 'v18.0'
 WHATSAPP_API_URL     = f'https://graph.facebook.com/{WHATSAPP_API_VERSION}/{WHATSAPP_PHONE_ID}/messages'
 WHATSAPP_VERIFY_TOKEN= os.environ.get('WHATSAPP_VERIFY_TOKEN', 'my_verify_token')
+WATI_API_URL         = os.environ.get('WATI_API_URL', '').rstrip('/')
+WATI_ACCESS_TOKEN    = os.environ.get('WATI_ACCESS_TOKEN', '')
+WATI_INSTANCE_ID     = os.environ.get('WATI_INSTANCE_ID', '')
+DEFAULT_WHATSAPP_COUNTRY_CODE = os.environ.get('DEFAULT_WHATSAPP_COUNTRY_CODE', '91')
 
 # ── Email ─────────────────────────────────────────────────────
-EMAIL_BACKEND   = 'django_ses.SESBackend'
-AWS_SES_REGION_NAME     = os.environ.get('AWS_SES_REGION_NAME', 'ap-south-1')
-AWS_SES_REGION_ENDPOINT = f'email.{AWS_SES_REGION_NAME}.amazonaws.com'
-DEFAULT_FROM_EMAIL      = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@yourcrm.com')
+EMAIL_BACKEND        = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST           = os.environ.get('EMAIL_HOST', '')
+EMAIL_PORT           = int(os.environ.get('EMAIL_PORT', '587'))
+EMAIL_HOST_USER      = os.environ.get('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD  = os.environ.get('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS        = env_bool('EMAIL_USE_TLS', True)
+DEFAULT_FROM_EMAIL   = os.environ.get('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER or 'noreply@yourcrm.com')
 
 # ── Localisation ──────────────────────────────────────────────
 LANGUAGE_CODE = 'en-us'

@@ -13,12 +13,12 @@ if getattr(settings, 'HAS_DRF_SPECTACULAR', False):
     )
 
 from views import (
-    LoginView, LogoutView, MeView,
+    LoginView, LogoutView, MeView, ChangePasswordView,
     BranchViewSet, UserViewSet, UserTargetViewSet, BranchTargetViewSet,
     HistoricalAnalyticsEntryViewSet,
     CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, DiscountViewSet,
-    LeadImportView, LeadImportHistoryViewSet,
+    AdminReceiptViewSet, LeadImportView, LeadImportHistoryViewSet,
     ExternalLeadCaptureView, NotificationViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
@@ -44,12 +44,14 @@ router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'installments', PaymentInstallmentViewSet, basename='installment')
+router.register(r'admin-receipts', AdminReceiptViewSet, basename='admin-receipt')
 
 api_urlpatterns = [
     path('auth/login/', LoginView.as_view(), name='login'),
     path('auth/logout/', LogoutView.as_view(), name='logout'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/me/', MeView.as_view(), name='me'),
+    path('auth/change-password/', ChangePasswordView.as_view(), name='change-password'),
     path('auth/heartbeat/', SessionHeartbeatView.as_view(), name='heartbeat'),
 
     path('leads/import/', LeadImportView.as_view(), name='lead-import'),
@@ -81,7 +83,7 @@ urlpatterns = [
     path('rules-signed-pdf/<int:enrollment_id>/', RulesSignedPdfView.as_view(), name='rules_signed_pdf'),
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
-    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|user-monitoring|lead-import-history)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
+    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),
 ]
