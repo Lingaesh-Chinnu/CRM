@@ -15,13 +15,17 @@ User = get_user_model()
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Adds user info payload to JWT tokens."""
 
+    @staticmethod
+    def effective_role(user):
+        return User.Role.SUPER_ADMIN if user.is_super_admin else user.role
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
         # Custom claims injected into the JWT payload
         token['username']  = user.username
         token['full_name'] = user.full_name
-        token['role']      = user.role
+        token['role']      = cls.effective_role(user)
         token['branch_id'] = user.branch_id
         return token
 
@@ -33,7 +37,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'username':   self.user.username,
             'full_name':  self.user.full_name,
             'email':      self.user.email,
-            'role':       self.user.role,
+            'role':       self.effective_role(self.user),
             'branch_id':  self.user.branch_id,
             'branch_name': self.user.branch.name if self.user.branch else None,
             'must_change_password': self.user.must_change_password,
@@ -74,6 +78,12 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_full_name(self, obj):
         return obj.full_name
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.is_super_admin:
+            data['role'] = User.Role.SUPER_ADMIN
+        return data
 
     def create(self, validated_data):
         password = validated_data.pop('password')

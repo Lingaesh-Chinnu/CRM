@@ -76,6 +76,13 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('role', User.Role.SUPER_ADMIN)
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
+        if extra_fields.get('role') != User.Role.SUPER_ADMIN:
+            raise ValueError('Superuser must have role=super_admin')
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Superuser must have is_staff=True')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Superuser must have is_superuser=True')
         return self.create_user(username, email, password, **extra_fields)
 
 
@@ -113,7 +120,13 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
 
     @property
     def is_super_admin(self):
-        return self.role == self.Role.SUPER_ADMIN
+        return self.role == self.Role.SUPER_ADMIN or self.is_superuser
+
+    def save(self, *args, **kwargs):
+        if self.is_superuser:
+            self.role = self.Role.SUPER_ADMIN
+            self.is_staff = True
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f'{self.username} ({self.get_role_display()})'
