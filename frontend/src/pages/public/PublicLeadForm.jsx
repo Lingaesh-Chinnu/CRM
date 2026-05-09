@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 import brandLogo from '../../assets/brand-logo.png'
 
@@ -18,6 +18,13 @@ function FieldLabel({ children }) {
 }
 
 export default function PublicLeadForm() {
+  const queryDefaults = useMemo(() => {
+    const params = new URLSearchParams(window.location.search)
+    return {
+      courseName: (params.get('course') || '').trim().toLowerCase(),
+      branchName: (params.get('branch') || '').trim().toLowerCase(),
+    }
+  }, [])
   const [form, setForm] = useState(initialForm)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
@@ -28,12 +35,26 @@ export default function PublicLeadForm() {
 
   useEffect(() => {
     api.get('/public/lead-form/').then(({ data }) => {
-      setBranches(data.branches || [])
-      setCourses(data.courses || [])
+      const branchOptions = data.branches || []
+      const courseOptions = data.courses || []
+      setBranches(branchOptions)
+      setCourses(courseOptions)
       setWillingToJoinOptions(data.willing_to_join_options || [])
       setQualificationOptions(data.qualification_options || [])
+      setForm((current) => {
+        const next = { ...current }
+        if (!next.branch && queryDefaults.branchName) {
+          const matchedBranch = branchOptions.find((branch) => branch.name.trim().toLowerCase() === queryDefaults.branchName)
+          if (matchedBranch) next.branch = matchedBranch.id
+        }
+        if (!next.course_interested && queryDefaults.courseName) {
+          const matchedCourse = courseOptions.find((course) => course.name.trim().toLowerCase() === queryDefaults.courseName)
+          if (matchedCourse) next.course_interested = matchedCourse.id
+        }
+        return next
+      })
     })
-  }, [])
+  }, [queryDefaults])
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -46,7 +67,11 @@ export default function PublicLeadForm() {
     try {
       const { data } = await api.post('/public/lead-form/', form)
       setMessage(data.detail || 'Thank you! Our team will contact you shortly.')
-      setForm(initialForm)
+      setForm((current) => ({
+        ...initialForm,
+        branch: current.branch,
+        course_interested: current.course_interested,
+      }))
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to submit your enquiry.')
     } finally {

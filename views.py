@@ -2028,6 +2028,13 @@ class PublicLeadFormView(APIView):
             created_by=None,
             assigned_to=None,
         )
+        notify_branch_users(
+            branch,
+            'New website lead assigned',
+            f'{lead.name} submitted a website enquiry for {course.name}.',
+            Notification.NType.INFO,
+            f'/leads/{lead.id}',
+        )
         return Response({
             'id': lead.id,
             'detail': 'Thank you! Our team will contact you shortly.',
