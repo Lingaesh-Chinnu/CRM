@@ -291,12 +291,30 @@ class LeadListSerializer(serializers.ModelSerializer):
     assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
-
     class Meta:
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name',
                   'status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to_name','branch_name','created_at']
+
+
+class LeadInboxSerializer(serializers.ModelSerializer):
+    course_name = serializers.CharField(source='course.name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    source_display = serializers.CharField(source='get_source_display', read_only=True)
+    willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
+    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
+
+    class Meta:
+        model = Lead
+        fields = [
+            'id', 'lead_number', 'name', 'phone', 'branch_name',
+            'course_name', 'source', 'source_display', 'status',
+            'qualification', 'qualification_display',
+            'willing_to_join', 'willing_to_join_display',
+            'external_course_interested', 'external_message',
+            'is_duplicate', 'created_at',
+        ]
 
 
 class LeadDetailSerializer(serializers.ModelSerializer):
@@ -307,6 +325,8 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     created_by_name  = serializers.CharField(source='created_by.full_name', read_only=True)
     converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
     source_display   = serializers.CharField(source='get_source_display', read_only=True)
+    willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
+    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
     follow_ups       = serializers.SerializerMethodField()
 
     class Meta:

@@ -52,6 +52,7 @@ import WhatsAppTemplatesPage from './pages/admin/WhatsAppTemplatesPage'
 
 // Public
 import PublicWalkInForm from './pages/public/PublicWalkInForm'
+import PublicLeadForm from './pages/public/PublicLeadForm'
 import RulesSigningPage from './pages/public/RulesSigningPage'
 
 function RootRedirect() {
@@ -82,6 +83,7 @@ export default function App() {
       <Route path="/login"             element={<LoginPage />} />
       <Route path="/change-password"   element={<PrivateRoute><ChangePasswordPage /></PrivateRoute>} />
       <Route path="/public/walk-in"    element={<PublicWalkInForm />} />
+      <Route path="/lead-form"         element={<PublicLeadForm />} />
       <Route path="/IIE-Rules-Regulations/:token" element={<RulesSigningPage />} />
       <Route path="/rules-sign/:token" element={<RulesSigningPage />} />
 

@@ -38,10 +38,23 @@ export default function LeadInboxPage() {
         ) : (
           <div className="divide-y divide-slate-200">
             {leads.map((lead) => (
-              <div key={lead.id} className="grid gap-4 px-6 py-5 md:grid-cols-[1.3fr_1fr_1fr_auto] md:items-center">
+              <div key={lead.id} className="grid gap-4 px-6 py-5 md:grid-cols-[1.5fr_1fr_1fr_auto] md:items-center">
                 <div>
-                  <p className="font-bold text-slate-950">{lead.name}</p>
-                  <p className="text-sm text-slate-500">{lead.phone} | {lead.course_name || 'No course'} | {lead.source_display || lead.source}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-bold text-slate-950">{lead.name}</p>
+                    {lead.is_duplicate && (
+                      <span className="rounded-full bg-amber-100 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-700">
+                        Duplicate
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {lead.phone} | {lead.course_name || lead.external_course_interested || 'No course'} | {lead.source_display || lead.source}
+                  </p>
+                  {lead.external_message && (
+                    <p className="mt-2 line-clamp-2 text-sm text-slate-600">{lead.external_message}</p>
+                  )}
+                  <p className="mt-1 text-xs text-slate-400">{new Date(lead.created_at).toLocaleString('en-IN')}</p>
                 </div>
                 <select onChange={(event) => assignBranch(lead.id, event.target.value)} defaultValue="" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                   <option value="">Assign branch</option>

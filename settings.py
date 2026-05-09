@@ -244,7 +244,10 @@ REST_FRAMEWORK: dict = {  # type: ignore
     'PAGE_SIZE':                  25,
     'DEFAULT_RENDERER_CLASSES':   ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_THROTTLE_CLASSES':   ['rest_framework.throttling.UserRateThrottle'],
-    'DEFAULT_THROTTLE_RATES':     {'user': '1000/hour'},
+    'DEFAULT_THROTTLE_RATES':     {
+        'user': '1000/hour',
+        'public_lead_form': os.environ.get('PUBLIC_LEAD_FORM_RATE', '10/hour'),
+    },
 }
 
 if HAS_DRF_SPECTACULAR:
@@ -307,6 +310,7 @@ WATI_API_URL         = os.environ.get('WATI_API_URL', '').rstrip('/')
 WATI_ACCESS_TOKEN    = os.environ.get('WATI_ACCESS_TOKEN', '')
 WATI_INSTANCE_ID     = os.environ.get('WATI_INSTANCE_ID', '')
 DEFAULT_WHATSAPP_COUNTRY_CODE = os.environ.get('DEFAULT_WHATSAPP_COUNTRY_CODE', '91')
+LEAD_CAPTURE_API_KEY = os.environ.get('LEAD_CAPTURE_API_KEY', '')
 
 # ── Email ─────────────────────────────────────────────────────
 EMAIL_BACKEND        = 'django.core.mail.backends.smtp.EmailBackend'

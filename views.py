@@ -36,6 +36,7 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -59,6 +60,7 @@ from decimal import Decimal
 from pathlib import Path
 import base64
 import io
+import logging
 import re
 import zipfile
 from whatsapp_service import send_candidate_message
@@ -80,6 +82,7 @@ from serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def app_url(path):
@@ -324,6 +327,44 @@ def duplicate_phone_exists(new_phone, record_type, record_id):
             if normalize_phone_number(phone) == new_phone:
                 return True
     return False
+
+
+def matching_candidate_phone_records(phone):
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return []
+    records = []
+    for lead in Lead.objects.select_related('branch', 'course'):
+        if normalize_phone_number(lead.phone) == normalized:
+            records.append({
+                'type': 'Lead',
+                'id': lead.id,
+                'name': lead.name,
+                'branch_name': lead.branch.name if lead.branch else 'Unassigned',
+                'course_name': lead.course.name if lead.course else '',
+                'url': f'/leads/{lead.id}',
+            })
+    for walkin in WalkIn.objects.select_related('branch', 'course'):
+        if normalize_phone_number(walkin.phone) == normalized:
+            records.append({
+                'type': 'Walk-in',
+                'id': walkin.id,
+                'name': walkin.name,
+                'branch_name': walkin.branch.name if walkin.branch else '',
+                'course_name': walkin.course.name if walkin.course else '',
+                'url': f'/walkins/{walkin.id}',
+            })
+    for enrollment in Enrollment.objects.select_related('branch', 'course'):
+        if normalize_phone_number(enrollment.phone) == normalized:
+            records.append({
+                'type': 'Student',
+                'id': enrollment.id,
+                'name': enrollment.name,
+                'branch_name': enrollment.branch.name if enrollment.branch else '',
+                'course_name': enrollment.course.name if enrollment.course else '',
+                'url': f'/students/{enrollment.id}',
+            })
+    return records
 
 
 class PhoneNumberUpdateView(APIView):
@@ -1182,7 +1223,7 @@ class DiscountViewSet(viewsets.ModelViewSet):
 from crm.models import FollowUp, Lead, LeadImportHistory
 from serializers import (
     FollowUpSerializer, LeadListSerializer, LeadDetailSerializer,
-    LeadStaffUpdateSerializer, LeadImportHistorySerializer
+    LeadStaffUpdateSerializer, LeadImportHistorySerializer, LeadInboxSerializer
 )
 import django_filters
 import csv
@@ -1534,7 +1575,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'], url_path='admin-inbox', permission_classes=[IsSuperAdmin])
     def admin_inbox(self, request):
         queryset = Lead.objects.filter(branch__isnull=True).select_related('course', 'created_by').order_by('-created_at')
-        return Response(LeadListSerializer(queryset, many=True).data)
+        return Response(LeadInboxSerializer(queryset, many=True).data)
 
     @action(detail=True, methods=['post'], url_path='assign-branch')
     def assign_branch(self, request, pk=None):
@@ -1800,26 +1841,65 @@ class ExternalLeadCaptureView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
+        configured_key = getattr(settings, 'LEAD_CAPTURE_API_KEY', '')
+        supplied_key = request.headers.get('X-API-KEY') or request.query_params.get('key')
+        if not configured_key or supplied_key != configured_key:
+            logger.warning(
+                'Rejected external lead capture attempt from %s. API key missing or invalid.',
+                get_client_ip(request),
+            )
+            return Response({'detail': 'Invalid API key.'}, status=status.HTTP_403_FORBIDDEN)
+
         data = request.data
-        phone = str(data.get('phone') or data.get('phone_number') or '').strip()
-        name = str(data.get('name') or data.get('candidate_name') or '').strip()
-        if not name or not phone:
+        raw_phone = str(data.get('phone_number') or data.get('phone') or '').strip()
+        phone_digits = normalize_phone_number(raw_phone)
+        if phone_digits.startswith('0') and len(phone_digits) == 11:
+            phone_digits = phone_digits[1:]
+        if phone_digits.startswith('91') and len(phone_digits) == 12:
+            phone_digits = phone_digits[2:]
+        name = str(data.get('candidate_name') or data.get('name') or '').strip()
+        if not name or not phone_digits:
             return Response({'detail': 'Candidate name and phone number are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(phone_digits) != 10:
+            return Response({'detail': 'Phone number must be a valid 10 digit Indian mobile number.'}, status=status.HTTP_400_BAD_REQUEST)
+
         course = None
-        course_name = str(data.get('course') or data.get('course_name') or '').strip()
+        course_name = str(data.get('course_interested') or data.get('course') or data.get('course_name') or '').strip()
         if course_name:
             course = Course.objects.filter(name__iexact=course_name, is_active=True).first()
-        source_value = data.get('source') or 'others'
-        valid_sources = {value for value, _ in Lead.Source.choices}
+        source_label = str(data.get('source') or 'website').strip().lower()
+        source_map = {
+            'website': Lead.Source.WEBSITE,
+            'google': Lead.Source.GOOGLE,
+            'justdial': Lead.Source.JUSTDIAL,
+        }
+        source_value = source_map.get(source_label)
+        if not source_value:
+            return Response({'detail': 'Source must be Website, Google, or Justdial.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        duplicate_records = matching_candidate_phone_records(phone_digits)
+        message = str(data.get('message') or '').strip()
+        duplicate_note = ''
+        if duplicate_records:
+            duplicate_note = 'Duplicate phone found in CRM: ' + '; '.join(
+                f"{item['type']} #{item['id']} {item['name']} ({item['branch_name']})"
+                for item in duplicate_records[:5]
+            )
+        remarks = '\n'.join(part for part in [message, duplicate_note] if part)
+
         lead = Lead.objects.create(
             name=name,
-            phone=phone,
+            phone=phone_digits,
             email=data.get('email', ''),
             location=data.get('location', ''),
             course=course,
-            source=source_value if source_value in valid_sources else Lead.Source.OTHERS,
-            remarks=data.get('remarks', ''),
+            source=source_value,
+            status=Lead.Status.NEW,
             branch=None,
+            remarks=remarks,
+            external_course_interested=course_name,
+            external_message=message,
+            is_duplicate=bool(duplicate_records),
             assigned_to=None,
             created_by=None,
         )
@@ -1831,8 +1911,127 @@ class ExternalLeadCaptureView(APIView):
                 Notification.NType.INFO,
                 f'/leads/{lead.id}',
             )
-        duplicate_response = LeadViewSet().duplicate_check(request)._data if False else None
-        return Response({'id': lead.id, 'lead_number': lead.lead_number}, status=status.HTTP_201_CREATED)
+        return Response({
+            'id': lead.id,
+            'lead_number': lead.lead_number,
+            'duplicate': bool(duplicate_records),
+            'duplicate_records': duplicate_records,
+            'detail': 'Lead captured and added to Admin Lead Inbox.',
+        }, status=status.HTTP_201_CREATED)
+
+
+class PublicLeadFormThrottle(ScopedRateThrottle):
+    scope = 'public_lead_form'
+
+
+class PublicLeadFormView(APIView):
+    """GET/POST /api/public/lead-form/ - public website lead capture."""
+    permission_classes = [AllowAny]
+    throttle_classes = [PublicLeadFormThrottle]
+
+    willing_to_join_options = [
+        {'value': Lead.WillingToJoin.WITHIN_MONTH, 'label': 'Within a month'},
+        {'value': Lead.WillingToJoin.MONTH_LATER, 'label': 'A month later'},
+        {'value': Lead.WillingToJoin.JUST_ENQUIRY, 'label': 'Just enquiry'},
+    ]
+    qualification_options = [
+        {'value': Lead.Qualification.SCHOOL_STUDENT, 'label': 'School Student'},
+        {'value': Lead.Qualification.COLLEGE_STUDENT, 'label': 'College Student'},
+        {'value': Lead.Qualification.GRADUATE, 'label': 'Graduate'},
+        {'value': Lead.Qualification.HOUSEWIFE, 'label': 'Housewife'},
+        {'value': Lead.Qualification.WORKING_PROFESSIONAL, 'label': 'Working Professional'},
+    ]
+
+    def get(self, request):
+        branches = Branch.objects.filter(
+            is_active=True,
+            name__in=['Gandhipuram', 'Hopes', 'Kuniyamuthur'],
+        ).order_by('name')
+        courses = Course.objects.filter(is_active=True).order_by('name')
+        return Response({
+            'branches': BranchSerializer(branches, many=True).data,
+            'courses': [{'id': course.id, 'name': course.name} for course in courses],
+            'willing_to_join_options': self.willing_to_join_options,
+            'qualification_options': self.qualification_options,
+        })
+
+    def post(self, request):
+        if request.data.get('company'):
+            return Response({'detail': 'Spam detected.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        name = str(request.data.get('full_name') or '').strip()
+        phone = normalize_phone_number(request.data.get('mobile_number'))
+        city = str(request.data.get('city') or '').strip()
+        qualification = str(request.data.get('qualification') or '').strip()
+        willing_to_join = str(request.data.get('willing_to_join') or '').strip()
+        branch_id = request.data.get('branch')
+        course_id = request.data.get('course_interested')
+
+        if not name or not phone:
+            return Response({'detail': 'Full Name and Mobile Number are required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(phone) == 12 and phone.startswith('91'):
+            phone = phone[2:]
+        if len(phone) != 10:
+            return Response({'detail': 'Mobile Number must be a valid 10 digit Indian number.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if branch_id in (None, ''):
+            return Response({'detail': 'Please select a valid branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        if course_id in (None, ''):
+            return Response({'detail': 'Please select a valid course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        branch = Branch.objects.filter(pk=branch_id, is_active=True).first()
+        if not branch:
+            return Response({'detail': 'Please select a valid branch.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        course = Course.objects.filter(pk=course_id, is_active=True).first()
+        if not course:
+            return Response({'detail': 'Please select a valid course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        valid_join = {item['value'] for item in self.willing_to_join_options}
+        valid_qualification = {item['value'] for item in self.qualification_options}
+        if willing_to_join not in valid_join:
+            return Response({'detail': 'Please select when willing to join.'}, status=status.HTTP_400_BAD_REQUEST)
+        if qualification not in valid_qualification:
+            return Response({'detail': 'Please select qualification.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        duplicate_records = matching_candidate_phone_records(phone)
+        existing_lead = Lead.objects.filter(phone=phone).order_by('-updated_at', '-created_at').first()
+        if existing_lead:
+            existing_lead.next_follow_up_date = timezone.localdate()
+            existing_lead.is_duplicate = True
+            existing_lead.external_message = 'Duplicate public website lead submission.'
+            existing_lead.save(update_fields=['next_follow_up_date', 'is_duplicate', 'external_message', 'updated_at'])
+            return Response({
+                'duplicate': True,
+                'detail': 'Thank you! Our team will contact you shortly.',
+                'lead_id': existing_lead.id,
+            }, status=status.HTTP_200_OK)
+
+        if duplicate_records:
+            return Response({
+                'duplicate': True,
+                'detail': 'Thank you! Our team will contact you shortly.',
+                'records': duplicate_records,
+            }, status=status.HTTP_200_OK)
+
+        lead = Lead.objects.create(
+            name=name,
+            phone=phone,
+            location=city,
+            course=course,
+            branch=branch,
+            status=Lead.Status.NEW,
+            source=Lead.Source.WEBSITE,
+            qualification=qualification,
+            willing_to_join=willing_to_join,
+            remarks='Public website lead form submission.',
+            created_by=None,
+            assigned_to=None,
+        )
+        return Response({
+            'id': lead.id,
+            'detail': 'Thank you! Our team will contact you shortly.',
+        }, status=status.HTTP_201_CREATED)
 
 
 class NotificationViewSet(viewsets.ModelViewSet):

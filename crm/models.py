@@ -296,6 +296,7 @@ class Lead(TimeStampedModel):
 
     class Source(models.TextChoices):
         GOOGLE            = 'google',            'Google'
+        WEBSITE           = 'website',           'Website'
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
         WHATSAPP          = 'whatsapp',          'Whatsapp'
@@ -308,6 +309,18 @@ class Lead(TimeStampedModel):
         WEEKDAY_MORNING = 'weekday_morning', 'Weekdays (Morning)'
         WEEKDAY_EVENING = 'weekday_evening', 'Weekdays (Evening)'
         WEEKENDS = 'weekends', 'Weekends'
+
+    class WillingToJoin(models.TextChoices):
+        WITHIN_MONTH = 'within_month', 'Within a month'
+        MONTH_LATER = 'month_later', 'A month later'
+        JUST_ENQUIRY = 'just_enquiry', 'Just enquiry'
+
+    class Qualification(models.TextChoices):
+        SCHOOL_STUDENT = 'school_student', 'School Student'
+        COLLEGE_STUDENT = 'college_student', 'College Student'
+        GRADUATE = 'graduate', 'Graduate'
+        HOUSEWIFE = 'housewife', 'Housewife'
+        WORKING_PROFESSIONAL = 'working_professional', 'Working Professional'
 
     lead_number = models.CharField(max_length=20, unique=True, editable=False)
     assigned_to = models.ForeignKey(User,   null=True, blank=True, on_delete=models.SET_NULL,
@@ -325,10 +338,15 @@ class Lead(TimeStampedModel):
     email       = models.EmailField(blank=True)
     location    = models.CharField(max_length=200, blank=True)
     pincode     = models.CharField(max_length=10, blank=True)
+    qualification = models.CharField(max_length=30, choices=Qualification.choices, blank=True)
+    willing_to_join = models.CharField(max_length=20, choices=WillingToJoin.choices, blank=True)
     preferred_timing = models.CharField(max_length=30, choices=PreferredTiming.choices, blank=True)
     walkin_date = models.DateField(null=True, blank=True)
     next_follow_up_date = models.DateField(null=True, blank=True)
     remarks     = models.TextField(blank=True)
+    external_course_interested = models.CharField(max_length=200, blank=True)
+    external_message = models.TextField(blank=True)
+    is_duplicate = models.BooleanField(default=False, db_index=True)
     status      = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW, db_index=True)
     source      = models.CharField(max_length=20, choices=Source.choices, default=Source.GOOGLE)
     converted_to_type = models.CharField(max_length=20, blank=True)

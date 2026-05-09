@@ -1,0 +1,219 @@
+import { useEffect, useState } from 'react'
+import { api } from '../../services/api'
+import brandLogo from '../../assets/brand-logo.png'
+
+const initialForm = {
+  full_name: '',
+  mobile_number: '',
+  course_interested: '',
+  willing_to_join: '',
+  qualification: '',
+  city: '',
+  branch: '',
+  company: '',
+}
+
+function FieldLabel({ children }) {
+  return <label className="mb-2 block text-sm font-semibold text-slate-700">{children}</label>
+}
+
+export default function PublicLeadForm() {
+  const [form, setForm] = useState(initialForm)
+  const [branches, setBranches] = useState([])
+  const [courses, setCourses] = useState([])
+  const [willingToJoinOptions, setWillingToJoinOptions] = useState([])
+  const [qualificationOptions, setQualificationOptions] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    api.get('/public/lead-form/').then(({ data }) => {
+      setBranches(data.branches || [])
+      setCourses(data.courses || [])
+      setWillingToJoinOptions(data.willing_to_join_options || [])
+      setQualificationOptions(data.qualification_options || [])
+    })
+  }, [])
+
+  const updateField = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post('/public/lead-form/', form)
+      setMessage(data.detail || 'Thank you! Our team will contact you shortly.')
+      setForm(initialForm)
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to submit your enquiry.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[linear-gradient(180deg,#e0f2fe_0%,#f8fafc_30%,#fff7ed_100%)] px-4 py-10 sm:px-8">
+      <div className="mx-auto max-w-6xl">
+        <div className="grid gap-8 lg:grid-cols-[0.95fr_1.05fr]">
+          <section className="overflow-hidden rounded-[32px] border border-sky-100 bg-slate-950 text-white shadow-[0_30px_80px_-35px_rgba(15,23,42,0.9)]">
+            <div className="bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.28),transparent_30%),radial-gradient(circle_at_bottom_right,rgba(249,115,22,0.24),transparent_32%)] px-8 py-10 md:px-10">
+              <div className="flex items-center gap-4">
+                <div className="flex h-20 w-20 items-center justify-center rounded-3xl border border-white/10 bg-white/10">
+                  <img src={brandLogo} alt="IIE Logo" className="h-16 w-16 object-contain" />
+                </div>
+                <div>
+                  <p className="text-2xl font-black tracking-tight">Indra Institute of Education</p>
+                  <p className="mt-1 text-sm text-slate-300">Course enquiry form</p>
+                </div>
+              </div>
+
+              <p className="mt-10 text-xs font-semibold uppercase tracking-[0.32em] text-sky-300">Lead Capture</p>
+              <h1 className="mt-4 text-4xl font-black tracking-tight">Start your enquiry with the right branch.</h1>
+              <p className="mt-5 max-w-xl text-base leading-8 text-slate-300">
+                Share your course interest and preferred joining timeline. Your selected branch team will receive the lead directly and follow up with you shortly.
+              </p>
+
+              <div className="mt-10 grid gap-4 sm:grid-cols-3">
+                {['Gandhipuram', 'Hopes', 'Kuniyamuthur'].map((branchName) => (
+                  <div key={branchName} className="rounded-3xl border border-white/10 bg-white/10 px-4 py-5">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Branch</p>
+                    <p className="mt-3 text-lg font-bold tracking-tight text-white">{branchName}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[32px] border border-slate-200 bg-white p-7 shadow-[0_30px_80px_-35px_rgba(15,23,42,0.25)] sm:p-10">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Public Lead Form</p>
+                <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Register your enquiry</h2>
+              </div>
+              <div className="rounded-full bg-sky-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">
+                IIE
+              </div>
+            </div>
+
+            <form onSubmit={submit} className="mt-8 grid gap-5 md:grid-cols-2">
+              <div className="md:col-span-2">
+                <FieldLabel>Full Name</FieldLabel>
+                <input
+                  value={form.full_name}
+                  onChange={(event) => updateField('full_name', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel>Mobile Number</FieldLabel>
+                <input
+                  value={form.mobile_number}
+                  onChange={(event) => updateField('mobile_number', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                  inputMode="numeric"
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel>Select Branch</FieldLabel>
+                <select
+                  value={form.branch}
+                  onChange={(event) => updateField('branch', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                  required
+                >
+                  <option value="">Select branch</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>Course Interested</FieldLabel>
+                <select
+                  value={form.course_interested}
+                  onChange={(event) => updateField('course_interested', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                >
+                  <option value="">Select course</option>
+                  {courses.map((course) => (
+                    <option key={course.id} value={course.id}>{course.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>When willing to join</FieldLabel>
+                <select
+                  value={form.willing_to_join}
+                  onChange={(event) => updateField('willing_to_join', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                  required
+                >
+                  <option value="">Select option</option>
+                  {willingToJoinOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>Qualification</FieldLabel>
+                <select
+                  value={form.qualification}
+                  onChange={(event) => updateField('qualification', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                  required
+                >
+                  <option value="">Select qualification</option>
+                  {qualificationOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>City</FieldLabel>
+                <input
+                  value={form.city}
+                  onChange={(event) => updateField('city', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-sky-400 focus:bg-white focus:ring-4 focus:ring-sky-100"
+                />
+              </div>
+
+              <div className="hidden" aria-hidden="true">
+                <FieldLabel>Company</FieldLabel>
+                <input
+                  tabIndex="-1"
+                  autoComplete="off"
+                  value={form.company}
+                  onChange={(event) => updateField('company', event.target.value)}
+                />
+              </div>
+
+              {message && (
+                <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-700">
+                  {message}
+                </div>
+              )}
+
+              <button
+                disabled={saving}
+                className="md:col-span-2 rounded-2xl bg-slate-950 px-4 py-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                {saving ? 'Submitting...' : 'Submit Enquiry'}
+              </button>
+            </form>
+          </section>
+        </div>
+      </div>
+    </div>
+  )
+}

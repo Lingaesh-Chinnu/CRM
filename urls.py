@@ -24,7 +24,7 @@ from views import (
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
     ExportLeadsExcelView, ExportEnrollmentsExcelView,
     UserPerformanceReportView, UserRatingReportView, ConversionFunnelReportView,
-    BranchPerformanceComparisonReportView, PublicWalkInFormView, PublicRulesSigningView,
+    BranchPerformanceComparisonReportView, PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
     RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView,
 )
@@ -55,7 +55,8 @@ api_urlpatterns = [
     path('auth/heartbeat/', SessionHeartbeatView.as_view(), name='heartbeat'),
 
     path('leads/import/', LeadImportView.as_view(), name='lead-import'),
-    path('external/leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),
+    path('external-leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),
+    path('external/leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture-legacy'),
     path('', include(router.urls)),
 
     path('dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),
@@ -74,6 +75,7 @@ api_urlpatterns = [
     path('phone-numbers/<str:record_type>/<int:record_id>/', PhoneNumberUpdateView.as_view(), name='phone-number-update'),
 
     path('public/walkin/', PublicWalkInFormView.as_view(), name='public-walkin'),
+    path('public/lead-form/', PublicLeadFormView.as_view(), name='public-lead-form'),
     path('public/rules-sign/<uuid:token>/', PublicRulesSigningView.as_view(), name='public-rules-sign'),
 ]
 
