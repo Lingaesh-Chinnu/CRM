@@ -138,11 +138,10 @@ export default function PublicLeadForm() {
 
           <div className="pr-12">
             <div className="flex items-center gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-3xl border border-sky-100 bg-sky-50">
-                <img src={brandLogo} alt="IIE Logo" className="h-12 w-12 object-contain" />
+              <div className="flex h-20 w-20 items-center justify-center rounded-[22px] border border-sky-200/30 bg-[#07142b] p-3 shadow-[0_16px_36px_-20px_rgba(14,165,233,0.55),0_10px_24px_-18px_rgba(7,20,43,0.9)]">
+                <img src={brandLogo} alt="IIE Logo" className="h-full w-full object-contain" />
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Public Lead Form</p>
                 <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Get a Call from our Team</h2>
               </div>
             </div>
