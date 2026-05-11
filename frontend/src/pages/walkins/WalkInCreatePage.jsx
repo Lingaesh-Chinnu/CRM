@@ -23,6 +23,14 @@ const initialForm = {
   remarks: '',
 }
 
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
+
 function FieldLabel({ children }) {
   return <label className="mb-2 block text-sm font-semibold text-slate-700">{children}</label>
 }
@@ -92,9 +100,12 @@ export default function WalkInCreatePage() {
           <input placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           <input placeholder="Pincode" value={form.pincode} onChange={(event) => setForm({ ...form, pincode: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           <textarea value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} placeholder="Address" className="md:col-span-2 min-h-[110px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input placeholder="Qualification" value={form.qualification} onChange={(event) => setForm({ ...form, qualification: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <select value={form.qualification} onChange={(event) => setForm({ ...form, qualification: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <option value="">Qualification</option>
+            {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
           <input
-            placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)"
+            placeholder="Example: BCA, B.Com, BE CSE, MBA"
             value={form.degree}
             onChange={(event) => setForm({ ...form, degree: event.target.value })}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"

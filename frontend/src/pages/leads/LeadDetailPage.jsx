@@ -29,6 +29,19 @@ const requiredLabels = {
   actual_fees: 'Course Fees',
 }
 
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
+
+function qualificationSelectOptions(value) {
+  if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
+  return [{ value, label: value }, ...qualificationOptions]
+}
+
 function buildConversionForm(lead) {
   return {
     name: lead?.name || '',
@@ -332,11 +345,14 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           {!isEnrollment && (
             <>
               <div>
-                <input value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} placeholder="Qualification" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                  <option value="">Qualification</option>
+                  {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
                 {errorFor('qualification')}
               </div>
               <div>
-                <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               </div>
               <div>
                 <input
@@ -382,8 +398,11 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           )}
           {isEnrollment && (
             <>
-              <input value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} placeholder="Qualification" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-              <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <option value="">Qualification</option>
+                {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               <select value={form.discount || ''} onChange={(event) => updateField('discount', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm md:col-span-2">
                 <option value="">No discount</option>
                 {availableDiscounts.map((discount) => (
@@ -659,7 +678,7 @@ export default function LeadDetailPage() {
               {detailErrorFor('qualification')}
             </DetailField>
             <DetailField label="Degree" value={lead.degree}>
-              <input value={detailsForm.degree || ''} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              <input value={detailsForm.degree || ''} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
           </div>
           {(hasMissingDetails || hasDetailChanges) && (

@@ -43,6 +43,19 @@ function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.created_by_name || walkin.walk_in_by_display || 'Public Form'
 }
 
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
+
+function qualificationSelectOptions(value) {
+  if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
+  return [{ value, label: value }, ...qualificationOptions]
+}
+
 function uniqueStaffUsers(rows) {
   const seen = new Set()
   return rows.filter((row) => {
@@ -517,11 +530,14 @@ export default function WalkInDetailPage() {
               {detailErrorFor('email')}
             </DetailField>
             <DetailField label="Qualification" value={walkin.qualification_display || walkin.qualification}>
-              <input value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} placeholder="Enter Qualification" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              <select value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Qualification</option>
+                {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
               {detailErrorFor('qualification')}
             </DetailField>
             <DetailField label="Degree / Department" value={walkin.degree}>
-              <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
             <DetailField label="Passed Out Year" value={walkin.year_of_passing}>
               <input
@@ -636,6 +652,17 @@ export default function WalkInDetailPage() {
                 <option value="weekends">Weekends</option>
               </select>
               {errorFor('preferred_timing')}
+            </div>
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Degree / Department
+              </label>
+              <input
+                value={form.degree}
+                onChange={(event) => updateDetail('degree', event.target.value)}
+                placeholder="Example: BCA, B.Com, BE CSE, MBA"
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              />
             </div>
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

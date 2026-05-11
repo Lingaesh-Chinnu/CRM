@@ -303,7 +303,7 @@ export default function PublicWalkInForm() {
                   value={form.degree}
                   onChange={(event) => updateField('degree', event.target.value)}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-                  placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma, CSE, Commerce"
+                  placeholder="Example: BCA, B.Com, BE CSE, MBA"
                 />
               </div>
 
