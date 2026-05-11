@@ -278,11 +278,22 @@ QUALIFICATION_LABELS = {
 
 
 def qualification_display_value(value):
+    value = value or ''
     return QUALIFICATION_LABELS.get(value, value)
 
 
+def safe_deferred_value(obj, field_name, default=''):
+    if field_name in getattr(obj, 'get_deferred_fields', lambda: set())():
+        return default
+    try:
+        value = getattr(obj, field_name)
+    except Exception:
+        return default
+    return default if value is None else value
+
+
 class FollowUpSerializer(serializers.ModelSerializer):
-    updated_by_name = serializers.CharField(source='updated_by.full_name', read_only=True)
+    updated_by_name = serializers.SerializerMethodField()
 
     class Meta:
         model = FollowUp
@@ -292,6 +303,12 @@ class FollowUpSerializer(serializers.ModelSerializer):
             'updated_by_name', 'created_at',
         ]
         read_only_fields = ['record_type', 'record_id', 'updated_by', 'created_at']
+
+    def get_updated_by_name(self, obj):
+        try:
+            return obj.updated_by.full_name if obj.updated_by_id and obj.updated_by else ''
+        except Exception:
+            return ''
 
 
 class LeadListSerializer(serializers.ModelSerializer):
@@ -346,10 +363,10 @@ class LeadInboxSerializer(serializers.ModelSerializer):
 class LeadDetailSerializer(serializers.ModelSerializer):
     """Full serializer for retrieve/create/update."""
     course_name      = serializers.CharField(source='course.name',        read_only=True)
-    assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
+    assigned_to_name = serializers.SerializerMethodField()
     branch_name      = serializers.CharField(source='branch.name',         read_only=True)
-    created_by_name  = serializers.CharField(source='created_by.full_name', read_only=True)
-    converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
+    created_by_name  = serializers.SerializerMethodField()
+    converted_by_name = serializers.SerializerMethodField()
     source_display   = serializers.CharField(source='get_source_display', read_only=True)
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
@@ -360,6 +377,46 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['lead_number', 'created_by']
 
+    def to_representation(self, instance):
+        defaults = {
+            'qualification': '',
+            'degree': '',
+            'willing_to_join': '',
+            'preferred_timing': '',
+            'next_follow_up_date': None,
+            'external_course_interested': '',
+            'external_message': '',
+            'is_duplicate': False,
+            'imported_via_csv': False,
+            'converted_to_type': '',
+            'converted_record_id': None,
+            'converted_at': None,
+            'converted_by_id': None,
+        }
+        deferred = getattr(instance, 'get_deferred_fields', lambda: set())()
+        for field_name, default in defaults.items():
+            if field_name in deferred:
+                instance.__dict__[field_name] = default
+        return super().to_representation(instance)
+
+    def get_assigned_to_name(self, obj):
+        try:
+            return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
+        except Exception:
+            return ''
+
+    def get_created_by_name(self, obj):
+        try:
+            return obj.created_by.full_name if obj.created_by_id and obj.created_by else ''
+        except Exception:
+            return ''
+
+    def get_converted_by_name(self, obj):
+        try:
+            return obj.converted_by.full_name if obj.converted_by_id and obj.converted_by else ''
+        except Exception:
+            return ''
+
     def get_follow_ups(self, obj):
         follow_ups = FollowUp.objects.filter(
             record_type=FollowUp.RecordType.LEAD,
@@ -368,7 +425,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         return FollowUpSerializer(follow_ups, many=True).data
 
     def get_qualification_display(self, obj):
-        return qualification_display_value(obj.qualification)
+        return qualification_display_value(safe_deferred_value(obj, 'qualification', ''))
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

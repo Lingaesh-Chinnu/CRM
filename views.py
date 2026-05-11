@@ -1329,10 +1329,20 @@ class LeadViewSet(viewsets.ModelViewSet):
         missing_columns = missing_model_columns(Lead, [
             'qualification', 'degree', 'willing_to_join',
             'external_course_interested', 'external_message',
-            'is_duplicate', 'imported_via_csv',
+            'is_duplicate', 'imported_via_csv', 'preferred_timing',
+            'next_follow_up_date', 'converted_to_type',
+            'converted_record_id', 'converted_at', 'converted_by',
         ])
         if missing_columns:
             qs = qs.defer(*missing_columns)
+        if self.action != 'list':
+            missing_user_columns = missing_model_columns(User, ['must_change_password'])
+            if missing_user_columns:
+                qs = qs.defer(
+                    *[f'assigned_to__{field}' for field in missing_user_columns],
+                    *[f'created_by__{field}' for field in missing_user_columns],
+                    *[f'converted_by__{field}' for field in missing_user_columns],
+                )
         # Staff can only see their branch's leads
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
