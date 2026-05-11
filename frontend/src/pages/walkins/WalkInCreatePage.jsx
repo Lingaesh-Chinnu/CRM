@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 const initialForm = {
   branch: '',
@@ -27,6 +28,8 @@ export default function WalkInCreatePage() {
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
   const [form, setForm] = useState(initialForm)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   useEffect(() => {
     Promise.all([api.get('/courses/'), api.get('/branches/')]).then(([coursesRes, branchesRes]) => {
@@ -37,15 +40,24 @@ export default function WalkInCreatePage() {
 
   const submit = async (event) => {
     event.preventDefault()
-    const { data } = await api.post('/walkins/', {
-      ...form,
-      branch: form.branch ? Number(form.branch) : null,
-      course: form.course ? Number(form.course) : null,
-      dob: form.dob || null,
-      visit_date: form.visit_date,
-      follow_up_date: form.follow_up_date || null,
-    })
-    navigate(`/walkins/${data.id}`)
+    if (saving) return
+    setSaving(true)
+    setErrorMessage('')
+    try {
+      const { data } = await api.post('/walkins/', {
+        ...form,
+        branch: form.branch ? Number(form.branch) : null,
+        course: form.course ? Number(form.course) : null,
+        dob: form.dob || null,
+        visit_date: form.visit_date,
+        follow_up_date: form.follow_up_date || null,
+      })
+      navigate(`/walkins/${data.id}`)
+    } catch (error) {
+      setErrorMessage(apiErrorMessage(error, 'Failed to create walk-in.'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -120,8 +132,13 @@ export default function WalkInCreatePage() {
           </select>
           <textarea value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} placeholder="Remarks" className="md:col-span-2 min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
         </div>
-        <button className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
-          Save Walk-in
+        {errorMessage && (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {errorMessage}
+          </div>
+        )}
+        <button disabled={saving} className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+          {saving ? 'Saving...' : 'Save Walk-in'}
         </button>
       </form>
     </div>

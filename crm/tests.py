@@ -1,3 +1,77 @@
-from django.test import TestCase
+from django.contrib.auth import get_user_model
+from rest_framework.test import APITestCase
 
-# Create your tests here.
+from crm.models import Branch, Course, WalkIn
+
+
+User = get_user_model()
+
+
+class PublicWalkInFormTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.other_branch = Branch.objects.create(name='Hopes', city='Coimbatore')
+        self.course = Course.objects.create(name='Python Full Stack', actual_fees=10000)
+        self.staff = User.objects.create_user(
+            username='staff',
+            email='staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        self.admin = User.objects.create_superuser(
+            username='admin',
+            email='admin@example.com',
+            password='pass12345',
+        )
+        self.payload = {
+            'branch': self.branch.id,
+            'name': 'Candidate One',
+            'dob': '2000-01-01',
+            'phone': '+91 98765 43210',
+            'email': 'candidate@example.com',
+            'location': 'Coimbatore',
+            'pincode': '641001',
+            'course': self.course.id,
+            'preferred_timing': WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            'demo_class': True,
+            'interested_global_certification': True,
+            'source': WalkIn.Source.DIRECT,
+            'visit_date': '2026-05-11',
+        }
+
+    def test_public_walkin_submit_creates_branch_record_without_login(self):
+        response = self.client.post('/api/public/walkin/', self.payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['detail'], 'Thanks for filling out the form.')
+        walkin = WalkIn.objects.get(phone='9876543210')
+        self.assertEqual(walkin.branch, self.branch)
+        self.assertEqual(walkin.course, self.course)
+        self.assertTrue(walkin.interested_global_certification)
+
+    def test_public_walkin_repeat_phone_updates_existing_record(self):
+        first = self.client.post('/api/public/walkin/', self.payload, format='json')
+        payload = {**self.payload, 'name': 'Candidate Updated', 'phone': '9876543210'}
+
+        second = self.client.post('/api/public/walkin/', payload, format='json')
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(second.data['updated'])
+        self.assertEqual(WalkIn.objects.count(), 1)
+        self.assertEqual(WalkIn.objects.get().name, 'Candidate Updated')
+
+    def test_branch_staff_and_admin_can_view_public_walkin(self):
+        self.client.post('/api/public/walkin/', self.payload, format='json')
+
+        self.client.force_authenticate(self.staff)
+        staff_response = self.client.get('/api/walkins/')
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertEqual(len(staff_response.data), 1)
+        self.assertEqual(staff_response.data[0]['branch_name'], self.branch.name)
+
+        self.client.force_authenticate(self.admin)
+        admin_response = self.client.get('/api/walkins/')
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertEqual(len(admin_response.data), 1)

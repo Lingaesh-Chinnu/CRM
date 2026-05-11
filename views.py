@@ -2469,16 +2469,74 @@ class PublicWalkInFormView(APIView):
         })
 
     def post(self, request):
-        serializer = PublicWalkInCreateSerializer(data=request.data)
+        data = request.data.copy()
+        phone = normalize_phone_number(data.get('phone'))
+        if len(phone) == 12 and phone.startswith('91'):
+            phone = phone[2:]
+        data['phone'] = phone
+
+        if not phone:
+            return Response({'phone': 'Phone number is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(phone) != 10:
+            return Response({'phone': 'Phone number should be 10 digits.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        branch_id = data.get('branch')
+        course_id = data.get('course')
+        branch = Branch.objects.filter(pk=branch_id, is_active=True).first()
+        if not branch:
+            return Response({'branch': 'Please select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        course = Course.objects.filter(pk=course_id, is_active=True).first()
+        if not course:
+            return Response({'course': 'Please select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = PublicWalkInCreateSerializer(data=data)
         serializer.is_valid(raise_exception=True)
-        walkin = serializer.save(status=WalkIn.Status.NEW)
+        duplicate_records = matching_candidate_phone_records(phone)
+        existing_walkin = None
+        active_walkins = WalkIn.objects.exclude(
+            status=WalkIn.Status.CONVERTED,
+        ).filter(
+            Q(converted_to_type__isnull=True) | Q(converted_to_type='')
+        ).order_by('-updated_at', '-created_at')
+        for walkin in active_walkins:
+            if normalize_phone_number(walkin.phone) == phone:
+                existing_walkin = walkin
+                break
+
+        save_kwargs = {
+            'status': WalkIn.Status.NEW,
+            'branch': branch,
+            'course': course,
+        }
+        if existing_walkin:
+            walkin = serializer.update(existing_walkin, {**serializer.validated_data, **save_kwargs})
+        else:
+            walkin = serializer.save(**save_kwargs)
+
+        notify_branch_users(
+            branch,
+            'New public walk-in submitted',
+            f'{walkin.name} submitted the public walk-in form for {course.name}.',
+            Notification.NType.INFO,
+            f'/walkins/{walkin.id}',
+        )
+        for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+            create_user_notification(
+                admin_user,
+                'New public walk-in submitted',
+                f'{walkin.name} submitted the public walk-in form for {branch.name}.',
+                Notification.NType.INFO,
+                f'/walkins/{walkin.id}',
+            )
         return Response(
             {
-                'detail': 'Walk-in submitted successfully.',
+                'detail': 'Thanks for filling out the form.',
                 'candidate_number': walkin.candidate_number,
                 'id': walkin.id,
+                'duplicate': bool(duplicate_records),
+                'updated': bool(existing_walkin),
             },
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_200_OK if existing_walkin else status.HTTP_201_CREATED
         )
 
 

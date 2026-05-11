@@ -56,6 +56,27 @@ function RadioGroup({ name, value, onChange }) {
   )
 }
 
+function formatSubmitError(error) {
+  const data = error.response?.data
+  if (!data) {
+    return error.request
+      ? 'Could not reach the server. Please check your connection and try again.'
+      : 'Failed to submit walk-in form.'
+  }
+  if (typeof data === 'string') return data
+  if (data.detail) return data.detail
+  if (typeof data === 'object') {
+    return Object.entries(data)
+      .map(([field, value]) => {
+        const label = field.replace(/_/g, ' ')
+        const message = Array.isArray(value) ? value.join(', ') : String(value)
+        return `${label}: ${message}`
+      })
+      .join(' ')
+  }
+  return 'Failed to submit walk-in form.'
+}
+
 export default function PublicWalkInForm() {
   const [form, setForm] = useState(initialForm)
   const [branches, setBranches] = useState([])
@@ -68,10 +89,14 @@ export default function PublicWalkInForm() {
 
   useEffect(() => {
     api.get('/public/walkin/').then(({ data }) => {
+      const branchFromLink = new URLSearchParams(window.location.search).get('branch') || ''
       setBranches(data.branches || [])
       setCourses(data.courses || [])
       setTimings(data.preferred_timing_options || [])
       setSources(data.source_options || [])
+      if (branchFromLink && (data.branches || []).some((branch) => String(branch.id) === branchFromLink)) {
+        setForm((current) => ({ ...current, branch: branchFromLink }))
+      }
     })
   }, [])
 
@@ -81,6 +106,7 @@ export default function PublicWalkInForm() {
 
   const submit = async (event) => {
     event.preventDefault()
+    if (saving || redirecting) return
     setSaving(true)
     setMessage('')
 
@@ -94,16 +120,15 @@ export default function PublicWalkInForm() {
         dob: form.dob || null,
         visit_date: new Date().toISOString().slice(0, 10),
       })
-      setMessage('Thank you registration. Your Walkin from has been recorded')
+      setMessage('Thanks for filling out the form.')
       setRedirecting(true)
       setForm(initialForm)
       window.setTimeout(() => {
         window.location.href = 'https://www.indrainstitute.com'
       }, 2500)
     } catch (error) {
-      const details = error.response?.data
       setRedirecting(false)
-      setMessage(typeof details === 'object' ? JSON.stringify(details) : 'Failed to submit walk-in form.')
+      setMessage(formatSubmitError(error))
     } finally {
       setSaving(false)
     }

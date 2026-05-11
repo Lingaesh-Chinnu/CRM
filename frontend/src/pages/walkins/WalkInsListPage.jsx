@@ -111,7 +111,7 @@ export default function WalkInsListPage() {
   const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = searchParams.get('follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
-  const publicWalkInPath = `${appBasePath}/public/walk-in`
+  const publicWalkInPath = `${appBasePath}/public/walk-in${!canFilterByBranch && user?.branch_id ? `?branch=${user.branch_id}` : ''}`
   const publicWalkInLink = `${window.location.origin}${publicWalkInPath}`
 
   const copyWalkInLink = async () => {

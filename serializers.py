@@ -476,6 +476,22 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
             'source', 'visit_date'
         ]
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        required_fields = [
+            'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode',
+            'course', 'preferred_timing', 'source', 'visit_date',
+        ]
+        missing = [
+            field for field in required_fields
+            if attrs.get(field) in (None, '')
+        ]
+        if missing:
+            raise serializers.ValidationError({
+                field: 'This field is required.' for field in missing
+            })
+        return attrs
+
 
 # ============================================================
 # backend/apps/discounts/serializers.py
