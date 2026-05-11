@@ -348,6 +348,7 @@ class Lead(TimeStampedModel):
     external_course_interested = models.CharField(max_length=200, blank=True)
     external_message = models.TextField(blank=True)
     is_duplicate = models.BooleanField(default=False, db_index=True)
+    imported_via_csv = models.BooleanField(default=False, db_index=True)
     status      = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW, db_index=True)
     source      = models.CharField(max_length=20, choices=Source.choices, default=Source.GOOGLE)
     converted_to_type = models.CharField(max_length=20, blank=True)

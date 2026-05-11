@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
@@ -10,8 +10,18 @@ function statusLabel(status) {
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+const sourceFilters = [
+  { value: '', label: 'All Sources' },
+  { value: 'website', label: 'Website' },
+  { value: 'manual', label: 'Manual' },
+  { value: 'csv_import', label: 'CSV Import' },
+  { value: 'google', label: 'Google' },
+  { value: 'justdial', label: 'Justdial' },
+]
+
 export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
+  const [filters, setFilters] = useState({ name: '', phone: '', source: '' })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -28,6 +38,28 @@ export default function LeadsListPage() {
   const nextFollowUpDateFrom = searchParams.get('next_follow_up_date_from') || ''
   const nextFollowUpDateTo = searchParams.get('next_follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
+
+  const filteredLeads = useMemo(() => {
+    const nameQuery = filters.name.trim().toLowerCase()
+    const phoneQuery = filters.phone.trim()
+    return leads.filter((lead) => {
+      const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
+      const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
+      let matchesSource = true
+
+      if (filters.source === 'manual') {
+        matchesSource = Boolean(lead.created_by) && !lead.imported_via_csv
+      } else if (filters.source === 'csv_import') {
+        matchesSource = Boolean(lead.imported_via_csv)
+      } else if (filters.source) {
+        matchesSource = lead.source === filters.source
+      }
+
+      return matchesName && matchesPhone && matchesSource
+    })
+  }, [filters, leads])
+
+  const hasFilters = Boolean(filters.name || filters.phone || filters.source)
 
   useEffect(() => {
     fetchLeads()
@@ -55,6 +87,14 @@ export default function LeadsListPage() {
 
   const updateLeadPhone = (leadId, phone) => {
     setLeads((current) => current.map((lead) => lead.id === leadId ? { ...lead, phone } : lead))
+  }
+
+  const updateFilter = (field, value) => {
+    setFilters((current) => ({ ...current, [field]: value }))
+  }
+
+  const clearFilters = () => {
+    setFilters({ name: '', phone: '', source: '' })
   }
 
   const submitImport = async (event) => {
@@ -176,6 +216,48 @@ export default function LeadsListPage() {
         </section>
       )}
 
+      <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_auto] lg:items-end">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
+            <input
+              value={filters.name}
+              onChange={(event) => updateFilter('name', event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Phone Number</span>
+            <input
+              value={filters.phone}
+              onChange={(event) => updateFilter('phone', event.target.value)}
+              inputMode="numeric"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Source</span>
+            <select
+              value={filters.source}
+              onChange={(event) => updateFilter('source', event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              {sourceFilters.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={clearFilters}
+            disabled={!hasFilters}
+            className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Clear Filters
+          </button>
+        </div>
+      </section>
+
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         {loadMessage && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
@@ -205,9 +287,28 @@ export default function LeadsListPage() {
               Create your first lead
             </Link>
           </div>
+        ) : filteredLeads.length === 0 ? (
+          <div className="px-6 py-16 text-center sm:px-10">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-100 text-sm font-black tracking-[0.24em] text-slate-600">
+              LD
+            </div>
+            <h2 className="mt-6 text-2xl font-black tracking-tight text-slate-950">
+              No matching leads
+            </h2>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">
+              Adjust the filters or clear them to view the full visible pipeline.
+            </p>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="mt-6 inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+            >
+              Clear Filters
+            </button>
+          </div>
         ) : (
           <ul className="divide-y divide-slate-200">
-            {leads.map((lead) => (
+            {filteredLeads.map((lead) => (
               <li key={lead.id}>
                 <div className="px-6 py-5 transition hover:bg-slate-50 sm:px-8">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

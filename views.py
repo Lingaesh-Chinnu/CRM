@@ -1817,6 +1817,7 @@ class LeadImportView(APIView):
                 remarks=remarks,
                 created_by=request.user,
                 assigned_to=request.user,
+                imported_via_csv=True,
             )
             imported += 1
             seen_phones.add(phone)
