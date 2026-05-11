@@ -1327,7 +1327,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         if not request.user.is_super_admin:
             allowed = {
                 'name', 'phone', 'dob', 'email', 'location', 'pincode',
-                'course', 'branch', 'preferred_timing', 'walkin_date',
+                'course', 'branch', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
                 'next_follow_up_date', 'remarks', 'status',
             }
             if set(request.data.keys()) - allowed:
@@ -1376,6 +1376,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('branch', lead.branch_id)
         data.setdefault('preferred_timing', lead.preferred_timing)
         data.setdefault('qualification', lead.qualification)
+        data.setdefault('degree', lead.degree)
         data.setdefault('visit_date', lead.walkin_date)
         if not request.user.is_super_admin:
             if not request.user.branch_id:
@@ -1418,6 +1419,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 location=data.get('location'),
                 pincode=data.get('pincode'),
                 qualification=data.get('qualification'),
+                degree=data.get('degree', ''),
                 year_of_passing=year_of_passing,
                 college_company=data.get('college_company'),
                 preferred_timing=data.get('preferred_timing'),
@@ -1434,6 +1436,8 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.location = data.get('location')
             lead.pincode = data.get('pincode')
             lead.preferred_timing = data.get('preferred_timing')
+            lead.qualification = data.get('qualification')
+            lead.degree = data.get('degree', '')
             lead.branch_id = data.get('branch')
             lead.course_id = data.get('course')
             lead.walkin_date = data.get('visit_date')
@@ -1443,7 +1447,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.converted_at = timezone.now()
             lead.converted_by = request.user
             lead.save(update_fields=[
-                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing',
+                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification', 'degree',
                 'branch', 'course', 'walkin_date', 'status', 'converted_to_type',
                 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
             ])
@@ -1488,6 +1492,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('course', lead.course_id)
         data.setdefault('branch', lead.branch_id)
         data.setdefault('preferred_timing', lead.preferred_timing)
+        data.setdefault('qualification', lead.qualification)
+        data.setdefault('degree', lead.degree)
         if not request.user.is_super_admin:
             if not request.user.branch_id:
                 return Response(
@@ -1533,6 +1539,8 @@ class LeadViewSet(viewsets.ModelViewSet):
                 email=data.get('email'),
                 location=data.get('location'),
                 pincode=data.get('pincode'),
+                qualification=data.get('qualification', ''),
+                degree=data.get('degree', ''),
                 preferred_timing=data.get('preferred_timing'),
                 enrollment_date=data.get('enrollment_date'),
                 source=source,
@@ -1555,6 +1563,8 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.location = data.get('location')
             lead.pincode = data.get('pincode')
             lead.preferred_timing = data.get('preferred_timing')
+            lead.qualification = data.get('qualification', '')
+            lead.degree = data.get('degree', '')
             lead.branch_id = data.get('branch')
             lead.status = Lead.Status.CONVERTED
             lead.converted_to_type = 'enrollment'
@@ -1562,7 +1572,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.converted_at = timezone.now()
             lead.converted_by = request.user
             lead.save(update_fields=[
-                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing',
+                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification', 'degree',
                 'branch', 'status', 'converted_to_type', 'converted_record_id',
                 'converted_at', 'converted_by', 'updated_at',
             ])
@@ -2310,6 +2320,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data.setdefault('pincode',     walkin.pincode)
         data.setdefault('source',      walkin.source)
         data.setdefault('preferred_timing', walkin.preferred_timing)
+        data.setdefault('qualification', walkin.qualification)
+        data.setdefault('degree', walkin.degree)
         data.setdefault('demo_class',  walkin.demo_class)
         data.setdefault('interested_global_certification', walkin.interested_global_certification)
         data.setdefault('branch',      walkin.branch_id)
@@ -2353,6 +2365,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin.pincode = data.get('pincode')
         walkin.branch_id = data.get('branch')
         walkin.preferred_timing = data.get('preferred_timing')
+        walkin.qualification = data.get('qualification', '')
+        walkin.degree = data.get('degree', '')
         walkin.status = WalkIn.Status.CONVERTED
         walkin.converted_to_type = 'enrollment'
         walkin.converted_record_id = enrollment.id
@@ -2360,7 +2374,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin.converted_by = request.user
         walkin.save(update_fields=[
             'name', 'phone', 'email', 'dob', 'location', 'pincode',
-            'branch', 'preferred_timing', 'status', 'converted_to_type',
+            'branch', 'preferred_timing', 'qualification', 'degree', 'status', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
         ])
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)

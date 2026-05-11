@@ -18,6 +18,8 @@ const initialForm = {
   branch: '',
   course: '',
   source: '',
+  qualification: '',
+  degree: '',
   next_follow_up_date: '',
   remarks: '',
 }
@@ -58,6 +60,8 @@ export default function LeadCreatePage() {
       course: form.course ? Number(form.course) : null,
       status: 'new',
       source: form.source,
+      qualification: form.qualification.trim(),
+      degree: form.degree.trim(),
       branch: isSuperAdmin ? Number(form.branch) || null : user?.branch || null,
       next_follow_up_date: form.next_follow_up_date || null,
       remarks,
@@ -146,6 +150,20 @@ export default function LeadCreatePage() {
             <option value="friends_reference">Friends Reference</option>
             <option value="others">Others</option>
           </select>
+
+          <input
+            placeholder="Qualification"
+            value={form.qualification}
+            onChange={(e) => setForm({ ...form, qualification: e.target.value })}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+          />
+
+          <input
+            placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)"
+            value={form.degree}
+            onChange={(e) => setForm({ ...form, degree: e.target.value })}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+          />
 
           <div>
             <FieldLabel>Next Follow-up Date</FieldLabel>

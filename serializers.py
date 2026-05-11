@@ -272,6 +272,15 @@ class CourseSerializer(serializers.ModelSerializer):
 from crm.models import FollowUp, Lead, LeadImportHistory
 
 
+QUALIFICATION_LABELS = {
+    value: label for value, label in Lead.Qualification.choices
+}
+
+
+def qualification_display_value(value):
+    return QUALIFICATION_LABELS.get(value, value)
+
+
 class FollowUpSerializer(serializers.ModelSerializer):
     updated_by_name = serializers.CharField(source='updated_by.full_name', read_only=True)
 
@@ -303,7 +312,7 @@ class LeadInboxSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
-    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
+    qualification_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Lead
@@ -316,6 +325,9 @@ class LeadInboxSerializer(serializers.ModelSerializer):
             'is_duplicate', 'created_at',
         ]
 
+    def get_qualification_display(self, obj):
+        return qualification_display_value(obj.qualification)
+
 
 class LeadDetailSerializer(serializers.ModelSerializer):
     """Full serializer for retrieve/create/update."""
@@ -326,7 +338,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
     source_display   = serializers.CharField(source='get_source_display', read_only=True)
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
-    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
+    qualification_display = serializers.SerializerMethodField()
     follow_ups       = serializers.SerializerMethodField()
 
     class Meta:
@@ -340,6 +352,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             record_id=obj.id,
         ).order_by('-created_at', '-id')
         return FollowUpSerializer(follow_ups, many=True).data
+
+    def get_qualification_display(self, obj):
+        return qualification_display_value(obj.qualification)
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -418,7 +433,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     walk_in_by_display = serializers.CharField(source='get_walk_in_by_display', read_only=True)
-    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
+    qualification_display = serializers.SerializerMethodField()
     follow_ups = serializers.SerializerMethodField()
     branch_change_history = serializers.SerializerMethodField()
 
@@ -433,6 +448,9 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             record_id=obj.id,
         ).order_by('-created_at', '-id')
         return FollowUpSerializer(follow_ups, many=True).data
+
+    def get_qualification_display(self, obj):
+        return qualification_display_value(obj.qualification)
 
     def get_branch_change_history(self, obj):
         return WalkInBranchChangeHistorySerializer(obj.branch_change_history.select_related(
@@ -574,6 +592,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     payment_status = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
+    qualification_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -582,12 +601,16 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','source','source_display','preferred_timing',
-                  'preferred_timing_display','demo_class','interested_global_certification']
+                  'preferred_timing_display','qualification','qualification_display','degree',
+                  'demo_class','interested_global_certification']
 
     def get_payment_status(self, obj):
         if hasattr(obj, 'payment'):
             return obj.payment.status
         return None
+
+    def get_qualification_display(self, obj):
+        return qualification_display_value(obj.qualification)
 
 
 class EnrollmentDetailSerializer(serializers.ModelSerializer):
@@ -598,6 +621,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     payment_info = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
+    qualification_display = serializers.SerializerMethodField()
     discount_name = serializers.CharField(source='discount.name', read_only=True)
     rules_signing_status = serializers.SerializerMethodField()
     rules_signed_pdf_url = serializers.SerializerMethodField()
@@ -652,6 +676,9 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'payment'):
             return PaymentSerializer(obj.payment).data
         return None
+
+    def get_qualification_display(self, obj):
+        return qualification_display_value(obj.qualification)
 
     def get_rules_signing_status(self, obj):
         return self._rules_signing_data(obj).get('status') or 'pending'

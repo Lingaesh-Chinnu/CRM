@@ -43,14 +43,6 @@ function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.created_by_name || walkin.walk_in_by_display || 'Public Form'
 }
 
-const qualificationOptions = [
-  { value: 'school_student', label: 'School Student' },
-  { value: 'college_student', label: 'College Student' },
-  { value: 'graduate', label: 'Graduate' },
-  { value: 'working_professional', label: 'Working Professional' },
-  { value: 'housewife', label: 'Housewife' },
-]
-
 function uniqueStaffUsers(rows) {
   const seen = new Set()
   return rows.filter((row) => {
@@ -71,6 +63,7 @@ const requiredLabels = {
   course: 'Course',
   preferred_timing: 'Preferred Timing',
   qualification: 'Qualification',
+  degree: 'Degree',
   year_of_passing: 'Passed Out Year',
   college_company: 'College / Company Name',
   enrollment_date: 'Enrollment Date',
@@ -83,7 +76,10 @@ function DetailField({ label, value, children }) {
     <div className="rounded-2xl bg-slate-50 p-4">
       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
       {hasValue ? (
-        <p className="mt-2 font-semibold text-slate-900">{value}</p>
+        <>
+          <p className="mt-2 font-semibold text-slate-900">{value}</p>
+          {children && <div className="mt-3">{children}</div>}
+        </>
       ) : (
         <>
           <p className="mt-2 font-semibold text-slate-900">Not provided</p>
@@ -118,6 +114,7 @@ export default function WalkInDetailPage() {
     course: '',
     preferred_timing: '',
     qualification: '',
+    degree: '',
     year_of_passing: '',
     college_company: '',
     visit_date: '',
@@ -164,6 +161,7 @@ export default function WalkInDetailPage() {
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
         qualification: data.qualification || '',
+        degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
@@ -255,6 +253,8 @@ export default function WalkInDetailPage() {
       email: form.email.trim(),
       location: form.location.trim(),
       pincode: form.pincode.trim(),
+      qualification: form.qualification.trim(),
+      degree: form.degree.trim(),
       course: Number(form.course),
       preferred_timing: form.preferred_timing,
       enrollment_date: form.enrollment_date,
@@ -327,6 +327,8 @@ export default function WalkInDetailPage() {
         if (field === 'branch' || field === 'course') payload[field] = Number(form[field])
         else payload[field] = form[field]
       })
+      if ((form.qualification || '') !== (walkin.qualification || '')) payload.qualification = form.qualification || ''
+      if (!walkin.degree || form.degree !== walkin.degree) payload.degree = form.degree || ''
       const { data } = await api.patch(`/walkins/${id}/`, payload)
       const matchedCourse = courses.find((course) => String(course.id) === String(data.course))
       setWalkin(data)
@@ -342,6 +344,7 @@ export default function WalkInDetailPage() {
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
         qualification: data.qualification || '',
+        degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
@@ -390,6 +393,7 @@ export default function WalkInDetailPage() {
 
   const hasMissingDetails = ['branch', 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'qualification', 'year_of_passing', 'college_company', 'course', 'preferred_timing', 'visit_date']
     .some((field) => !walkin[field])
+  const hasDetailChanges = ['qualification', 'degree'].some((field) => String(form[field] || '') !== String(walkin[field] || ''))
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = walkin.converted_to_type || (walkin.status === 'converted' ? 'enrollment' : '')
@@ -513,11 +517,11 @@ export default function WalkInDetailPage() {
               {detailErrorFor('email')}
             </DetailField>
             <DetailField label="Qualification" value={walkin.qualification_display || walkin.qualification}>
-              <select value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <option value="">Select Qualification</option>
-                {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              <input value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} placeholder="Enter Qualification" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('qualification')}
+            </DetailField>
+            <DetailField label="Degree" value={walkin.degree}>
+              <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
             <DetailField label="Passed Out Year" value={walkin.year_of_passing}>
               <input
@@ -536,7 +540,7 @@ export default function WalkInDetailPage() {
               {detailErrorFor('college_company')}
             </DetailField>
           </div>
-          {hasMissingDetails && (
+          {(hasMissingDetails || hasDetailChanges) && (
             <button
               type="button"
               onClick={saveCandidateDetails}

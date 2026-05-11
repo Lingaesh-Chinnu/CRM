@@ -338,7 +338,8 @@ class Lead(TimeStampedModel):
     email       = models.EmailField(blank=True)
     location    = models.CharField(max_length=200, blank=True)
     pincode     = models.CharField(max_length=10, blank=True)
-    qualification = models.CharField(max_length=30, choices=Qualification.choices, blank=True)
+    qualification = models.CharField(max_length=200, blank=True)
+    degree = models.CharField(max_length=200, blank=True)
     willing_to_join = models.CharField(max_length=20, choices=WillingToJoin.choices, blank=True)
     preferred_timing = models.CharField(max_length=30, choices=PreferredTiming.choices, blank=True)
     walkin_date = models.DateField(null=True, blank=True)
@@ -461,7 +462,8 @@ class WalkIn(TimeStampedModel):
     pincode         = models.CharField(max_length=10, blank=True)
 
     # Academic / Professional
-    qualification   = models.CharField(max_length=30, choices=Qualification.choices, blank=True)
+    qualification   = models.CharField(max_length=200, blank=True)
+    degree          = models.CharField(max_length=200, blank=True)
     profession      = models.CharField(max_length=200, blank=True)
     year_of_passing = models.PositiveSmallIntegerField(null=True, blank=True)
     college_company = models.CharField(max_length=300, blank=True)
@@ -753,6 +755,8 @@ class Enrollment(TimeStampedModel):
     email            = models.EmailField(blank=True)
     location         = models.CharField(max_length=200, blank=True)
     pincode          = models.CharField(max_length=10, blank=True)
+    qualification    = models.CharField(max_length=200, blank=True)
+    degree           = models.CharField(max_length=200, blank=True)
     source           = models.CharField(max_length=20, choices=WalkIn.Source.choices, blank=True)
     preferred_timing = models.CharField(max_length=30, choices=WalkIn.PreferredTiming.choices, blank=True)
     demo_class       = models.BooleanField(default=False)

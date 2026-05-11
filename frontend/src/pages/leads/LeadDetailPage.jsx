@@ -19,6 +19,7 @@ const requiredLabels = {
   branch: 'Branch',
   preferred_timing: 'Preferred Timing',
   qualification: 'Qualification',
+  degree: 'Degree',
   year_of_passing: 'Passed Out Year',
   college_company: 'College / Company Name',
   conversion_date: 'Visit Date / Enrollment Date',
@@ -27,14 +28,6 @@ const requiredLabels = {
   start_date: 'Course Start Date',
   actual_fees: 'Course Fees',
 }
-
-const qualificationOptions = [
-  { value: 'school_student', label: 'School Student' },
-  { value: 'college_student', label: 'College Student' },
-  { value: 'graduate', label: 'Graduate' },
-  { value: 'working_professional', label: 'Working Professional' },
-  { value: 'housewife', label: 'Housewife' },
-]
 
 function buildConversionForm(lead) {
   return {
@@ -48,6 +41,7 @@ function buildConversionForm(lead) {
     branch: lead?.branch || '',
     preferred_timing: lead?.preferred_timing || '',
     qualification: lead?.qualification || '',
+    degree: lead?.degree || '',
     year_of_passing: '',
     college_company: '',
     conversion_date: lead?.walkin_date || todayIso(),
@@ -101,10 +95,21 @@ function discountAmount(discount, courseFee) {
 }
 
 function DetailField({ label, value, children }) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      {value ? <p className="mt-2 font-semibold text-slate-900">{value}</p> : <div className="mt-3">{children}</div>}
+      {hasValue ? (
+        <>
+          <p className="mt-2 font-semibold text-slate-900">{value}</p>
+          {children && <div className="mt-3">{children}</div>}
+        </>
+      ) : (
+        <>
+          <p className="mt-2 font-semibold text-slate-900">Not provided</p>
+          {children && <div className="mt-3">{children}</div>}
+        </>
+      )}
     </div>
   )
 }
@@ -211,9 +216,12 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       payload.discount = form.discount || null
       payload.start_date = form.start_date || null
       payload.batch_timing = form.batch_timing || ''
+      payload.qualification = form.qualification.trim()
+      payload.degree = form.degree.trim()
     } else {
       payload.visit_date = form.conversion_date
       payload.qualification = form.qualification
+      payload.degree = form.degree.trim()
       payload.year_of_passing = form.year_of_passing
       payload.college_company = form.college_company.trim()
     }
@@ -324,11 +332,11 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           {!isEnrollment && (
             <>
               <div>
-                <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                  <option value="">Qualification</option>
-                  {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <input value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} placeholder="Qualification" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                 {errorFor('qualification')}
+              </div>
+              <div>
+                <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               </div>
               <div>
                 <input
@@ -374,6 +382,8 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           )}
           {isEnrollment && (
             <>
+              <input value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} placeholder="Qualification" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               <select value={form.discount || ''} onChange={(event) => updateField('discount', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm md:col-span-2">
                 <option value="">No discount</option>
                 {availableDiscounts.map((discount) => (
@@ -521,7 +531,7 @@ export default function LeadDetailPage() {
   }
 
   const saveCandidateDetails = async () => {
-    const editableFields = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'conversion_date']
+    const editableFields = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'qualification', 'conversion_date']
       .filter((field) => {
         if (field === 'course') return !lead.course
         if (field === 'branch') return !lead.branch
@@ -548,6 +558,8 @@ export default function LeadDetailPage() {
         else if (field === 'course' || field === 'branch') payload[field] = Number(detailsForm[field])
         else payload[field] = detailsForm[field]
       })
+      if ((detailsForm.qualification || '') !== (lead.qualification || '')) payload.qualification = detailsForm.qualification || ''
+      if (!lead.degree || detailsForm.degree !== lead.degree) payload.degree = detailsForm.degree || ''
       const { data } = await api.patch(`/leads/${id}/`, payload)
       setLead(data)
       setDetailsForm(buildConversionForm(data))
@@ -559,8 +571,9 @@ export default function LeadDetailPage() {
     }
   }
 
-  const hasMissingDetails = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'walkin_date']
+  const hasMissingDetails = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'qualification', 'walkin_date']
     .some((field) => !lead[field])
+  const hasDetailChanges = ['qualification', 'degree'].some((field) => String(detailsForm[field] || '') !== String(lead[field] || ''))
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
   const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Converted to Enrollment' : ''
@@ -641,8 +654,15 @@ export default function LeadDetailPage() {
               </select>
               {detailErrorFor('preferred_timing')}
             </DetailField>
+            <DetailField label="Qualification" value={lead.qualification_display || lead.qualification}>
+              <input value={detailsForm.qualification || ''} onChange={(event) => updateDetail('qualification', event.target.value)} placeholder="Enter Qualification" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              {detailErrorFor('qualification')}
+            </DetailField>
+            <DetailField label="Degree" value={lead.degree}>
+              <input value={detailsForm.degree || ''} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+            </DetailField>
           </div>
-          {hasMissingDetails && (
+          {(hasMissingDetails || hasDetailChanges) && (
             <button
               type="button"
               onClick={saveCandidateDetails}
