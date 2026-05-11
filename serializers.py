@@ -495,7 +495,7 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
         model = WalkIn
         fields = [
             'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode', 'course',
-            'qualification', 'year_of_passing', 'college_company',
+            'qualification', 'degree', 'year_of_passing', 'college_company',
             'preferred_timing', 'demo_class', 'interested_global_certification',
             'source', 'visit_date'
         ]

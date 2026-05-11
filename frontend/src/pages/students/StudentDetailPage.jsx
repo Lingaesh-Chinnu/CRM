@@ -107,7 +107,7 @@ export default function StudentDetailPage() {
             <DetailCard label="Branch" value={prettyValue(row.branch_name)} />
             <DetailCard label="Course" value={prettyValue(row.course_name)} />
             <DetailCard label="Qualification" value={prettyValue(row.qualification_display || row.qualification)} />
-            <DetailCard label="Degree" value={prettyValue(row.degree)} />
+            <DetailCard label="Degree / Department" value={prettyValue(row.degree)} />
             <DetailCard label="Enrollment Date" value={formatDate(row.enrollment_date)} />
             <DetailCard label="Start Date" value={formatDate(row.start_date)} />
             <DetailCard label="Preferred Timing" value={prettyValue(row.preferred_timing_display)} />

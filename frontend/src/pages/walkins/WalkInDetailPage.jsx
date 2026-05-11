@@ -63,7 +63,7 @@ const requiredLabels = {
   course: 'Course',
   preferred_timing: 'Preferred Timing',
   qualification: 'Qualification',
-  degree: 'Degree',
+  degree: 'Degree / Department',
   year_of_passing: 'Passed Out Year',
   college_company: 'College / Company Name',
   enrollment_date: 'Enrollment Date',
@@ -520,7 +520,7 @@ export default function WalkInDetailPage() {
               <input value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} placeholder="Enter Qualification" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('qualification')}
             </DetailField>
-            <DetailField label="Degree" value={walkin.degree}>
+            <DetailField label="Degree / Department" value={walkin.degree}>
               <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="B.Com, BCA, BE CSE, MBA, 12th, Diploma" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
             <DetailField label="Passed Out Year" value={walkin.year_of_passing}>

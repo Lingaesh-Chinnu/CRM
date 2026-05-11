@@ -186,7 +186,7 @@ export default function EnrollmentDetailPage() {
         <h2 className="text-xl font-black tracking-tight text-slate-950">Student details</h2>
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DetailCard label="Qualification" value={row.qualification_display || row.qualification} />
-          <DetailCard label="Degree" value={row.degree} />
+          <DetailCard label="Degree / Department" value={row.degree} />
           <DetailCard label="Branch" value={row.branch_name} />
           <DetailCard label="Preferred Timing" value={row.preferred_timing_display} />
         </div>
