@@ -33,6 +33,9 @@ class PublicWalkInFormTests(APITestCase):
             'location': 'Coimbatore',
             'pincode': '641001',
             'course': self.course.id,
+            'qualification': WalkIn.Qualification.COLLEGE_STUDENT,
+            'year_of_passing': 2026,
+            'college_company': 'IIE College',
             'preferred_timing': WalkIn.PreferredTiming.WEEKDAY_MORNING,
             'demo_class': True,
             'interested_global_certification': True,
@@ -48,6 +51,9 @@ class PublicWalkInFormTests(APITestCase):
         walkin = WalkIn.objects.get(phone='9876543210')
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.course, self.course)
+        self.assertEqual(walkin.qualification, WalkIn.Qualification.COLLEGE_STUDENT)
+        self.assertEqual(walkin.year_of_passing, 2026)
+        self.assertEqual(walkin.college_company, 'IIE College')
         self.assertTrue(walkin.interested_global_certification)
 
     def test_public_walkin_repeat_phone_updates_existing_record(self):

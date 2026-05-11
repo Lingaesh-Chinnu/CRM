@@ -343,6 +343,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        year = attrs.get('year_of_passing')
+        if year not in (None, '') and (year < 1900 or year > 2100):
+            raise serializers.ValidationError({'year_of_passing': 'Enter a valid passed out year.'})
         if self.instance is None:
             data = {**getattr(self, 'initial_data', {}), **attrs}
             required_fields = ['name', 'phone', 'course', 'source']
@@ -415,6 +418,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     walk_in_by_display = serializers.CharField(source='get_walk_in_by_display', read_only=True)
+    qualification_display = serializers.CharField(source='get_qualification_display', read_only=True)
     follow_ups = serializers.SerializerMethodField()
     branch_change_history = serializers.SerializerMethodField()
 
@@ -442,6 +446,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             required_fields = [
                 'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode',
                 'course', 'preferred_timing', 'visit_date',
+                'qualification', 'year_of_passing', 'college_company',
             ]
             missing = [
                 field for field in required_fields
@@ -472,15 +477,20 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
         model = WalkIn
         fields = [
             'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode', 'course',
+            'qualification', 'year_of_passing', 'college_company',
             'preferred_timing', 'demo_class', 'interested_global_certification',
             'source', 'visit_date'
         ]
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        year = attrs.get('year_of_passing')
+        if year not in (None, '') and (year < 1900 or year > 2100):
+            raise serializers.ValidationError({'year_of_passing': 'Enter a valid passed out year.'})
         required_fields = [
             'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode',
-            'course', 'preferred_timing', 'source', 'visit_date',
+            'course', 'qualification', 'year_of_passing', 'college_company',
+            'preferred_timing', 'source', 'visit_date',
         ]
         missing = [
             field for field in required_fields

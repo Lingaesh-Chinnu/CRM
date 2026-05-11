@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
 function normaliseListResponse(data) {
@@ -45,6 +46,7 @@ export default function EnrollmentsListPage() {
     search: '',
   })
   const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState('')
   const [updatingStudentId, setUpdatingStudentId] = useState(null)
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -92,6 +94,10 @@ export default function EnrollmentsListPage() {
 
       const { data } = await api.get('/enrollments/', { params })
       setRows(normaliseListResponse(data))
+      setMessage('')
+    } catch (error) {
+      setRows([])
+      setMessage(apiErrorMessage(error, 'Failed to load enrollments.'))
     } finally {
       setLoading(false)
     }
@@ -110,7 +116,9 @@ export default function EnrollmentsListPage() {
 
     try {
       await api.patch(`/enrollments/${studentId}/`, { status })
-    } catch {
+      setMessage('')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to update student status.'))
       await loadEnrollments()
     } finally {
       setUpdatingStudentId(null)
@@ -201,6 +209,11 @@ export default function EnrollmentsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+        {message && (
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700">
+            {message}
+          </div>
+        )}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Students</p>

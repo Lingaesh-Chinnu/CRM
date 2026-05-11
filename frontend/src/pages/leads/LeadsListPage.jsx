@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
 function statusLabel(status) {
@@ -12,6 +13,7 @@ function statusLabel(status) {
 export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -42,8 +44,10 @@ export default function LeadsListPage() {
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
+      setLoadMessage('')
     } catch (error) {
-      console.error('Failed to fetch leads:', error)
+      setLeads([])
+      setLoadMessage(apiErrorMessage(error, 'Failed to load leads.'))
     } finally {
       setLoading(false)
     }
@@ -173,6 +177,11 @@ export default function LeadsListPage() {
       )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+        {loadMessage && (
+          <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
+            {loadMessage}
+          </div>
+        )}
         {focus === 'today-follow-up' && (
           <div className="border-b border-slate-200 bg-cyan-50 px-6 py-4 text-sm font-medium text-slate-700 sm:px-8">
             Showing only leads with next follow-up scheduled for today.

@@ -83,7 +83,9 @@ export default function App() {
       <Route path="/login"             element={<LoginPage />} />
       <Route path="/change-password"   element={<PrivateRoute><ChangePasswordPage /></PrivateRoute>} />
       <Route path="/public/walk-in"    element={<PublicWalkInForm />} />
+      <Route path="/public/walkin"     element={<PublicWalkInForm />} />
       <Route path="/lead-form"         element={<PublicLeadForm />} />
+      <Route path="/public/lead-form"  element={<PublicLeadForm />} />
       <Route path="/IIE-Rules-Regulations/:token" element={<RulesSigningPage />} />
       <Route path="/rules-sign/:token" element={<RulesSigningPage />} />
 

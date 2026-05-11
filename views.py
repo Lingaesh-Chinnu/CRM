@@ -1374,6 +1374,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('course', lead.course_id)
         data.setdefault('branch', lead.branch_id)
         data.setdefault('preferred_timing', lead.preferred_timing)
+        data.setdefault('qualification', lead.qualification)
         data.setdefault('visit_date', lead.walkin_date)
         if not request.user.is_super_admin:
             if not request.user.branch_id:
@@ -1385,6 +1386,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         required_fields = [
             'name', 'phone', 'dob', 'email', 'location', 'pincode',
             'course', 'branch', 'preferred_timing', 'visit_date',
+            'qualification', 'year_of_passing', 'college_company',
         ]
         missing = [field for field in required_fields if data.get(field) in (None, '')]
         if missing:
@@ -1392,6 +1394,12 @@ class LeadViewSet(viewsets.ModelViewSet):
                 {'detail': 'Please complete all mandatory fields.', 'missing_fields': missing},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            year_of_passing = int(data.get('year_of_passing'))
+        except (TypeError, ValueError):
+            return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
+        if year_of_passing < 1900 or year_of_passing > 2100:
+            return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
 
         walkin_source_values = {choice[0] for choice in WalkIn.Source.choices}
         source = lead.source if lead.source in walkin_source_values else WalkIn.Source.GOOGLE
@@ -1408,6 +1416,9 @@ class LeadViewSet(viewsets.ModelViewSet):
                 email=data.get('email'),
                 location=data.get('location'),
                 pincode=data.get('pincode'),
+                qualification=data.get('qualification'),
+                year_of_passing=year_of_passing,
+                college_company=data.get('college_company'),
                 preferred_timing=data.get('preferred_timing'),
                 visit_date=data.get('visit_date'),
                 source=source,
@@ -2461,6 +2472,10 @@ class PublicWalkInFormView(APIView):
             'preferred_timing_options': [
                 {'value': value, 'label': label}
                 for value, label in WalkIn.PreferredTiming.choices
+            ],
+            'qualification_options': [
+                {'value': value, 'label': label}
+                for value, label in WalkIn.Qualification.choices
             ],
             'source_options': [
                 {'value': value, 'label': label}

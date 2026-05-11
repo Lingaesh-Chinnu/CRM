@@ -11,11 +11,22 @@ const initialForm = {
   location: '',
   pincode: '',
   course: '',
+  qualification: '',
+  year_of_passing: '',
+  college_company: '',
   preferred_timing: '',
   demo_class: '',
   interested_global_certification: '',
   source: '',
 }
+
+const fallbackQualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
 
 function FieldLabel({ children }) {
   return (
@@ -82,6 +93,7 @@ export default function PublicWalkInForm() {
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
   const [timings, setTimings] = useState([])
+  const [qualifications, setQualifications] = useState(fallbackQualificationOptions)
   const [sources, setSources] = useState([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -93,10 +105,13 @@ export default function PublicWalkInForm() {
       setBranches(data.branches || [])
       setCourses(data.courses || [])
       setTimings(data.preferred_timing_options || [])
+      setQualifications(data.qualification_options || fallbackQualificationOptions)
       setSources(data.source_options || [])
       if (branchFromLink && (data.branches || []).some((branch) => String(branch.id) === branchFromLink)) {
         setForm((current) => ({ ...current, branch: branchFromLink }))
       }
+    }).catch((error) => {
+      setMessage(formatSubmitError(error))
     })
   }, [])
 
@@ -260,6 +275,48 @@ export default function PublicWalkInForm() {
                   value={form.location}
                   onChange={(event) => updateField('location', event.target.value)}
                   className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                />
+              </div>
+
+              <div>
+                <FieldLabel>Qualification</FieldLabel>
+                <select
+                  value={form.qualification}
+                  onChange={(event) => updateField('qualification', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                >
+                  <option value="">Select qualification</option>
+                  {qualifications.map((qualification) => (
+                    <option key={qualification.value} value={qualification.value}>
+                      {qualification.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>Passed Out Year</FieldLabel>
+                <input
+                  type="number"
+                  min="1900"
+                  max="2100"
+                  value={form.year_of_passing}
+                  onChange={(event) => updateField('year_of_passing', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  placeholder="2026"
+                  required
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <FieldLabel>College / Company Name</FieldLabel>
+                <input
+                  value={form.college_company}
+                  onChange={(event) => updateField('college_company', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  placeholder="College, school, or company name"
                   required
                 />
               </div>

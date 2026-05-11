@@ -18,12 +18,23 @@ const requiredLabels = {
   course: 'Course Interested',
   branch: 'Branch',
   preferred_timing: 'Preferred Timing',
+  qualification: 'Qualification',
+  year_of_passing: 'Passed Out Year',
+  college_company: 'College / Company Name',
   conversion_date: 'Visit Date / Enrollment Date',
   visit_date: 'Visit Date',
   enrollment_date: 'Enrollment Date',
   start_date: 'Course Start Date',
   actual_fees: 'Course Fees',
 }
+
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
 
 function buildConversionForm(lead) {
   return {
@@ -36,6 +47,9 @@ function buildConversionForm(lead) {
     course: lead?.course || '',
     branch: lead?.branch || '',
     preferred_timing: lead?.preferred_timing || '',
+    qualification: lead?.qualification || '',
+    year_of_passing: '',
+    college_company: '',
     conversion_date: lead?.walkin_date || todayIso(),
     actual_fees: '',
     discount: '',
@@ -151,6 +165,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
     : [
         'name', 'phone', 'dob', 'email', 'pincode', 'location', 'course',
         ...(showBranchField ? ['branch'] : []),
+        'qualification', 'year_of_passing', 'college_company',
         'preferred_timing', 'conversion_date',
       ]
   const shouldShowField = (field) => {
@@ -196,6 +211,9 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       payload.batch_timing = form.batch_timing || ''
     } else {
       payload.visit_date = form.conversion_date
+      payload.qualification = form.qualification
+      payload.year_of_passing = form.year_of_passing
+      payload.college_company = form.college_company.trim()
     }
 
     onSubmit(payload)
@@ -270,6 +288,38 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
               <textarea value={form.location} onChange={(event) => updateField('location', event.target.value)} placeholder="Address" className="min-h-[92px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               {errorFor('location')}
             </div>
+          )}
+          {!isEnrollment && (
+            <>
+              <div>
+                <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                  <option value="">Qualification</option>
+                  {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                {errorFor('qualification')}
+              </div>
+              <div>
+                <input
+                  type="number"
+                  min="1900"
+                  max="2100"
+                  value={form.year_of_passing}
+                  onChange={(event) => updateField('year_of_passing', event.target.value)}
+                  placeholder="Passed Out Year"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                />
+                {errorFor('year_of_passing')}
+              </div>
+              <div className="md:col-span-2">
+                <input
+                  value={form.college_company}
+                  onChange={(event) => updateField('college_company', event.target.value)}
+                  placeholder="College / Company Name"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                />
+                {errorFor('college_company')}
+              </div>
+            </>
           )}
           <label className="block">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -101,6 +102,7 @@ export default function WalkInsListPage() {
   const [courses, setCourses] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadMessage, setLoadMessage] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useSelector((state) => state.auth)
@@ -178,8 +180,13 @@ export default function WalkInsListPage() {
         setOtherWalkins(data.other_walkins || [])
         setCurrentMonthCount(data.current_month_count || 0)
         setOtherWalkinsCount(data.other_walkins_count || 0)
+        setLoadMessage('')
       } catch (error) {
-        console.error('Failed to fetch walk-ins:', error)
+        setCurrentMonthWalkins([])
+        setOtherWalkins([])
+        setCurrentMonthCount(0)
+        setOtherWalkinsCount(0)
+        setLoadMessage(apiErrorMessage(error, 'Failed to load walk-ins.'))
       } finally {
         setLoading(false)
       }
@@ -234,6 +241,11 @@ export default function WalkInsListPage() {
       </section>
 
       <form method="GET" onSubmit={submitFilters} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+        {loadMessage && (
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+            {loadMessage}
+          </div>
+        )}
         <div className={`grid gap-3 md:grid-cols-2 ${canFilterByBranch ? 'xl:grid-cols-6' : 'xl:grid-cols-4'}`}>
           <input value={filters.name} onChange={(event) => updateFilter('name', event.target.value)} name="name" placeholder="Candidate name" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
           <input value={filters.phone} onChange={(event) => updateFilter('phone', event.target.value)} name="phone" placeholder="Phone number" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />

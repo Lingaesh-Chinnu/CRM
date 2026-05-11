@@ -43,6 +43,14 @@ function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.created_by_name || walkin.walk_in_by_display || 'Public Form'
 }
 
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
+
 function uniqueStaffUsers(rows) {
   const seen = new Set()
   return rows.filter((row) => {
@@ -62,15 +70,26 @@ const requiredLabels = {
   pincode: 'Pincode',
   course: 'Course',
   preferred_timing: 'Preferred Timing',
+  qualification: 'Qualification',
+  year_of_passing: 'Passed Out Year',
+  college_company: 'College / Company Name',
   enrollment_date: 'Enrollment Date',
   start_date: 'Course Start Date',
 }
 
 function DetailField({ label, value, children }) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      {value ? <p className="mt-2 font-semibold text-slate-900">{value}</p> : <div className="mt-3">{children}</div>}
+      {hasValue ? (
+        <p className="mt-2 font-semibold text-slate-900">{value}</p>
+      ) : (
+        <>
+          <p className="mt-2 font-semibold text-slate-900">Not provided</p>
+          {children && <div className="mt-3">{children}</div>}
+        </>
+      )}
     </div>
   )
 }
@@ -97,6 +116,9 @@ export default function WalkInDetailPage() {
     pincode: '',
     course: '',
     preferred_timing: '',
+    qualification: '',
+    year_of_passing: '',
+    college_company: '',
     visit_date: '',
     enrollment_date: new Date().toISOString().slice(0, 10),
     actual_fees: '',
@@ -140,6 +162,9 @@ export default function WalkInDetailPage() {
         pincode: data.pincode || '',
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
+        qualification: data.qualification || '',
+        year_of_passing: data.year_of_passing || '',
+        college_company: data.college_company || '',
         visit_date: data.visit_date || '',
         assigned_to: data.assigned_to || '',
         enrollment_date: data.visit_date || prev.enrollment_date,
@@ -258,6 +283,9 @@ export default function WalkInDetailPage() {
       ['email', 'Email'],
       ['location', 'Address'],
       ['pincode', 'Pincode'],
+      ['qualification', 'Qualification'],
+      ['year_of_passing', 'Passed Out Year'],
+      ['college_company', 'College / Company Name'],
       ['course', 'Course Interested'],
       ['preferred_timing', 'Preferred Timing'],
       ['visit_date', 'Visit Date'],
@@ -301,6 +329,9 @@ export default function WalkInDetailPage() {
         pincode: data.pincode || '',
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
+        qualification: data.qualification || '',
+        year_of_passing: data.year_of_passing || '',
+        college_company: data.college_company || '',
         visit_date: data.visit_date || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
@@ -345,7 +376,7 @@ export default function WalkInDetailPage() {
     }
   }
 
-  const hasMissingDetails = ['branch', 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'course', 'preferred_timing', 'visit_date']
+  const hasMissingDetails = ['branch', 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'qualification', 'year_of_passing', 'college_company', 'course', 'preferred_timing', 'visit_date']
     .some((field) => !walkin[field])
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
@@ -468,6 +499,29 @@ export default function WalkInDetailPage() {
             <DetailField label="Email" value={walkin.email}>
               <input type="email" value={form.email} onChange={(event) => updateDetail('email', event.target.value)} placeholder="Enter Email" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('email')}
+            </DetailField>
+            <DetailField label="Qualification" value={walkin.qualification_display || walkin.qualification}>
+              <select value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Qualification</option>
+                {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {detailErrorFor('qualification')}
+            </DetailField>
+            <DetailField label="Passed Out Year" value={walkin.year_of_passing}>
+              <input
+                type="number"
+                min="1900"
+                max="2100"
+                value={form.year_of_passing}
+                onChange={(event) => updateDetail('year_of_passing', event.target.value)}
+                placeholder="2026"
+                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+              />
+              {detailErrorFor('year_of_passing')}
+            </DetailField>
+            <DetailField label="College / Company Name" value={walkin.college_company}>
+              <input value={form.college_company} onChange={(event) => updateDetail('college_company', event.target.value)} placeholder="College, school, or company name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              {detailErrorFor('college_company')}
             </DetailField>
           </div>
           {hasMissingDetails && (

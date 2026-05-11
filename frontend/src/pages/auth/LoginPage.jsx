@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { login, clearError } from '../../store/slices/authSlice'
+import { login, logout, clearError } from '../../store/slices/authSlice'
 import toast from 'react-hot-toast'
 import brandLogo from '../../assets/brand-logo.png'
 import LoginAnimatedBackground from '../../components/common/LoginAnimatedBackground'
@@ -27,16 +27,16 @@ export default function LoginPage() {
       const role = data?.user?.role
 
       if (loginType === 'admin' && role !== 'super_admin') {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
+        await dispatch(logout())
         throw new Error('Admin access required. Use an Admin account.')
       }
 
       if (loginType === 'user' && role === 'super_admin') {
-        toast.success('Signed in as Admin')
-      } else {
-        toast.success('Login successful!')
+        await dispatch(logout())
+        throw new Error('User access required. Use a Staff/User account.')
       }
+
+      toast.success('Login successful!')
 
       const from = location.state?.from?.pathname || '/dashboard'
       navigate(from, { replace: true })

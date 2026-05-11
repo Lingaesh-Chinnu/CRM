@@ -433,6 +433,13 @@ class WalkIn(TimeStampedModel):
         WEEKDAY_EVENING = 'weekday_evening', 'Weekdays (Evening)'
         WEEKENDS = 'weekends', 'Weekends'
 
+    class Qualification(models.TextChoices):
+        SCHOOL_STUDENT = 'school_student', 'School Student'
+        COLLEGE_STUDENT = 'college_student', 'College Student'
+        GRADUATE = 'graduate', 'Graduate'
+        WORKING_PROFESSIONAL = 'working_professional', 'Working Professional'
+        HOUSEWIFE = 'housewife', 'Housewife'
+
     candidate_number = models.CharField(max_length=20, unique=True, editable=False)
     lead             = models.OneToOneField(Lead,   null=True, blank=True, on_delete=models.SET_NULL,
                                             related_name='walkin')
@@ -454,7 +461,7 @@ class WalkIn(TimeStampedModel):
     pincode         = models.CharField(max_length=10, blank=True)
 
     # Academic / Professional
-    qualification   = models.CharField(max_length=200, blank=True)
+    qualification   = models.CharField(max_length=30, choices=Qualification.choices, blank=True)
     profession      = models.CharField(max_length=200, blank=True)
     year_of_passing = models.PositiveSmallIntegerField(null=True, blank=True)
     college_company = models.CharField(max_length=300, blank=True)

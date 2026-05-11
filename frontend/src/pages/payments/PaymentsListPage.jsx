@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
@@ -47,10 +48,17 @@ export default function PaymentsListPage() {
     if (statusFilter) params.status = statusFilter
     if (dueThisWeek) params.due_this_week = dueThisWeek
 
-    api.get('/payments/', { params }).then(({ data }) => {
-      setRows(data.results || data)
-      setLoading(false)
-    })
+    setLoading(true)
+    setMessage('')
+    api.get('/payments/', { params })
+      .then(({ data }) => {
+        setRows(data.results || data)
+      })
+      .catch((error) => {
+        setRows([])
+        setMessage(apiErrorMessage(error, 'Failed to load payments.'))
+      })
+      .finally(() => setLoading(false))
   }, [statusFilter, dueThisWeek])
 
   useEffect(() => {

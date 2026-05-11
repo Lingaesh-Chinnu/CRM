@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 import brandLogo from '../../assets/brand-logo.png'
 
 const REDIRECT_URL = 'https://www.indrainstitute.com'
@@ -64,6 +65,8 @@ export default function PublicLeadForm() {
         }
         return next
       })
+    }).catch((error) => {
+      setMessage(apiErrorMessage(error, 'Unable to load enquiry form options.'))
     })
   }, [queryDefaults])
 
@@ -107,7 +110,7 @@ export default function PublicLeadForm() {
       }))
       handleSuccess()
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to submit your enquiry.')
+      setMessage(apiErrorMessage(error, 'Failed to submit your enquiry.'))
     } finally {
       setSaving(false)
     }
