@@ -162,7 +162,7 @@ export default function PublicLeadForm() {
             </div>
 
             <div>
-              <FieldLabel>Mobile Number</FieldLabel>
+              <FieldLabel>Phone Number</FieldLabel>
               <input
                 value={form.mobile_number}
                 onChange={(event) => updateField('mobile_number', event.target.value)}
@@ -173,7 +173,7 @@ export default function PublicLeadForm() {
             </div>
 
             <div>
-              <FieldLabel>Select Branch</FieldLabel>
+              <FieldLabel>Branch</FieldLabel>
               <select
                 value={form.branch}
                 onChange={(event) => updateField('branch', event.target.value)}

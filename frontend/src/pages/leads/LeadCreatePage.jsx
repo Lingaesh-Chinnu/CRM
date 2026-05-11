@@ -85,85 +85,106 @@ export default function LeadCreatePage() {
 
       <form onSubmit={submit} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="grid gap-4 md:grid-cols-2">
-          <input
-            placeholder="Name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            required
-          />
+          <div>
+            <FieldLabel>Full Name</FieldLabel>
+            <input
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              required
+            />
+          </div>
 
-          <input
-            placeholder="Phone"
-            value={form.phone}
-            onChange={(e) => setForm({ ...form, phone: e.target.value })}
-            onBlur={checkDuplicate}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            required
-          />
+          <div>
+            <FieldLabel>Phone Number</FieldLabel>
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              onBlur={checkDuplicate}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              required
+            />
+          </div>
 
-          <select
-            value={form.course}
-            onChange={(e) => setForm({ ...form, course: e.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            required
-          >
-            <option value="" disabled>Select course</option>
-            {courses.map((course) => (
-              <option key={course.id} value={course.id}>{course.name}</option>
-            ))}
-          </select>
-
-          {isSuperAdmin ? (
+          <div>
+            <FieldLabel>Course Interested</FieldLabel>
             <select
-              value={form.branch}
-              onChange={(e) => setForm({ ...form, branch: e.target.value })}
-              className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              value={form.course}
+              onChange={(e) => setForm({ ...form, course: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               required
             >
-              <option value="" disabled>Select branch</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>{branch.name}</option>
+              <option value="" disabled>Select course</option>
+              {courses.map((course) => (
+                <option key={course.id} value={course.id}>{course.name}</option>
               ))}
             </select>
+          </div>
+
+          {isSuperAdmin ? (
+            <div>
+              <FieldLabel>Branch</FieldLabel>
+              <select
+                value={form.branch}
+                onChange={(e) => setForm({ ...form, branch: e.target.value })}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                required
+              >
+                <option value="" disabled>Select branch</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+            </div>
           ) : (
-            <input
-              value={user?.branch_name || 'No branch assigned'}
-              readOnly
-              className="rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-700"
-            />
+            <div>
+              <FieldLabel>Branch</FieldLabel>
+              <input
+                value={user?.branch_name || 'No branch assigned'}
+                readOnly
+                className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-700"
+              />
+            </div>
           )}
 
-          <select
-            value={form.source}
-            onChange={(e) => setForm({ ...form, source: e.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            required
-          >
-            <option value="" disabled>Select source</option>
-            <option value="google">Google</option>
-            <option value="instagram">Instagram</option>
-            <option value="facebook">Facebook</option>
-            <option value="whatsapp">Whatsapp</option>
-            <option value="justdial">JustDial</option>
-            <option value="team_reference">Team Reference</option>
-            <option value="friends_reference">Friends Reference</option>
-            <option value="others">Others</option>
-          </select>
+          <div>
+            <FieldLabel>Source</FieldLabel>
+            <select
+              value={form.source}
+              onChange={(e) => setForm({ ...form, source: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              required
+            >
+              <option value="" disabled>Select source</option>
+              <option value="google">Google</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="whatsapp">Whatsapp</option>
+              <option value="justdial">JustDial</option>
+              <option value="team_reference">Team Reference</option>
+              <option value="friends_reference">Friends Reference</option>
+              <option value="others">Others</option>
+            </select>
+          </div>
 
-          <input
-            placeholder="Qualification"
-            value={form.qualification}
-            onChange={(e) => setForm({ ...form, qualification: e.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-          />
+          <div>
+            <FieldLabel>Qualification</FieldLabel>
+            <input
+              value={form.qualification}
+              onChange={(e) => setForm({ ...form, qualification: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
+          </div>
 
-          <input
-            placeholder="Degree (B.Com, BCA, BE CSE, MBA, 12th, Diploma)"
-            value={form.degree}
-            onChange={(e) => setForm({ ...form, degree: e.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-          />
+          <div>
+            <FieldLabel>Degree</FieldLabel>
+            <input
+              placeholder="Example: BCA, B.Com, BE CSE, MBA"
+              value={form.degree}
+              onChange={(e) => setForm({ ...form, degree: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
+          </div>
 
           <div>
             <FieldLabel>Next Follow-up Date</FieldLabel>
@@ -175,12 +196,14 @@ export default function LeadCreatePage() {
             />
           </div>
 
-          <textarea
-            value={form.remarks}
-            onChange={(e) => setForm({ ...form, remarks: e.target.value })}
-            placeholder="Remarks"
-            className="md:col-span-2 min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-          />
+          <div className="md:col-span-2">
+            <FieldLabel>Remarks</FieldLabel>
+            <textarea
+              value={form.remarks}
+              onChange={(e) => setForm({ ...form, remarks: e.target.value })}
+              className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
+          </div>
         </div>
 
         {duplicateInfo && (

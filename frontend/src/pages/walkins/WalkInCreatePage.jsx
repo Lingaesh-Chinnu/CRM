@@ -79,11 +79,17 @@ export default function WalkInCreatePage() {
       </section>
       <form onSubmit={submit} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="grid gap-4 md:grid-cols-2">
-          <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
-            <option value="">Select branch</option>
-            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-          </select>
-          <input placeholder="Name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <div>
+            <FieldLabel>Branch</FieldLabel>
+            <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select branch</option>
+              {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel>Full Name</FieldLabel>
+            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          </div>
           <div>
             <FieldLabel>Date of Birth</FieldLabel>
             <input
@@ -96,47 +102,77 @@ export default function WalkInCreatePage() {
               required
             />
           </div>
-          <input placeholder="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input placeholder="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input placeholder="Pincode" value={form.pincode} onChange={(event) => setForm({ ...form, pincode: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <textarea value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} placeholder="Address" className="md:col-span-2 min-h-[110px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <select value={form.qualification} onChange={(event) => setForm({ ...form, qualification: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
-            <option value="">Qualification</option>
-            {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <input
-            placeholder="Example: BCA, B.Com, BE CSE, MBA"
-            value={form.degree}
-            onChange={(event) => setForm({ ...form, degree: event.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-          />
-          <input
-            type="number"
-            min="1900"
-            max="2100"
-            placeholder="Passed Out Year"
-            value={form.year_of_passing}
-            onChange={(event) => setForm({ ...form, year_of_passing: event.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            required
-          />
-          <input
-            placeholder="College / Company Name"
-            value={form.college_company}
-            onChange={(event) => setForm({ ...form, college_company: event.target.value })}
-            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2"
-            required
-          />
-          <select value={form.course} onChange={(event) => setForm({ ...form, course: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
-            <option value="">Course interested</option>
-            {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-          </select>
-          <select value={form.preferred_timing} onChange={(event) => setForm({ ...form, preferred_timing: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
-            <option value="">Preferred timing</option>
-            <option value="weekday_morning">Weekdays (Morning)</option>
-            <option value="weekday_evening">Weekdays (Evening)</option>
-            <option value="weekends">Weekends</option>
-          </select>
+          <div>
+            <FieldLabel>Phone Number</FieldLabel>
+            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          </div>
+          <div>
+            <FieldLabel>Email</FieldLabel>
+            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          </div>
+          <div>
+            <FieldLabel>Pincode</FieldLabel>
+            <input value={form.pincode} onChange={(event) => setForm({ ...form, pincode: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel>Address</FieldLabel>
+            <textarea value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          </div>
+          <div>
+            <FieldLabel>Qualification</FieldLabel>
+            <select value={form.qualification} onChange={(event) => setForm({ ...form, qualification: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select qualification</option>
+              {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel>Degree</FieldLabel>
+            <input
+              placeholder="Example: BCA, B.Com, BE CSE, MBA"
+              value={form.degree}
+              onChange={(event) => setForm({ ...form, degree: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
+          </div>
+          <div>
+            <FieldLabel>Passed Out Year</FieldLabel>
+            <input
+              type="number"
+              min="1900"
+              max="2100"
+              placeholder="2026"
+              value={form.year_of_passing}
+              onChange={(event) => setForm({ ...form, year_of_passing: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              required
+            />
+          </div>
+          <div>
+            <FieldLabel>College / Company Name</FieldLabel>
+            <input
+              placeholder="College, school, or company name"
+              value={form.college_company}
+              onChange={(event) => setForm({ ...form, college_company: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              required
+            />
+          </div>
+          <div>
+            <FieldLabel>Course Interested</FieldLabel>
+            <select value={form.course} onChange={(event) => setForm({ ...form, course: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select course</option>
+              {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel>Preferred Timing</FieldLabel>
+            <select value={form.preferred_timing} onChange={(event) => setForm({ ...form, preferred_timing: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select timing</option>
+              <option value="weekday_morning">Weekdays (Morning)</option>
+              <option value="weekday_evening">Weekdays (Evening)</option>
+              <option value="weekends">Weekends</option>
+            </select>
+          </div>
           <div>
             <FieldLabel>Visit Date</FieldLabel>
             <input
@@ -160,16 +196,22 @@ export default function WalkInCreatePage() {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
           </div>
-          <select value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2" required>
-            <option value="">Select source</option>
-            <option value="google">Google</option>
-            <option value="justdial">JustDial</option>
-            <option value="direct">Direct</option>
-            <option value="instagram">Instagram</option>
-            <option value="facebook">Facebook</option>
-            <option value="friends_reference">Friends Reference</option>
-          </select>
-          <textarea value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} placeholder="Remarks" className="md:col-span-2 min-h-[120px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+          <div className="md:col-span-2">
+            <FieldLabel>Source</FieldLabel>
+            <select value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select source</option>
+              <option value="google">Google</option>
+              <option value="justdial">JustDial</option>
+              <option value="direct">Direct</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="friends_reference">Friends Reference</option>
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel>Remarks</FieldLabel>
+            <textarea value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+          </div>
         </div>
         {errorMessage && (
           <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">

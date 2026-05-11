@@ -219,7 +219,7 @@ export default function PublicWalkInForm() {
               </div>
 
               <div>
-                <FieldLabel>Name</FieldLabel>
+                <FieldLabel>Full Name</FieldLabel>
                 <input
                   value={form.name}
                   onChange={(event) => updateField('name', event.target.value)}
@@ -250,7 +250,7 @@ export default function PublicWalkInForm() {
               </div>
 
               <div>
-                <FieldLabel>Email ID</FieldLabel>
+                <FieldLabel>Email</FieldLabel>
                 <input
                   type="email"
                   value={form.email}
@@ -298,7 +298,7 @@ export default function PublicWalkInForm() {
               </div>
 
               <div>
-                <FieldLabel>Degree / Department</FieldLabel>
+                <FieldLabel>Degree</FieldLabel>
                 <input
                   value={form.degree}
                   onChange={(event) => updateField('degree', event.target.value)}

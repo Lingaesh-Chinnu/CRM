@@ -127,6 +127,17 @@ function DetailField({ label, value, children }) {
   )
 }
 
+function FormField({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        {label}
+      </span>
+      {children}
+    </label>
+  )
+}
+
 function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, saving, error, onCancel, onSubmit }) {
   const isEnrollment = type === 'enrollment'
   const label = isEnrollment ? 'Enrollment' : 'Walk-in'
@@ -286,93 +297,119 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
         )}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div>
-            <input value={form.name} onChange={(event) => updateField('name', event.target.value)} placeholder="Name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <FormField label="Full Name">
+              <input value={form.name} onChange={(event) => updateField('name', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            </FormField>
             {errorFor('name')}
           </div>
           <div>
-            <input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} placeholder="Phone Number" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <FormField label="Phone Number">
+              <input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            </FormField>
             {errorFor('phone')}
           </div>
           {shouldShowField('dob') && (
             <div>
-              <input type="date" value={form.dob} onChange={(event) => updateField('dob', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <FormField label="Date of Birth">
+                <input type="date" value={form.dob} onChange={(event) => updateField('dob', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </FormField>
               {errorFor('dob')}
             </div>
           )}
           {shouldShowField('email') && (
             <div>
-              <input type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} placeholder="Email" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <FormField label="Email">
+                <input type="email" value={form.email} onChange={(event) => updateField('email', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </FormField>
               {errorFor('email')}
             </div>
           )}
           {shouldShowField('pincode') && (
             <div>
-              <input value={form.pincode} onChange={(event) => updateField('pincode', event.target.value)} placeholder="Pincode" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <FormField label="Pincode">
+                <input value={form.pincode} onChange={(event) => updateField('pincode', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </FormField>
               {errorFor('pincode')}
             </div>
           )}
           <div>
-            <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-              <option value="">Course Interested</option>
-              {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-            </select>
+            <FormField label="Course Interested">
+              <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <option value="">Select course</option>
+                {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+              </select>
+            </FormField>
             {errorFor('course')}
           </div>
           {shouldShowField('branch') && (
             <div>
-              <select value={form.branch} onChange={(event) => { updateField('branch', event.target.value); setForm((current) => ({ ...current, branch: event.target.value, discount: '' })) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                <option value="">Branch</option>
-                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-              </select>
+              <FormField label="Branch">
+                <select value={form.branch} onChange={(event) => { updateField('branch', event.target.value); setForm((current) => ({ ...current, branch: event.target.value, discount: '' })) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                  <option value="">Select branch</option>
+                  {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                </select>
+              </FormField>
               {errorFor('branch')}
             </div>
           )}
           <div>
-            <select value={form.preferred_timing} onChange={(event) => updateField('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-              <option value="">Preferred Timing</option>
-              <option value="weekday_morning">Weekdays (Morning)</option>
-              <option value="weekday_evening">Weekdays (Evening)</option>
-              <option value="weekends">Weekends</option>
-            </select>
+            <FormField label="Preferred Timing">
+              <select value={form.preferred_timing} onChange={(event) => updateField('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                <option value="">Select timing</option>
+                <option value="weekday_morning">Weekdays (Morning)</option>
+                <option value="weekday_evening">Weekdays (Evening)</option>
+                <option value="weekends">Weekends</option>
+              </select>
+            </FormField>
             {errorFor('preferred_timing')}
           </div>
           {shouldShowField('location') && (
             <div className="md:col-span-2">
-              <textarea value={form.location} onChange={(event) => updateField('location', event.target.value)} placeholder="Address" className="min-h-[92px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              <FormField label="Address">
+                <textarea value={form.location} onChange={(event) => updateField('location', event.target.value)} className="min-h-[92px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </FormField>
               {errorFor('location')}
             </div>
           )}
           {!isEnrollment && (
             <>
               <div>
-                <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                  <option value="">Qualification</option>
-                  {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                <FormField label="Qualification">
+                  <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                    <option value="">Select qualification</option>
+                    {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </FormField>
                 {errorFor('qualification')}
               </div>
               <div>
-                <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                <FormField label="Degree">
+                  <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                </FormField>
               </div>
               <div>
-                <input
-                  type="number"
-                  min="1900"
-                  max="2100"
-                  value={form.year_of_passing}
-                  onChange={(event) => updateField('year_of_passing', event.target.value)}
-                  placeholder="Passed Out Year"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                />
+                <FormField label="Passed Out Year">
+                  <input
+                    type="number"
+                    min="1900"
+                    max="2100"
+                    value={form.year_of_passing}
+                    onChange={(event) => updateField('year_of_passing', event.target.value)}
+                    placeholder="2026"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                  />
+                </FormField>
                 {errorFor('year_of_passing')}
               </div>
               <div className="md:col-span-2">
-                <input
-                  value={form.college_company}
-                  onChange={(event) => updateField('college_company', event.target.value)}
-                  placeholder="College / Company Name"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                />
+                <FormField label="College / Company Name">
+                  <input
+                    value={form.college_company}
+                    onChange={(event) => updateField('college_company', event.target.value)}
+                    placeholder="College, school, or company name"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                  />
+                </FormField>
                 {errorFor('college_company')}
               </div>
             </>
@@ -398,19 +435,27 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           )}
           {isEnrollment && (
             <>
-              <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                <option value="">Qualification</option>
-                {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-              <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-              <select value={form.discount || ''} onChange={(event) => updateField('discount', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm md:col-span-2">
-                <option value="">No discount</option>
-                {availableDiscounts.map((discount) => (
-                  <option key={discount.id} value={discount.id}>
-                    {discount.name} - Rs {formatMoney(discount.value)}
-                  </option>
-                ))}
-              </select>
+              <FormField label="Qualification">
+                <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                  <option value="">Select qualification</option>
+                  {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </FormField>
+              <FormField label="Degree">
+                <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              </FormField>
+              <div className="md:col-span-2">
+                <FormField label="Available Discount">
+                  <select value={form.discount || ''} onChange={(event) => updateField('discount', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                    <option value="">No discount</option>
+                    {availableDiscounts.map((discount) => (
+                      <option key={discount.id} value={discount.id}>
+                        {discount.name} - Rs {formatMoney(discount.value)}
+                      </option>
+                    ))}
+                  </select>
+                </FormField>
+              </div>
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 md:col-span-2">
                 <p className="text-xl font-black tracking-tight text-emerald-950">
                   Final Fees: Rs {formatMoney(finalFees)}

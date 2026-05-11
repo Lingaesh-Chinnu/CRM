@@ -76,7 +76,7 @@ const requiredLabels = {
   course: 'Course',
   preferred_timing: 'Preferred Timing',
   qualification: 'Qualification',
-  degree: 'Degree / Department',
+  degree: 'Degree',
   year_of_passing: 'Passed Out Year',
   college_company: 'College / Company Name',
   enrollment_date: 'Enrollment Date',
@@ -100,6 +100,17 @@ function DetailField({ label, value, children }) {
         </>
       )}
     </div>
+  )
+}
+
+function FormField({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        {label}
+      </span>
+      {children}
+    </label>
   )
 }
 
@@ -536,7 +547,7 @@ export default function WalkInDetailPage() {
               </select>
               {detailErrorFor('qualification')}
             </DetailField>
-            <DetailField label="Degree / Department" value={walkin.degree}>
+            <DetailField label="Degree" value={walkin.degree}>
               <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
             <DetailField label="Passed Out Year" value={walkin.year_of_passing}>
@@ -620,78 +631,87 @@ export default function WalkInDetailPage() {
           <div className="mt-5 space-y-4">
             <div>
               {isSuperAdmin ? (
-                <select value={form.branch} onChange={(event) => { updateDetail('branch', event.target.value); setForm((current) => ({ ...current, branch: event.target.value, discount: '' })) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <option value="">Branch</option>
-                  {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                </select>
+                <FormField label="Branch">
+                  <select value={form.branch} onChange={(event) => { updateDetail('branch', event.target.value); setForm((current) => ({ ...current, branch: event.target.value, discount: '' })) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <option value="">Select branch</option>
+                    {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+                  </select>
+                </FormField>
               ) : (
-                <input value={walkin.branch_name || 'No branch'} readOnly className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-700" />
+                <FormField label="Branch">
+                  <input value={walkin.branch_name || 'No branch'} readOnly className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-700" />
+                </FormField>
               )}
               {errorFor('branch')}
             </div>
             <div>
-              <input value={form.name} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+              <FormField label="Full Name">
+                <input value={form.name} onChange={(event) => updateDetail('name', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+              </FormField>
               {errorFor('name')}
             </div>
             <div>
-              <input value={form.phone} onChange={(event) => updateDetail('phone', event.target.value)} placeholder="Phone Number" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+              <FormField label="Phone Number">
+                <input value={form.phone} onChange={(event) => updateDetail('phone', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+              </FormField>
               {errorFor('phone')}
             </div>
             <div>
-              <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <option value="">Course Interested</option>
-                {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-              </select>
+              <FormField label="Course Interested">
+                <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <option value="">Select course</option>
+                  {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+                </select>
+              </FormField>
               {errorFor('course')}
             </div>
             <div>
-              <select value={form.preferred_timing} onChange={(event) => updateDetail('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <option value="">Preferred Timing</option>
-                <option value="weekday_morning">Weekdays (Morning)</option>
-                <option value="weekday_evening">Weekdays (Evening)</option>
-                <option value="weekends">Weekends</option>
-              </select>
+              <FormField label="Preferred Timing">
+                <select value={form.preferred_timing} onChange={(event) => updateDetail('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <option value="">Select timing</option>
+                  <option value="weekday_morning">Weekdays (Morning)</option>
+                  <option value="weekday_evening">Weekdays (Evening)</option>
+                  <option value="weekends">Weekends</option>
+                </select>
+              </FormField>
               {errorFor('preferred_timing')}
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Degree / Department
-              </label>
-              <input
-                value={form.degree}
-                onChange={(event) => updateDetail('degree', event.target.value)}
-                placeholder="Example: BCA, B.Com, BE CSE, MBA"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-              />
+              <FormField label="Degree">
+                <input
+                  value={form.degree}
+                  onChange={(event) => updateDetail('degree', event.target.value)}
+                  placeholder="Example: BCA, B.Com, BE CSE, MBA"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                />
+              </FormField>
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Enrollment Date
-              </label>
-              <input
-                type="date"
-                value={form.enrollment_date}
-                onChange={(event) => updateDetail('enrollment_date', event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-              />
+              <FormField label="Enrollment Date">
+                <input
+                  type="date"
+                  value={form.enrollment_date}
+                  onChange={(event) => updateDetail('enrollment_date', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                />
+              </FormField>
               {errorFor('enrollment_date')}
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Available Discount
-              </label>
-              <select
-                value={form.discount || ''}
-                onChange={(event) => setForm({ ...form, discount: event.target.value })}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-              >
-                <option value="">No discount</option>
-                {availableDiscounts.map((discount) => (
-                  <option key={discount.id} value={discount.id}>
-                    {discount.name} - Rs {formatMoney(discount.value)}
-                  </option>
-                ))}
-              </select>
+              <FormField label="Available Discount">
+                <select
+                  value={form.discount || ''}
+                  onChange={(event) => setForm({ ...form, discount: event.target.value })}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <option value="">No discount</option>
+                  {availableDiscounts.map((discount) => (
+                    <option key={discount.id} value={discount.id}>
+                      {discount.name} - Rs {formatMoney(discount.value)}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
             </div>
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
               <p className="text-xl font-black tracking-tight text-emerald-950">
@@ -703,15 +723,14 @@ export default function WalkInDetailPage() {
               </p>
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                Course Start Date
-              </label>
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={(event) => updateDetail('start_date', event.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-              />
+              <FormField label="Course Start Date">
+                <input
+                  type="date"
+                  value={form.start_date}
+                  onChange={(event) => updateDetail('start_date', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                />
+              </FormField>
               {errorFor('start_date')}
             </div>
           </div>
