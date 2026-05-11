@@ -745,6 +745,8 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
     serializer.is_valid(raise_exception=True)
     enrollment = serializer.save(
         walkin=transfer_request.walkin,
+        original_walkin_course=transfer_request.walkin.course,
+        final_enrollment_course_id=payload.get('course'),
         enrolled_by=reviewer,
         created_by=reviewer,
         status=Enrollment.Status.PENDING_RULES,
@@ -757,12 +759,11 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
     walkin.dob = payload.get('dob') or walkin.dob
     walkin.location = payload.get('location') or walkin.location
     walkin.pincode = payload.get('pincode') or walkin.pincode
-    walkin.course_id = payload.get('course') or walkin.course_id
     walkin.preferred_timing = payload.get('preferred_timing') or walkin.preferred_timing
     walkin.status = WalkIn.Status.TRANSFERRED
     walkin.remarks = (walkin.remarks + '\n' if walkin.remarks else '') + f'Transferred to {transfer_request.requested_branch.name if transfer_request.requested_branch else "requested branch"}.'
     walkin.save(update_fields=[
-        'name', 'phone', 'email', 'dob', 'location', 'pincode', 'course',
+        'name', 'phone', 'email', 'dob', 'location', 'pincode',
         'preferred_timing', 'status', 'remarks', 'updated_at',
     ])
 
@@ -1522,6 +1523,8 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead=lead,
                 branch_id=data.get('branch'),
                 course_id=data.get('course'),
+                original_walkin_course_id=lead.course_id,
+                final_enrollment_course_id=data.get('course'),
                 enrolled_by=request.user,
                 created_by=request.user,
                 name=data.get('name'),
@@ -1553,7 +1556,6 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.pincode = data.get('pincode')
             lead.preferred_timing = data.get('preferred_timing')
             lead.branch_id = data.get('branch')
-            lead.course_id = data.get('course')
             lead.status = Lead.Status.CONVERTED
             lead.converted_to_type = 'enrollment'
             lead.converted_record_id = enrollment.id
@@ -1561,7 +1563,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.converted_by = request.user
             lead.save(update_fields=[
                 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing',
-                'branch', 'course', 'status', 'converted_to_type', 'converted_record_id',
+                'branch', 'status', 'converted_to_type', 'converted_record_id',
                 'converted_at', 'converted_by', 'updated_at',
             ])
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
@@ -2335,6 +2337,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         enrollment = serializer.save(
             walkin=walkin,
+            original_walkin_course=walkin.course,
+            final_enrollment_course=course,
             enrolled_by=request.user,
             created_by=request.user,
             status=Enrollment.Status.PENDING_RULES,
@@ -2348,7 +2352,6 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin.location = data.get('location')
         walkin.pincode = data.get('pincode')
         walkin.branch_id = data.get('branch')
-        walkin.course_id = data.get('course')
         walkin.preferred_timing = data.get('preferred_timing')
         walkin.status = WalkIn.Status.CONVERTED
         walkin.converted_to_type = 'enrollment'
@@ -2357,7 +2360,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin.converted_by = request.user
         walkin.save(update_fields=[
             'name', 'phone', 'email', 'dob', 'location', 'pincode',
-            'branch', 'course', 'preferred_timing', 'status', 'converted_to_type',
+            'branch', 'preferred_timing', 'status', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
         ])
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)

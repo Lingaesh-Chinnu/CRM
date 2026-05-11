@@ -106,6 +106,7 @@ export default function WalkInDetailPage() {
   const [detailErrors, setDetailErrors] = useState({})
   const [branchCorrectionOpen, setBranchCorrectionOpen] = useState(false)
   const [branchCorrection, setBranchCorrection] = useState({ branch: '', reason: '' })
+  const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
   const [form, setForm] = useState({
     branch: '',
     name: '',
@@ -208,6 +209,25 @@ export default function WalkInDetailPage() {
     setDetailErrors((current) => ({ ...current, course: '' }))
   }
 
+  const courseNameFor = (courseId) => courses.find((course) => String(course.id) === String(courseId))?.name || 'selected course'
+
+  const submitEnrollment = async (payload) => {
+    setPendingCourseChangePayload(null)
+    try {
+      const { data } = await api.post(`/walkins/${id}/convert-to-enrollment/`, payload)
+      setMessage('Walk-in converted to enrollment successfully.')
+      setWalkin((current) => ({
+        ...current,
+        status: 'converted',
+        converted_to_type: 'enrollment',
+        converted_record_id: data.id,
+        converted_at: new Date().toISOString(),
+      }))
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to convert walk-in to enrollment.')
+    }
+  }
+
   const convert = async (event) => {
     event.preventDefault()
     const requiredFields = [
@@ -227,34 +247,26 @@ export default function WalkInDetailPage() {
       return
     }
     setFieldErrors({})
-    try {
-      const payload = {
-        branch: Number(form.branch),
-        name: form.name.trim(),
-        dob: form.dob,
-        phone: form.phone.trim(),
-        email: form.email.trim(),
-        location: form.location.trim(),
-        pincode: form.pincode.trim(),
-        course: Number(form.course),
-        preferred_timing: form.preferred_timing,
-        enrollment_date: form.enrollment_date,
-        actual_fees: selectedDiscount ? discountBaseFee : courseFee,
-        discount: form.discount || null,
-        start_date: form.start_date || null,
-      }
-      const { data } = await api.post(`/walkins/${id}/convert-to-enrollment/`, payload)
-      setMessage('Walk-in converted to enrollment successfully.')
-      setWalkin((current) => ({
-        ...current,
-        status: 'converted',
-        converted_to_type: 'enrollment',
-        converted_record_id: data.id,
-        converted_at: new Date().toISOString(),
-      }))
-    } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to convert walk-in to enrollment.')
+    const payload = {
+      branch: Number(form.branch),
+      name: form.name.trim(),
+      dob: form.dob,
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      location: form.location.trim(),
+      pincode: form.pincode.trim(),
+      course: Number(form.course),
+      preferred_timing: form.preferred_timing,
+      enrollment_date: form.enrollment_date,
+      actual_fees: selectedDiscount ? discountBaseFee : courseFee,
+      discount: form.discount || null,
+      start_date: form.start_date || null,
     }
+    if (walkin.course && String(walkin.course) !== String(payload.course)) {
+      setPendingCourseChangePayload(payload)
+      return
+    }
+    await submitEnrollment(payload)
   }
 
   const saveFollowUp = async (payload) => {
@@ -546,6 +558,29 @@ export default function WalkInDetailPage() {
           <h2 className="text-xl font-black tracking-tight text-slate-950">
             {convertedType ? 'Conversion status' : 'Convert to enrollment'}
           </h2>
+          {pendingCourseChangePayload && (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-semibold leading-6 text-amber-950">
+                Candidate originally enquired for {walkin.course_name || courseNameFor(walkin.course)}, but now enrolling for {courseNameFor(pendingCourseChangePayload.course)}. Do you want to continue?
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => submitEnrollment(pendingCourseChangePayload)}
+                  className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Confirm & Continue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingCourseChangePayload(null)}
+                  className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-amber-100"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
           {convertedType ? (
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
               <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">

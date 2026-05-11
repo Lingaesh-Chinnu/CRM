@@ -568,6 +568,8 @@ from crm.models import Enrollment, RulesSigningRequest, get_default_installment_
 
 class EnrollmentListSerializer(serializers.ModelSerializer):
     course_name = serializers.CharField(source='course.name',  read_only=True)
+    original_walkin_course_name = serializers.CharField(source='original_walkin_course.name', read_only=True)
+    final_enrollment_course_name = serializers.CharField(source='final_enrollment_course.name', read_only=True)
     branch_name = serializers.CharField(source='branch.name',  read_only=True)
     payment_status = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
@@ -577,6 +579,8 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
         model  = Enrollment
         fields = ['id','student_number','name','dob','phone','email','location','pincode',
                   'course_name','branch_name','final_fees','enrollment_date','status',
+                  'original_walkin_course','original_walkin_course_name',
+                  'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','source','source_display','preferred_timing',
                   'preferred_timing_display','demo_class','interested_global_certification']
 
@@ -588,6 +592,8 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
 
 class EnrollmentDetailSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name', read_only=True)
+    original_walkin_course_name = serializers.CharField(source='original_walkin_course.name', read_only=True)
+    final_enrollment_course_name = serializers.CharField(source='final_enrollment_course.name', read_only=True)
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     payment_info = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)

@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
-from crm.models import Branch, Course, WalkIn
+from crm.models import Branch, Course, Enrollment, Lead, WalkIn
 
 
 User = get_user_model()
@@ -12,6 +12,7 @@ class PublicWalkInFormTests(APITestCase):
         self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
         self.other_branch = Branch.objects.create(name='Hopes', city='Coimbatore')
         self.course = Course.objects.create(name='Python Full Stack', actual_fees=10000)
+        self.final_course = Course.objects.create(name='Software Testing', actual_fees=15000)
         self.staff = User.objects.create_user(
             username='staff',
             email='staff@example.com',
@@ -81,3 +82,72 @@ class PublicWalkInFormTests(APITestCase):
         admin_response = self.client.get('/api/walkins/')
         self.assertEqual(admin_response.status_code, 200)
         self.assertEqual(len(admin_response.data), 1)
+
+    def test_walkin_to_enrollment_can_change_course_without_overwriting_walkin_course(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Course Change Candidate',
+            dob='2000-01-01',
+            phone='9000000001',
+            email='course-change@example.com',
+            location='Coimbatore',
+            pincode='641001',
+            qualification=WalkIn.Qualification.GRADUATE,
+            year_of_passing=2025,
+            college_company='IIE College',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.DIRECT,
+            visit_date='2026-05-11',
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/walkins/{walkin.id}/convert-to-enrollment/', {
+            'branch': self.branch.id,
+            'name': walkin.name,
+            'phone': walkin.phone,
+            'course': self.final_course.id,
+            'preferred_timing': walkin.preferred_timing,
+            'enrollment_date': '2026-05-11',
+            'start_date': '2026-05-12',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        walkin.refresh_from_db()
+        enrollment = Enrollment.objects.get(walkin=walkin)
+        self.assertEqual(walkin.course, self.course)
+        self.assertEqual(enrollment.course, self.final_course)
+        self.assertEqual(enrollment.original_walkin_course, self.course)
+        self.assertEqual(enrollment.final_enrollment_course, self.final_course)
+        self.assertEqual(enrollment.actual_fees, self.final_course.actual_fees)
+
+    def test_lead_to_enrollment_can_change_course_and_preserve_original_course(self):
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Lead Course Change',
+            phone='9000000002',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_EVENING,
+            source=Lead.Source.WEBSITE,
+            status=Lead.Status.NEW,
+            created_by=self.staff,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/leads/{lead.id}/convert-to-enrollment/', {
+            'branch': self.branch.id,
+            'name': lead.name,
+            'phone': lead.phone,
+            'course': self.final_course.id,
+            'preferred_timing': lead.preferred_timing,
+            'enrollment_date': '2026-05-11',
+            'start_date': '2026-05-12',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead.refresh_from_db()
+        enrollment = Enrollment.objects.get(lead=lead)
+        self.assertEqual(lead.course, self.course)
+        self.assertEqual(enrollment.course, self.final_course)
+        self.assertEqual(enrollment.original_walkin_course, self.course)
+        self.assertEqual(enrollment.final_enrollment_course, self.final_course)

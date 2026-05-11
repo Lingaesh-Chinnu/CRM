@@ -737,6 +737,10 @@ class Enrollment(TimeStampedModel):
     branch          = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
                                         related_name='enrollments')
     course          = models.ForeignKey(Course, on_delete=models.RESTRICT, related_name='enrollments')
+    original_walkin_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL,
+                                               related_name='enrollments_original_walkin_course')
+    final_enrollment_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL,
+                                                related_name='enrollments_final_course')
     enrolled_by     = models.ForeignKey(User,   null=True, blank=True, on_delete=models.SET_NULL,
                                         related_name='enrollments_created')
     created_by      = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
@@ -775,6 +779,8 @@ class Enrollment(TimeStampedModel):
         ordering = ['-enrollment_date', '-created_at']
 
     def save(self, *args, **kwargs):
+        if self.course_id and not self.final_enrollment_course_id:
+            self.final_enrollment_course_id = self.course_id
         if not self.student_number and self.status in self.FINAL_STATUSES:
             self.student_number = generate_student_number(self.branch)
         # Auto-compute final fees

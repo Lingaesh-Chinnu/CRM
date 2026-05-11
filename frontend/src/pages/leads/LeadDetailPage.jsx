@@ -123,6 +123,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   })
   const [availableDiscounts, setAvailableDiscounts] = useState([])
   const [fieldErrors, setFieldErrors] = useState({})
+  const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }))
@@ -151,6 +152,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   }
 
   const selectedCourse = courses.find((course) => String(course.id) === String(form.course))
+  const courseNameFor = (courseId) => courses.find((course) => String(course.id) === String(courseId))?.name || 'selected course'
   const selectedDiscount = availableDiscounts.find((discount) => String(discount.id) === String(form.discount))
   const courseFee = Number(selectedCourse?.final_fees ?? form.actual_fees ?? 0)
   const discountBaseFee = Number(form.actual_fees || selectedCourse?.actual_fees || selectedCourse?.final_fees || 0)
@@ -216,6 +218,11 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       payload.college_company = form.college_company.trim()
     }
 
+    if (isEnrollment && lead?.course && String(lead.course) !== String(payload.course)) {
+      setPendingCourseChangePayload(payload)
+      return
+    }
+
     onSubmit(payload)
   }
 
@@ -231,6 +238,31 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
         <p className="mt-4 text-sm leading-6 text-slate-600">
           Complete the required details before creating the {isEnrollment ? 'enrollment' : 'walk-in'} record.
         </p>
+        {pendingCourseChangePayload && (
+          <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold leading-6 text-amber-950">
+              Candidate originally enquired for {lead.course_name || courseNameFor(lead.course)}, but now enrolling for {courseNameFor(pendingCourseChangePayload.course)}. Do you want to continue?
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => onSubmit(pendingCourseChangePayload)}
+                disabled={saving}
+                className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                Confirm & Continue
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingCourseChangePayload(null)}
+                disabled={saving}
+                className="rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-amber-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div>
             <input value={form.name} onChange={(event) => updateField('name', event.target.value)} placeholder="Name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
