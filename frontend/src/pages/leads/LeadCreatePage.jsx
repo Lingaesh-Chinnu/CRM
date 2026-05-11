@@ -24,6 +24,14 @@ const initialForm = {
   remarks: '',
 }
 
+const qualificationOptions = [
+  { value: 'school_student', label: 'School Student' },
+  { value: 'college_student', label: 'College Student' },
+  { value: 'graduate', label: 'Graduate' },
+  { value: 'working_professional', label: 'Working Professional' },
+  { value: 'housewife', label: 'Housewife' },
+]
+
 function FieldLabel({ children }) {
   return <label className="mb-2 block text-sm font-semibold text-slate-600">{children}</label>
 }
@@ -169,11 +177,16 @@ export default function LeadCreatePage() {
 
           <div>
             <FieldLabel>Qualification</FieldLabel>
-            <input
+            <select
               value={form.qualification}
               onChange={(e) => setForm({ ...form, qualification: e.target.value })}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            />
+            >
+              <option value="">Select qualification</option>
+              {qualificationOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </div>
 
           <div>

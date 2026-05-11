@@ -719,7 +719,10 @@ export default function LeadDetailPage() {
               {detailErrorFor('preferred_timing')}
             </DetailField>
             <DetailField label="Qualification" value={lead.qualification_display || lead.qualification}>
-              <input value={detailsForm.qualification || ''} onChange={(event) => updateDetail('qualification', event.target.value)} placeholder="Enter Qualification" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              <select value={detailsForm.qualification || ''} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Qualification</option>
+                {qualificationSelectOptions(detailsForm.qualification || '').map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
               {detailErrorFor('qualification')}
             </DetailField>
             <DetailField label="Degree" value={lead.degree}>

@@ -297,14 +297,28 @@ class FollowUpSerializer(serializers.ModelSerializer):
 class LeadListSerializer(serializers.ModelSerializer):
     """Compact serializer for list endpoints."""
     course_name  = serializers.CharField(source='course.name', read_only=True)
-    assigned_to_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
+    assigned_to_name = serializers.SerializerMethodField()
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
+    imported_via_csv = serializers.SerializerMethodField()
+
     class Meta:
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name',
                   'status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to_name','branch_name','created_by','imported_via_csv','created_at']
+
+    def get_imported_via_csv(self, obj):
+        try:
+            return bool(obj.imported_via_csv)
+        except Exception:
+            return False
+
+    def get_assigned_to_name(self, obj):
+        try:
+            return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
+        except Exception:
+            return ''
 
 
 class LeadInboxSerializer(serializers.ModelSerializer):
@@ -407,9 +421,9 @@ from crm.models import WalkIn, WalkInBranchChangeHistory
 class WalkInListSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name',  read_only=True)
     branch_name  = serializers.CharField(source='branch.name',  read_only=True)
-    assigned_name= serializers.CharField(source='assigned_to.full_name', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
-    converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
+    assigned_name= serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    converted_by_name = serializers.SerializerMethodField()
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     walk_in_by_display = serializers.CharField(source='get_walk_in_by_display', read_only=True)
@@ -422,6 +436,24 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at']
+
+    def get_assigned_name(self, obj):
+        try:
+            return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
+        except Exception:
+            return ''
+
+    def get_created_by_name(self, obj):
+        try:
+            return obj.created_by.full_name if obj.created_by_id and obj.created_by else ''
+        except Exception:
+            return ''
+
+    def get_converted_by_name(self, obj):
+        try:
+            return obj.converted_by.full_name if obj.converted_by_id and obj.converted_by else ''
+        except Exception:
+            return ''
 
 
 class WalkInDetailSerializer(serializers.ModelSerializer):

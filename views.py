@@ -47,7 +47,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Count, Q, F, Exists, OuterRef
 from django.utils import timezone
@@ -83,6 +83,28 @@ from serializers import (
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
+_TABLE_COLUMN_CACHE = {}
+
+
+def missing_model_columns(model, field_names):
+    cache_key = model._meta.db_table
+    try:
+        columns = _TABLE_COLUMN_CACHE.get(cache_key)
+        if columns is None:
+            with connection.cursor() as cursor:
+                columns = {
+                    column.name
+                    for column in connection.introspection.get_table_description(cursor, model._meta.db_table)
+                }
+            _TABLE_COLUMN_CACHE[cache_key] = columns
+        return [
+            field_name
+            for field_name in field_names
+            if model._meta.get_field(field_name).column not in columns
+        ]
+    except Exception:
+        logger.exception('Could not inspect columns for %s.', model._meta.db_table)
+        return list(field_names)
 
 
 def app_url(path):
@@ -1244,12 +1266,40 @@ def create_follow_up_entry(record, record_type, request):
 
 
 class LeadFilter(django_filters.FilterSet):
+    name = django_filters.CharFilter(method='filter_name')
+    phone = django_filters.CharFilter(method='filter_phone')
+    source = django_filters.CharFilter(method='filter_source')
     walkin_date_from = django_filters.DateFilter(field_name='walkin_date', lookup_expr='gte')
     walkin_date_to   = django_filters.DateFilter(field_name='walkin_date', lookup_expr='lte')
     next_follow_up_date_from = django_filters.DateFilter(field_name='next_follow_up_date', lookup_expr='gte')
     next_follow_up_date_to   = django_filters.DateFilter(field_name='next_follow_up_date', lookup_expr='lte')
     created_from     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_to       = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+
+    def filter_name(self, queryset, name, value):
+        value = (value or '').strip()
+        return queryset.filter(name__icontains=value) if value else queryset
+
+    def filter_phone(self, queryset, name, value):
+        value = (value or '').strip()
+        return queryset.filter(phone__icontains=value) if value else queryset
+
+    def filter_source(self, queryset, name, value):
+        value = (value or '').strip()
+        if not value:
+            return queryset
+        if value == 'manual':
+            if 'imported_via_csv' in missing_model_columns(Lead, ['imported_via_csv']):
+                return queryset.filter(created_by__isnull=False)
+            return queryset.filter(created_by__isnull=False, imported_via_csv=False)
+        if value == 'csv_import':
+            if 'imported_via_csv' in missing_model_columns(Lead, ['imported_via_csv']):
+                return queryset.none()
+            return queryset.filter(imported_via_csv=True)
+        valid_sources = {choice[0] for choice in Lead.Source.choices}
+        if value in valid_sources:
+            return queryset.filter(source=value)
+        return queryset.none()
 
     class Meta:
         model  = Lead
@@ -1272,7 +1322,17 @@ class LeadViewSet(viewsets.ModelViewSet):
     ordering           = ['-created_at']
 
     def get_queryset(self):
-        qs = Lead.objects.select_related('course','branch','assigned_to','created_by')
+        if self.action == 'list':
+            qs = Lead.objects.select_related('course', 'branch')
+        else:
+            qs = Lead.objects.select_related('course','branch','assigned_to','created_by')
+        missing_columns = missing_model_columns(Lead, [
+            'qualification', 'degree', 'willing_to_join',
+            'external_course_interested', 'external_message',
+            'is_duplicate', 'imported_via_csv',
+        ])
+        if missing_columns:
+            qs = qs.defer(*missing_columns)
         # Staff can only see their branch's leads
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
@@ -1807,18 +1867,20 @@ class LeadImportView(APIView):
                     seen_phones.add(phone)
                 continue
 
-            Lead.objects.create(
-                name=name,
-                phone=phone,
-                course=course,
-                branch=request.user.branch,
-                source=source,
-                next_follow_up_date=followup_date,
-                remarks=remarks,
-                created_by=request.user,
-                assigned_to=request.user,
-                imported_via_csv=True,
-            )
+            lead_kwargs = {
+                'name': name,
+                'phone': phone,
+                'course': course,
+                'branch': request.user.branch,
+                'source': source,
+                'next_follow_up_date': followup_date,
+                'remarks': remarks,
+                'created_by': request.user,
+                'assigned_to': request.user,
+            }
+            if 'imported_via_csv' not in missing_model_columns(Lead, ['imported_via_csv']):
+                lead_kwargs['imported_via_csv'] = True
+            Lead.objects.create(**lead_kwargs)
             imported += 1
             seen_phones.add(phone)
             existing_phones.add(phone)
@@ -2107,6 +2169,7 @@ import django_filters
 class WalkInFilter(django_filters.FilterSet):
     name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
     phone = django_filters.CharFilter(field_name='phone', lookup_expr='icontains')
+    source = django_filters.CharFilter(method='filter_source')
     branch = django_filters.ModelChoiceFilter(queryset=Branch.objects.all(), method='filter_branch')
     created_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_created_by')
     visit_date_from = django_filters.DateFilter(field_name='visit_date', lookup_expr='gte')
@@ -2124,6 +2187,15 @@ class WalkInFilter(django_filters.FilterSet):
             return queryset
         return queryset.filter(created_by=value)
 
+    def filter_source(self, queryset, name, value):
+        value = (value or '').strip()
+        if not value:
+            return queryset
+        valid_sources = {choice[0] for choice in WalkIn.Source.choices}
+        if value in valid_sources:
+            return queryset.filter(source=value)
+        return queryset.none()
+
     class Meta:
         model  = WalkIn
         fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class']
@@ -2140,7 +2212,13 @@ class WalkInViewSet(viewsets.ModelViewSet):
     ordering           = ['-visit_date']
 
     def get_queryset(self):
-        qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead')
+        if self.action == 'list':
+            qs = WalkIn.objects.select_related('course', 'branch')
+        else:
+            qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead')
+        missing_columns = missing_model_columns(WalkIn, ['degree'])
+        if missing_columns:
+            qs = qs.defer(*missing_columns)
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
         if self.request.query_params.get('focus') == 'today-follow-up':
