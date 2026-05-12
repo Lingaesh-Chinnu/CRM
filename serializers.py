@@ -150,6 +150,7 @@ class HistoricalAnalyticsEntrySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'year', 'month', 'branch', 'branch_name',
             'leads_count', 'walkins_count', 'enrollments_count',
+            'value_amount',
             'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
@@ -157,6 +158,11 @@ class HistoricalAnalyticsEntrySerializer(serializers.ModelSerializer):
     def validate_month(self, value):
         if value < 1 or value > 12:
             raise serializers.ValidationError('Month must be between 1 and 12.')
+        return value
+
+    def validate_value_amount(self, value):
+        if value < 0:
+            raise serializers.ValidationError('Value amount cannot be negative.')
         return value
 
 
@@ -892,21 +898,81 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/payments/serializers.py
 # ============================================================
+from decimal import Decimal
+
 from crm.models import Payment, PaymentInstallment, AdminReceipt, get_payment_installment_schedule
+
+
+def payment_installment_summary(payment):
+    schedule = get_payment_installment_schedule(payment)
+    paid_by_index = {}
+    for installment in payment.installments.all():
+        index = installment.installment_index or 1
+        paid_by_index[index] = paid_by_index.get(index, Decimal('0')) + (installment.amount or Decimal('0'))
+
+    summary = []
+    for index, item in enumerate(schedule, start=1):
+        required_amount = Decimal(str(item.get('amount') or 0))
+        paid_amount = paid_by_index.get(index, Decimal('0'))
+        pending_amount = max(required_amount - paid_amount, Decimal('0'))
+        if paid_amount >= required_amount and required_amount > 0:
+            status = 'paid'
+        elif paid_amount > 0:
+            status = 'partial'
+        else:
+            status = 'pending'
+        due_date = item.get('due_date')
+        summary.append({
+            'index': index,
+            'label': item.get('label') or f'{index} Installment',
+            'required_amount': required_amount,
+            'paid_amount': paid_amount,
+            'pending_amount': pending_amount,
+            'status': status,
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+        })
+    return summary
 
 
 class PaymentInstallmentSerializer(serializers.ModelSerializer):
     collected_by_name = serializers.CharField(source='collected_by.full_name', read_only=True)
     bill_generated_by_name = serializers.CharField(source='bill_generated_by.full_name', read_only=True)
     bill_is_generated = serializers.SerializerMethodField()
+    document_number = serializers.SerializerMethodField()
+    document_is_generated = serializers.SerializerMethodField()
+    document_type_display = serializers.SerializerMethodField()
+    installment_status = serializers.SerializerMethodField()
 
     class Meta:
         model  = PaymentInstallment
         fields = '__all__'
-        read_only_fields = ['collected_by', 'created_at']
+        read_only_fields = [
+            'collected_by', 'created_at', 'installment_index', 'installment_label',
+            'document_type', 'receipt_number', 'bill_number', 'bill_generated_at',
+            'bill_generated_by',
+        ]
 
     def get_bill_is_generated(self, obj):
         return bool(obj.bill_number and obj.bill_generated_at)
+
+    def get_document_number(self, obj):
+        if obj.bill_number:
+            return obj.bill_number
+        return obj.receipt_number
+
+    def get_document_is_generated(self, obj):
+        return bool(self.get_document_number(obj))
+
+    def get_document_type_display(self, obj):
+        if obj.bill_number or obj.document_type == PaymentInstallment.DocumentType.BILL:
+            return 'Bill'
+        return 'Receipt'
+
+    def get_installment_status(self, obj):
+        for item in payment_installment_summary(obj.payment):
+            if item['index'] == obj.installment_index:
+                return item['status']
+        return 'pending'
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -920,13 +986,14 @@ class PaymentSerializer(serializers.ModelSerializer):
     branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
     branch_name = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
+    installment_summary = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
                   'course_name','first_class_date','branch','branch_name',
                   'total_fees','paid_amount','balance','status',
-                  'next_payment_date','payment_schedule','manual_installment_schedule',
+                  'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
                   'installments','updated_at']
         read_only_fields = ['paid_amount','balance','status']
 
@@ -942,6 +1009,9 @@ class PaymentSerializer(serializers.ModelSerializer):
             }
             for item in schedule
         ]
+
+    def get_installment_summary(self, obj):
+        return payment_installment_summary(obj)
 
 
 class AdminReceiptSerializer(serializers.ModelSerializer):

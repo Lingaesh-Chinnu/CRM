@@ -6,7 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
 function statusLabel(status) {
-  if (!status) return 'Unknown'
+  if (!status) return 'New'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
@@ -137,10 +137,10 @@ export default function LeadsListPage() {
       <section className="flex flex-col gap-4 rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:flex-row sm:items-end sm:justify-between sm:p-8">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">
-            Leads
+            Prospect pipeline
           </p>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">
-            Prospect pipeline
+            Leads
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
             Track new inquiries, follow-up commitments, and movement toward walk-ins from one list.

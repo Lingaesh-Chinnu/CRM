@@ -30,7 +30,14 @@ function emptyForm() {
     leads_count: '',
     walkins_count: '',
     enrollments_count: '',
+    value_amount: '',
   }
+}
+
+function money(value) {
+  return `Rs ${Number(value || 0).toLocaleString('en-IN', {
+    maximumFractionDigits: 2,
+  })}`
 }
 
 function branchSortIndex(branch) {
@@ -46,6 +53,7 @@ function preparePayload(values) {
     leads_count: Number(values.leads_count),
     walkins_count: Number(values.walkins_count),
     enrollments_count: Number(values.enrollments_count),
+    value_amount: Number(values.value_amount || 0),
   }
 }
 
@@ -134,6 +142,7 @@ export default function HistoricalAnalyticsPage() {
       leads_count: entry.leads_count,
       walkins_count: entry.walkins_count,
       enrollments_count: entry.enrollments_count,
+      value_amount: entry.value_amount || 0,
     })
     setMessage('')
   }
@@ -192,6 +201,15 @@ export default function HistoricalAnalyticsPage() {
                 required
               />
             ))}
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.value_amount}
+              onChange={(event) => setForm({ ...form, value_amount: event.target.value })}
+              placeholder="Value Amount"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
           </div>
 
           {message && <p className="mt-4 text-sm font-medium text-slate-600">{message}</p>}
@@ -220,25 +238,27 @@ export default function HistoricalAnalyticsPage() {
             <div className="p-6 text-slate-500">No historical records available yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <div className="min-w-[980px]">
-                <div className="grid grid-cols-[1.1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div className="min-w-[1120px]">
+                <div className="grid grid-cols-[1.1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   <div>Branch</div>
                   <div>Month</div>
                   <div>Year</div>
                   <div>Leads</div>
                   <div>Walk-ins</div>
                   <div>Enrollments</div>
+                  <div>Value</div>
                   <div>Action</div>
                 </div>
                 <div className="divide-y divide-slate-200">
                   {entries.map((entry) => (
-                    <div key={entry.id} className="grid grid-cols-[1.1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr] gap-4 px-6 py-5 text-sm">
+                    <div key={entry.id} className="grid grid-cols-[1.1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr_1fr] gap-4 px-6 py-5 text-sm">
                       <div className="font-semibold text-slate-950">{entry.branch_name}</div>
                       <div>{months.find((month) => month.value === Number(entry.month))?.label}</div>
                       <div>{entry.year}</div>
                       <div>{entry.leads_count}</div>
                       <div>{entry.walkins_count}</div>
                       <div>{entry.enrollments_count}</div>
+                      <div className="font-semibold text-slate-950">{money(entry.value_amount)}</div>
                       <div className="flex gap-2">
                         <button type="button" onClick={() => editEntry(entry)} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">
                           Edit

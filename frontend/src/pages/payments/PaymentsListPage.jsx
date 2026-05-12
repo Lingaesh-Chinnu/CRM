@@ -84,8 +84,8 @@ export default function PaymentsListPage() {
   const [summary, setSummary] = useState({
     total_collection: 0,
     pending_amount: 0,
-    upcoming_payments: 0,
-    overdue_payments: 0,
+    partial_payments: 0,
+    completed_installments: 0,
   })
   const [branches, setBranches] = useState([])
   const [templates, setTemplates] = useState([])
@@ -132,8 +132,8 @@ export default function PaymentsListPage() {
         setSummary(data.summary || {
           total_collection: 0,
           pending_amount: 0,
-          upcoming_payments: 0,
-          overdue_payments: 0,
+          partial_payments: 0,
+          completed_installments: 0,
         })
       })
       .catch((error) => {
@@ -226,9 +226,9 @@ export default function PaymentsListPage() {
       <section className="grid gap-4 md:grid-cols-4">
         {[
           ['Total Collection', `Rs ${money(summary.total_collection)}`],
+          ['Partial Payments', summary.partial_payments || 0],
+          ['Completed Installments', summary.completed_installments || 0],
           ['Pending Amount', `Rs ${money(summary.pending_amount)}`],
-          ['Upcoming Payments', summary.upcoming_payments],
-          ['Overdue Payments', summary.overdue_payments],
         ].map(([label, value]) => (
           <div key={label} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>

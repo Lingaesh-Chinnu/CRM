@@ -16,6 +16,19 @@ function statusLabel(status) {
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+function money(value) {
+  return Number(value || 0).toLocaleString('en-IN')
+}
+
+function formatDate(value) {
+  if (!value) return 'Not set'
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export default function PaymentDetailPage() {
   const { id } = useParams()
   const [payment, setPayment] = useState(null)
@@ -52,7 +65,7 @@ export default function PaymentDetailPage() {
     setSaving(true)
     setMessage('')
     try {
-      await api.post('/installments/', {
+      const { data } = await api.post('/installments/', {
         payment: payment.id,
         enrollment: payment.enrollment,
         amount: Number(form.amount),
@@ -62,7 +75,7 @@ export default function PaymentDetailPage() {
         notes: form.notes,
       })
       setForm(initialInstallment)
-      setMessage('Installment added successfully.')
+      setMessage(data.detail || 'Payment entry added successfully.')
       await loadPayment()
     } catch (error) {
       const details = error.response?.data
@@ -136,6 +149,19 @@ export default function PaymentDetailPage() {
     return <div className="p-6 text-slate-500">Payment record not found.</div>
   }
 
+  const installmentSummary = payment.installment_summary || []
+  const activeInstallment = installmentSummary.find((item) => item.status !== 'paid') || installmentSummary[installmentSummary.length - 1]
+  const enteredAmount = Number(form.amount || 0)
+  const paymentNotice = activeInstallment && enteredAmount > 0
+    ? enteredAmount + Number(activeInstallment.paid_amount || 0) >= Number(activeInstallment.required_amount || 0)
+      ? 'Installment completed successfully. Official bill will be generated.'
+      : 'Minimum installment amount not completed. Receipt only will be generated.'
+    : ''
+  const paymentHistory = [...(payment.installments || [])].sort((a, b) => {
+    const dateCompare = String(a.payment_date || '').localeCompare(String(b.payment_date || ''))
+    return dateCompare || Number(a.id || 0) - Number(b.id || 0)
+  })
+
   return (
     <div className="space-y-6">
       <section className="flex flex-col gap-4 rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:flex-row sm:items-end sm:justify-between sm:p-8">
@@ -190,7 +216,9 @@ export default function PaymentDetailPage() {
               )}
             </div>
             <div className="mt-5 grid gap-3 md:grid-cols-3">
-              {schedule.map((item, index) => (
+              {schedule.map((item, index) => {
+                const summary = installmentSummary[index]
+                return (
                 <div key={`${item.label}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <p className="text-sm font-bold text-slate-950">{item.label}</p>
                   {isSuperAdmin ? (
@@ -216,87 +244,104 @@ export default function PaymentDetailPage() {
                         }}
                         className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
                       />
+                      {summary ? (
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                          Paid Rs {money(summary.paid_amount)} | Pending Rs {money(summary.pending_amount)} | {statusLabel(summary.status)}
+                        </p>
+                      ) : null}
                     </div>
                   ) : (
                     <>
-                      <p className="mt-2 text-2xl font-black text-slate-950">Rs {Number(item.amount || 0).toLocaleString('en-IN')}</p>
-                      <p className="mt-1 text-sm text-slate-500">Due: {item.due_date || 'Not set'}</p>
+                      <p className="mt-2 text-2xl font-black text-slate-950">Rs {money(summary?.required_amount || item.amount)}</p>
+                      <p className="mt-1 text-sm text-slate-500">Paid: Rs {money(summary?.paid_amount)} | Pending: Rs {money(summary?.pending_amount)}</p>
+                      <p className="mt-1 text-sm text-slate-500">Due: {formatDate(summary?.due_date || item.due_date)} | {statusLabel(summary?.status)}</p>
                     </>
                   )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           </section>
 
           <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
-              <h2 className="text-xl font-black tracking-tight text-slate-950">Installments</h2>
+              <h2 className="text-xl font-black tracking-tight text-slate-950">Payment History</h2>
               <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-                {payment.installments?.length || 0} Entries
+                {paymentHistory.length || 0} Entries
               </div>
             </div>
 
-            {!payment.installments?.length ? (
-              <div className="p-6 text-slate-500">No installments added yet.</div>
+            {!paymentHistory.length ? (
+              <div className="p-6 text-slate-500">No payment entries added yet.</div>
             ) : (
-              <div className="divide-y divide-slate-200">
-                {payment.installments.map((installment) => (
-                  <div key={installment.id} className="px-6 py-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                      <div>
-                        <p className="text-lg font-bold tracking-tight text-slate-950">
-                          {Number(installment.amount).toLocaleString()} via {statusLabel(installment.payment_mode)}
-                        </p>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {installment.payment_date} | {installment.reference_number || 'No reference'} | {installment.collected_by_name || 'System'}
-                        </p>
-                        {installment.bill_is_generated ? (
-                          <p className="mt-2 text-sm text-slate-500">
-                            {installment.bill_number} | Generated by {installment.bill_generated_by_name || 'Admin'}
-                          </p>
-                        ) : (
-                          <p className="mt-2 text-sm text-slate-500">Bill not generated yet.</p>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-start gap-3 lg:items-end">
-                        <p className="max-w-md text-sm text-slate-500">{installment.notes || 'No notes'}</p>
-                        <div className="flex flex-wrap gap-3">
-                          {isSuperAdmin && !installment.bill_is_generated ? (
-                            <button
-                              type="button"
-                              onClick={() => generateBill(installment.id)}
-                              disabled={billActionId === installment.id}
-                              className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-                            >
-                              {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
-                            </button>
-                          ) : null}
-
-                          {installment.bill_is_generated ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => openBill(installment.id, 'view')}
-                                disabled={billActionId === installment.id}
-                                className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                              >
-                                View Bill
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openBill(installment.id, 'download')}
-                                disabled={billActionId === installment.id}
-                                className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                              >
-                                Download Bill
-                              </button>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[900px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-6 py-3">Date</th>
+                      <th className="px-6 py-3 text-right">Amount</th>
+                      <th className="px-6 py-3">Type</th>
+                      <th className="px-6 py-3">Installment</th>
+                      <th className="px-6 py-3">Status</th>
+                      <th className="px-6 py-3">Reference</th>
+                      <th className="px-6 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200">
+                    {paymentHistory.map((installment) => {
+                      const documentLabel = installment.document_type_display || (installment.bill_is_generated ? 'Bill' : 'Receipt')
+                      return (
+                        <tr key={installment.id}>
+                          <td className="px-6 py-4 text-slate-700">{formatDate(installment.payment_date)}</td>
+                          <td className="px-6 py-4 text-right font-black text-slate-950">Rs {money(installment.amount)}</td>
+                          <td className="px-6 py-4">
+                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
+                              {documentLabel}
+                            </span>
+                            {installment.document_number ? <p className="mt-1 text-xs text-slate-500">{installment.document_number}</p> : null}
+                          </td>
+                          <td className="px-6 py-4 text-slate-700">{installment.installment_label || `${installment.installment_index} Installment`}</td>
+                          <td className="px-6 py-4 text-slate-700">{statusLabel(installment.installment_status)}</td>
+                          <td className="px-6 py-4 text-slate-500">{installment.reference_number || 'No reference'}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex justify-end gap-2">
+                              {isSuperAdmin && !installment.bill_is_generated && installment.installment_status === 'paid' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => generateBill(installment.id)}
+                                  disabled={billActionId === installment.id}
+                                  className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                >
+                                  {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
+                                </button>
+                              ) : null}
+                              {installment.document_is_generated || installment.bill_is_generated ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => openBill(installment.id, 'view')}
+                                    disabled={billActionId === installment.id}
+                                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                                  >
+                                    View {documentLabel}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => openBill(installment.id, 'download')}
+                                    disabled={billActionId === installment.id}
+                                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                                  >
+                                    Download
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
@@ -304,6 +349,14 @@ export default function PaymentDetailPage() {
 
         <form onSubmit={addInstallment} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <h2 className="text-xl font-black tracking-tight text-slate-950">Add installment</h2>
+          {activeInstallment ? (
+            <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-slate-700">
+              <p className="font-bold text-slate-950">{activeInstallment.label}</p>
+              <p className="mt-1">
+                Required Rs {money(activeInstallment.required_amount)} | Paid Rs {money(activeInstallment.paid_amount)} | Pending Rs {money(activeInstallment.pending_amount)}
+              </p>
+            </div>
+          ) : null}
           <div className="mt-5 space-y-4">
             <input
               type="number"
@@ -352,6 +405,7 @@ export default function PaymentDetailPage() {
             />
           </div>
 
+          {paymentNotice && <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{paymentNotice}</p>}
           {message && <p className="mt-4 text-sm text-slate-600">{message}</p>}
 
           <button

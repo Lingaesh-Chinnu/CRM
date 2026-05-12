@@ -1449,7 +1449,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('preferred_timing', lead.preferred_timing)
         data.setdefault('qualification', lead.qualification)
         data.setdefault('degree', lead.degree)
-        data.setdefault('visit_date', lead.walkin_date)
+        data.setdefault('visit_date', lead.walkin_date or timezone.localdate())
         if not request.user.is_super_admin:
             if not request.user.branch_id:
                 return Response(
@@ -1457,61 +1457,65 @@ class LeadViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             data['branch'] = request.user.branch_id
-        required_fields = [
-            'name', 'phone', 'dob', 'email', 'location', 'pincode',
-            'course', 'branch', 'preferred_timing', 'visit_date',
-            'qualification', 'year_of_passing', 'college_company',
-        ]
+        required_fields = ['name', 'phone', 'course', 'branch', 'visit_date']
         missing = [field for field in required_fields if data.get(field) in (None, '')]
         if missing:
             return Response(
                 {'detail': 'Please complete all mandatory fields.', 'missing_fields': missing},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            year_of_passing = int(data.get('year_of_passing'))
-        except (TypeError, ValueError):
-            return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
-        if year_of_passing < 1900 or year_of_passing > 2100:
-            return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
+        branch = Branch.objects.filter(pk=data.get('branch'), is_active=True).first()
+        if not branch:
+            return Response({'branch': 'Please select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        course = Course.objects.filter(pk=data.get('course'), is_active=True).first()
+        if not course:
+            return Response({'course': 'Please select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
+        year_of_passing = None
+        if data.get('year_of_passing') not in (None, ''):
+            try:
+                year_of_passing = int(data.get('year_of_passing'))
+            except (TypeError, ValueError):
+                return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
+            if year_of_passing < 1900 or year_of_passing > 2100:
+                return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
 
         walkin_source_values = {choice[0] for choice in WalkIn.Source.choices}
         source = lead.source if lead.source in walkin_source_values else WalkIn.Source.GOOGLE
         with transaction.atomic():
             walkin = WalkIn.objects.create(
                 lead=lead,
-                branch_id=data.get('branch'),
-                course_id=data.get('course'),
+                branch=branch,
+                course=course,
                 assigned_to=lead.assigned_to,
                 created_by=request.user,
-                name=data.get('name'),
-                phone=data.get('phone'),
-                dob=data.get('dob'),
-                email=data.get('email'),
-                location=data.get('location'),
-                pincode=data.get('pincode'),
-                qualification=data.get('qualification'),
-                degree=data.get('degree', ''),
+                name=str(data.get('name') or '').strip(),
+                phone=str(data.get('phone') or '').strip(),
+                dob=data.get('dob') or None,
+                email=str(data.get('email') or '').strip(),
+                location=str(data.get('location') or '').strip(),
+                pincode=str(data.get('pincode') or '').strip(),
+                qualification=data.get('qualification') or '',
+                degree=data.get('degree') or '',
                 year_of_passing=year_of_passing,
-                college_company=data.get('college_company'),
-                preferred_timing=data.get('preferred_timing'),
+                college_company=data.get('college_company') or '',
+                preferred_timing=data.get('preferred_timing') or '',
                 visit_date=data.get('visit_date'),
                 source=source,
                 demo_class=data.get('demo_class', False),
                 interested_global_certification=data.get('interested_global_certification', False),
             )
 
-            lead.name = data.get('name')
-            lead.phone = data.get('phone')
-            lead.dob = data.get('dob')
-            lead.email = data.get('email')
-            lead.location = data.get('location')
-            lead.pincode = data.get('pincode')
-            lead.preferred_timing = data.get('preferred_timing')
-            lead.qualification = data.get('qualification')
-            lead.degree = data.get('degree', '')
-            lead.branch_id = data.get('branch')
-            lead.course_id = data.get('course')
+            lead.name = str(data.get('name') or '').strip()
+            lead.phone = str(data.get('phone') or '').strip()
+            lead.dob = data.get('dob') or None
+            lead.email = str(data.get('email') or '').strip()
+            lead.location = str(data.get('location') or '').strip()
+            lead.pincode = str(data.get('pincode') or '').strip()
+            lead.preferred_timing = data.get('preferred_timing') or ''
+            lead.qualification = data.get('qualification') or ''
+            lead.degree = data.get('degree') or ''
+            lead.branch = branch
+            lead.course = course
             lead.walkin_date = data.get('visit_date')
             lead.status = Lead.Status.CONVERTED
             lead.converted_to_type = 'walkin'
@@ -3081,7 +3085,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 # backend/apps/payments/views.py
 # ============================================================
 from crm.models import Payment, PaymentInstallment, get_payment_installment_schedule
-from serializers import PaymentSerializer, PaymentInstallmentSerializer
+from serializers import PaymentSerializer, PaymentInstallmentSerializer, payment_installment_summary
 
 
 class PaymentFilter(django_filters.FilterSet):
@@ -3162,6 +3166,18 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             payment_date__gte=month_start,
             payment_date__lte=month_end,
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        partial_payments = PaymentInstallment.objects.filter(
+            payment__in=queryset,
+            payment_date__gte=month_start,
+            payment_date__lte=month_end,
+            document_type=PaymentInstallment.DocumentType.RECEIPT,
+        ).count()
+        completed_installments = PaymentInstallment.objects.filter(
+            payment__in=queryset,
+            payment_date__gte=month_start,
+            payment_date__lte=month_end,
+            document_type=PaymentInstallment.DocumentType.BILL,
+        ).count()
         pending = sum((payment.balance for payment in queryset), Decimal('0'))
         due_queryset = queryset.filter(
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
@@ -3187,6 +3203,8 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             'summary': {
                 'total_collection': collection,
                 'pending_amount': pending,
+                'partial_payments': partial_payments,
+                'completed_installments': completed_installments,
                 'upcoming_payments': upcoming,
                 'overdue_payments': overdue,
             },
@@ -3394,35 +3412,98 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         return qs
 
-    def perform_create(self, serializer):
-        serializer.save(collected_by=self.request.user)
-
     def create(self, request, *args, **kwargs):
         payment_id = request.data.get('payment')
         enrollment_id = request.data.get('enrollment')
-        if payment_id and enrollment_id:
-            try:
-                payment = Payment.objects.get(pk=payment_id)
-            except Payment.DoesNotExist:
-                return Response({'detail': 'Payment record not found.'}, status=404)
-            if str(payment.enrollment_id) != str(enrollment_id):
-                return Response(
-                    {'detail': 'Installment payment and enrollment do not match.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return super().create(request, *args, **kwargs)
+        if not payment_id:
+            return Response({'detail': 'Payment record is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            payment = Payment.objects.select_related('enrollment__branch').get(pk=payment_id)
+        except Payment.DoesNotExist:
+            return Response({'detail': 'Payment record not found.'}, status=404)
+        if not request.user.is_super_admin and payment.enrollment.branch_id != request.user.branch_id:
+            return Response({'detail': 'You do not have access to this payment.'}, status=403)
+        if enrollment_id and str(payment.enrollment_id) != str(enrollment_id):
+            return Response(
+                {'detail': 'Installment payment and enrollment do not match.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            amount = Decimal(str(request.data.get('amount') or '0'))
+        except (TypeError, ValueError):
+            return Response({'detail': 'Payment amount must be numeric.'}, status=status.HTTP_400_BAD_REQUEST)
+        if amount <= 0:
+            return Response({'detail': 'Payment amount must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        allow_overpayment = request.user.is_super_admin and str(request.data.get('allow_overpayment', '')).lower() in {'1', 'true', 'yes'}
+        if amount > payment.balance and not allow_overpayment:
+            return Response({'detail': 'Payment amount cannot exceed the pending total fee balance.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        active = self._active_installment(payment)
+        paid_after_entry = active['paid_amount'] + amount
+        completed = paid_after_entry >= active['required_amount'] and active['required_amount'] > 0
+        now = timezone.now()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        save_kwargs = {
+            'payment': payment,
+            'enrollment': payment.enrollment,
+            'collected_by': request.user,
+            'installment_index': active['index'],
+            'installment_label': active['label'],
+            'document_type': PaymentInstallment.DocumentType.BILL if completed else PaymentInstallment.DocumentType.RECEIPT,
+            'bill_generated_at': now,
+        }
+        if completed:
+            save_kwargs['bill_number'] = self._generate_document_number(payment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
+            save_kwargs['bill_generated_by'] = request.user
+        else:
+            save_kwargs['receipt_number'] = self._generate_document_number(payment.enrollment.branch, PaymentInstallment.DocumentType.RECEIPT)
+        self.perform_create(serializer, save_kwargs)
+        headers = self.get_success_headers(serializer.data)
+        message = (
+            'Installment completed successfully. Official bill will be generated.'
+            if completed else
+            'Minimum installment amount not completed. Receipt only will be generated.'
+        )
+        return Response({'detail': message, 'installment': serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+
+    def perform_create(self, serializer, save_kwargs=None):
+        serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
 
     def update(self, request, *args, **kwargs):
         installment = self.get_object()
-        if installment.bill_generated_at:
-            return Response({'detail': 'Generated bills cannot be edited.'}, status=400)
+        if self._document_number(installment) or installment.bill_generated_at:
+            return Response({'detail': 'Generated payment documents cannot be edited.'}, status=400)
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         installment = self.get_object()
-        if installment.bill_generated_at:
-            return Response({'detail': 'Generated bills cannot be deleted.'}, status=400)
+        if self._document_number(installment) or installment.bill_generated_at:
+            return Response({'detail': 'Generated payment documents cannot be deleted.'}, status=400)
         return super().destroy(request, *args, **kwargs)
+
+    def _active_installment(self, payment):
+        summary = payment_installment_summary(payment)
+        if not summary:
+            return {
+                'index': 1,
+                'label': '1 Installment',
+                'required_amount': payment.total_fees,
+                'paid_amount': Decimal('0'),
+                'pending_amount': payment.total_fees,
+                'status': 'pending',
+            }
+        for item in summary:
+            if item['status'] != 'paid':
+                return item
+        return summary[-1]
+
+    def _document_number(self, installment):
+        if installment.bill_number:
+            return installment.bill_number
+        return installment.receipt_number
 
     def _build_bill_html(self, installment):
         enrollment = installment.enrollment
@@ -3473,11 +3554,16 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             if logo_path.exists():
                 logo_src = f"data:image/png;base64,{base64.b64encode(logo_path.read_bytes()).decode('ascii')}"
                 break
+        is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
+        document_title = 'Official Payment Bill' if is_bill else 'Payment Receipt'
+        document_number_label = 'Bill No' if is_bill else 'Receipt No'
+        document_number = self._document_number(installment)
+        partial_note = '' if is_bill else '<div class="partial-note">Partial Payment Received</div>'
         return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>{escape(installment.bill_number or 'Installment Bill')}</title>
+    <title>{escape(document_number or document_title)}</title>
     <style>
       * {{ box-sizing: border-box; }}
       body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
@@ -3494,6 +3580,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
       .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
       .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
+      .partial-note {{ padding: 7px 18px; border-bottom: 1px solid #CBD5E1; background: #FFF7ED; color: #9A3412; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }}
       .section {{ padding: 12px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
       .grid {{ display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 24px; row-gap: 9px; }}
       .field {{ display: grid; grid-template-columns: 150px minmax(0, 220px); gap: 10px; align-items: baseline; min-height: 22px; }}
@@ -3540,9 +3627,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         </div>
       </div>
       <div class="receipt-bar">
-        <div class="receipt-title">Payment Receipt</div>
-        <div class="receipt-no">Receipt No: {escape(installment.bill_number or '')}</div>
+        <div class="receipt-title">{escape(document_title)}</div>
+        <div class="receipt-no">{escape(document_number_label)}: {escape(document_number or '')}</div>
       </div>
+      {partial_note}
       <div class="section">
         <div class="grid">
           <div class="field"><div class="label">STUDENT NAME</div><div class="value">{escape(enrollment.name)}</div></div>
@@ -3551,7 +3639,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           <div class="field"><div class="label">BRANCH</div><div class="value">{escape(branch.name if branch else 'No branch')}</div></div>
           <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(installment.get_payment_mode_display())}</div></div>
           <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(receipt_date(installment.payment_date))}</div></div>
-          <div class="field"><div class="label">INSTALLMENT AMOUNT</div><div class="value amount">Rs {installment.amount:,.2f}</div></div>
+          <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment.installment_label or str(installment.installment_index))}</div></div>
+          <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {installment.amount:,.2f}</div></div>
           <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {payment.total_fees:,.2f}</div></div>
           <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {payment.paid_amount:,.2f}</div></div>
           <div class="field"><div class="label">BALANCE</div><div class="value amount">Rs {payment.balance:,.2f}</div></div>
@@ -3579,7 +3668,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       </div>
       <div class="bottom">
         <div>Fees once paid cannot be refunded.</div>
-        <div>This is a computer-generated bill, no signature required.</div>
+        <div>This is a computer-generated document, no signature required.</div>
       </div>
     </div>
   </body>
@@ -3593,7 +3682,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return re.sub(r'[^A-Z0-9]', '', raw_code)[:6] or 'GEN'
         branch_name_key = re.sub(r'[^a-z0-9]', '', branch.name or '').lower()
         known_codes = {
-            'kuniyamuthur': 'KNI',
+            'kuniyamuthur': 'KUN',
             'gandhipuram': 'GDP',
             'hopes': 'HOP',
         }
@@ -3604,16 +3693,14 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return ''.join(word[0] for word in words).upper()[:3]
         return re.sub(r'[^A-Z0-9]', '', (branch.name or 'GEN').upper())[:3] or 'GEN'
 
-    def _generate_receipt_number(self, installment):
-        branch = installment.enrollment.branch
+    def _generate_document_number(self, branch, document_type):
         year = timezone.localdate().year
         branch_code = self._branch_receipt_code(branch)
-        prefix = f'IIE-{branch_code}-{year}-'
-        generated_count = PaymentInstallment.objects.filter(
-            enrollment__branch=branch,
-            bill_generated_at__year=year,
-        ).exclude(pk=installment.pk).count()
-        return f'{prefix}{generated_count + 1:04d}'
+        prefix = 'BILL' if document_type == PaymentInstallment.DocumentType.BILL else 'RCPT'
+        number_prefix = f'{prefix}-{branch_code}-{year}-'
+        field = 'bill_number__startswith' if document_type == PaymentInstallment.DocumentType.BILL else 'receipt_number__startswith'
+        generated_count = PaymentInstallment.objects.filter(enrollment__branch=branch, **{field: number_prefix}).count()
+        return f'{number_prefix}{generated_count + 1:04d}'
 
     @action(detail=True, methods=['post'], url_path='generate-bill')
     def generate_bill(self, request, pk=None):
@@ -3621,31 +3708,37 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if not request.user.is_super_admin:
             return Response({'detail': 'Only admin can generate bills.'}, status=403)
 
+        installment_status = PaymentInstallmentSerializer(installment).data.get('installment_status')
+        if installment_status != 'paid':
+            return Response({'detail': 'Official bill can be generated only after the required installment amount is fully paid.'}, status=400)
         if not installment.bill_number:
-            installment.bill_number = self._generate_receipt_number(installment)
+            installment.bill_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
+        installment.document_type = PaymentInstallment.DocumentType.BILL
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
-        installment.save(update_fields=['bill_number', 'bill_generated_at', 'bill_generated_by'])
+        installment.save(update_fields=['document_type', 'bill_number', 'bill_generated_at', 'bill_generated_by'])
         return Response(PaymentInstallmentSerializer(installment).data)
 
     @action(detail=True, methods=['get'], url_path='view-bill')
     def view_bill(self, request, pk=None):
         installment = self.get_object()
-        if not installment.bill_number or not installment.bill_generated_at:
-            return Response({'detail': 'Bill has not been generated yet.'}, status=404)
+        document_number = self._document_number(installment)
+        if not document_number:
+            return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
 
         response = HttpResponse(self._build_bill_html(installment), content_type='text/html; charset=utf-8')
-        response['Content-Disposition'] = f'inline; filename="{installment.bill_number}.html"'
+        response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
         return response
 
     @action(detail=True, methods=['get'], url_path='download-bill')
     def download_bill(self, request, pk=None):
         installment = self.get_object()
-        if not installment.bill_number or not installment.bill_generated_at:
-            return Response({'detail': 'Bill has not been generated yet.'}, status=404)
+        document_number = self._document_number(installment)
+        if not document_number:
+            return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
 
         response = HttpResponse(self._build_bill_html(installment), content_type='text/html; charset=utf-8')
-        response['Content-Disposition'] = f'attachment; filename="{installment.bill_number}.html"'
+        response['Content-Disposition'] = f'attachment; filename="{document_number}.html"'
         return response
 
 
@@ -4317,6 +4410,7 @@ class DashboardHistoricalAnalyticsView(APIView):
                 'leads': 0,
                 'walkins': 0,
                 'enrollments': 0,
+                'value_amount': Decimal('0'),
             }
             for year in (2023, 2024, 2025)
         }
@@ -4325,11 +4419,13 @@ class DashboardHistoricalAnalyticsView(APIView):
             leads=Sum('leads_count'),
             walkins=Sum('walkins_count'),
             enrollments=Sum('enrollments_count'),
+            value_amount=Sum('value_amount'),
         ):
             year = row['year']
             year_rows[year]['leads'] = row['leads'] or 0
             year_rows[year]['walkins'] = row['walkins'] or 0
             year_rows[year]['enrollments'] = row['enrollments'] or 0
+            year_rows[year]['value_amount'] = row['value_amount'] or Decimal('0')
 
         return Response({
             'month': current_month,

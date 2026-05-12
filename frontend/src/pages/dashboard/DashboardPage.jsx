@@ -139,6 +139,16 @@ function HistoricalAnalyticsChart({ rows }) {
 
   return (
     <div className="mt-5">
+      <div className="mb-5 grid gap-3 sm:grid-cols-3">
+        {rows.map((row) => (
+          <div key={`${row.year}-value`} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{row.label} Value</p>
+            <p className="mt-2 text-lg font-black text-slate-950">
+              Rs {Number(row.value_amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </p>
+          </div>
+        ))}
+      </div>
       <div className="flex flex-wrap items-center justify-center gap-4 text-xs font-semibold text-slate-500">
         <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-cyan-500"></span>Leads</span>
         <span className="inline-flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-500"></span>Walk-ins</span>

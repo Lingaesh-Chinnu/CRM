@@ -227,6 +227,7 @@ class HistoricalAnalyticsEntry(TimeStampedModel):
     leads_count = models.PositiveIntegerField()
     walkins_count = models.PositiveIntegerField()
     enrollments_count = models.PositiveIntegerField()
+    value_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name='historical_analytics_created')
 
@@ -284,15 +285,19 @@ class Lead(TimeStampedModel):
     """Prospective student enquiry."""
 
     class Status(models.TextChoices):
-        NEW        = 'new',       'New'
-        CONTACTED  = 'contacted', 'Contacted'
-        INTERESTED = 'interested','Interested'
-        FOLLOW_UP  = 'follow_up', 'Follow Up'
-        WALK_IN    = 'walk_in',   'Walk-in Scheduled'
-        ENROLLED   = 'enrolled',  'Enrolled'
-        DROPPED    = 'dropped',   'Dropped'
-        CONVERTED  = 'converted', 'Converted'
-        LOST       = 'lost',      'Lost'
+        NEW                              = 'new',                              'New'
+        INTERESTED                       = 'interested',                       'Interested'
+        WILL_WALK_IN                     = 'will_walk_in',                     'Will Walk-in'
+        NOT_INTERESTED                   = 'not_interested',                   'Not Interested'
+        CONTINUOUSLY_NOT_ANSWERING_CALLS = 'continuously_not_answering_calls', 'Continuously Not Answering Calls'
+        NOT_ANSWERING                    = 'not_answering',                    'Not Answering'
+        CONTACTED                        = 'contacted',                        'Contacted'
+        FOLLOW_UP                        = 'follow_up',                        'Follow Up'
+        WALK_IN                          = 'walk_in',                          'Walk-in Scheduled'
+        ENROLLED                         = 'enrolled',                         'Enrolled'
+        DROPPED                          = 'dropped',                          'Dropped'
+        CONVERTED                        = 'converted',                        'Converted'
+        LOST                             = 'lost',                             'Lost'
 
     class Source(models.TextChoices):
         GOOGLE            = 'google',            'Google'
@@ -349,7 +354,7 @@ class Lead(TimeStampedModel):
     external_message = models.TextField(blank=True)
     is_duplicate = models.BooleanField(default=False, db_index=True)
     imported_via_csv = models.BooleanField(default=False, db_index=True)
-    status      = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW, db_index=True)
+    status      = models.CharField(max_length=40, choices=Status.choices, default=Status.NEW, db_index=True)
     source      = models.CharField(max_length=20, choices=Source.choices, default=Source.GOOGLE)
     converted_to_type = models.CharField(max_length=20, blank=True)
     converted_record_id = models.PositiveIntegerField(null=True, blank=True)
@@ -401,8 +406,16 @@ class LeadImportHistory(TimeStampedModel):
 def generate_walkin_number():
     now    = timezone.now()
     prefix = f'WI-{now.strftime("%Y%m")}'
-    last   = WalkIn.objects.filter(candidate_number__startswith=prefix).count() + 1
-    return f'{prefix}-{last:04d}'
+    numbers = []
+    for candidate_number in WalkIn.objects.filter(candidate_number__startswith=prefix).values_list('candidate_number', flat=True):
+        try:
+            numbers.append(int(str(candidate_number).rsplit('-', 1)[-1]))
+        except (TypeError, ValueError):
+            continue
+    next_number = (max(numbers) if numbers else 0) + 1
+    while WalkIn.objects.filter(candidate_number=f'{prefix}-{next_number:04d}').exists():
+        next_number += 1
+    return f'{prefix}-{next_number:04d}'
 
 
 class WalkIn(TimeStampedModel):
@@ -906,6 +919,10 @@ class Payment(TimeStampedModel):
 class PaymentInstallment(models.Model):
     """Individual payment entry (instalment)."""
 
+    class DocumentType(models.TextChoices):
+        RECEIPT = 'receipt', 'Receipt'
+        BILL    = 'bill',    'Bill'
+
     class Mode(models.TextChoices):
         CASH         = 'cash',          'Cash'
         UPI          = 'upi',           'UPI'
@@ -917,6 +934,11 @@ class PaymentInstallment(models.Model):
     payment          = models.ForeignKey(Payment,    on_delete=models.CASCADE, related_name='installments')
     enrollment       = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='installments')
     amount           = models.DecimalField(max_digits=10, decimal_places=2)
+    installment_index = models.PositiveSmallIntegerField(default=1, db_index=True)
+    installment_label = models.CharField(max_length=80, blank=True)
+    document_type    = models.CharField(max_length=20, choices=DocumentType.choices,
+                                        default=DocumentType.RECEIPT, db_index=True)
+    receipt_number   = models.CharField(max_length=50, blank=True, db_index=True)
     payment_mode     = models.CharField(max_length=20, choices=Mode.choices, default=Mode.CASH)
     reference_number = models.CharField(max_length=100, blank=True)
     notes            = models.TextField(blank=True)

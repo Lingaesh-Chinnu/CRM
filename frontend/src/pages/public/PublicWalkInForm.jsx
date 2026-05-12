@@ -75,7 +75,11 @@ function formatSubmitError(error) {
       ? 'Could not reach the server. Please check your connection and try again.'
       : 'Failed to submit walk-in form.'
   }
-  if (typeof data === 'string') return data
+  if (typeof data === 'string') {
+    return data.includes('<!doctype html') || data.includes('<html')
+      ? 'Server error while submitting the form. Please try again.'
+      : data
+  }
   if (data.detail) return data.detail
   if (typeof data === 'object') {
     return Object.entries(data)

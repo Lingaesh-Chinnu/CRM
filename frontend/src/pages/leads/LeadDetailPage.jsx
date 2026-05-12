@@ -28,6 +28,32 @@ const requiredLabels = {
   actual_fees: 'Course Fees',
 }
 
+function formatBackendError(error, fallback) {
+  const data = error.response?.data
+  if (!data) {
+    if (error.request) return 'Could not reach the server. Please try again.'
+    return fallback
+  }
+  if (typeof data === 'string') {
+    return data.includes('<!doctype html') || data.includes('<html') ? fallback : data
+  }
+  if (data.detail) {
+    const missing = data.missing_fields?.length
+      ? ` Missing: ${data.missing_fields.map((field) => requiredLabels[field] || field).join(', ')}.`
+      : ''
+    return `${data.detail}${missing}`
+  }
+  if (typeof data === 'object') {
+    return Object.entries(data)
+      .map(([field, value]) => {
+        const message = Array.isArray(value) ? value.join(', ') : String(value)
+        return `${requiredLabels[field] || field}: ${message}`
+      })
+      .join(' ')
+  }
+  return fallback
+}
+
 const qualificationOptions = [
   { value: 'school_student', label: 'School Student' },
   { value: 'college_student', label: 'College Student' },
@@ -36,9 +62,28 @@ const qualificationOptions = [
   { value: 'housewife', label: 'Housewife' },
 ]
 
+const leadStatusOptions = [
+  { value: 'new', label: 'New' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'continuously_not_answering_calls', label: 'Continuously Not Answering Calls' },
+  { value: 'not_answering', label: 'Not Answering' },
+]
+
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
   return [{ value, label: value }, ...qualificationOptions]
+}
+
+function leadStatusSelectOptions(value) {
+  if (!value || leadStatusOptions.some((option) => option.value === value)) return leadStatusOptions
+  return [{ value, label: statusLabel(value) }, ...leadStatusOptions]
+}
+
+function statusLabel(status) {
+  if (!status) return 'New'
+  return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 function buildConversionForm(lead) {
@@ -63,6 +108,7 @@ function buildConversionForm(lead) {
     batch_timing: '',
     demo_class: false,
     interested_global_certification: false,
+    status: lead?.status || 'new',
   }
 }
 
@@ -96,7 +142,7 @@ function conversionStatusLabel(lead) {
   if (lead?.converted_to_type === 'enrollment') return 'Converted to Enrollment'
   if (lead?.status === 'walk_in') return 'Converted to Walk-in'
   if (lead?.status === 'enrolled' || lead?.status === 'converted') return 'Converted to Enrollment'
-  return lead?.status ? lead.status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase()) : 'Unknown'
+  return statusLabel(lead?.status)
 }
 
 function discountAmount(discount, courseFee) {
@@ -212,12 +258,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
         ...(showBranchField ? ['branch'] : []),
         'preferred_timing', 'conversion_date', 'start_date',
       ]
-    : [
-        'name', 'phone', 'dob', 'email', 'pincode', 'location', 'course',
-        ...(showBranchField ? ['branch'] : []),
-        'qualification', 'year_of_passing', 'college_company',
-        'preferred_timing', 'conversion_date',
-      ]
+    : ['name', 'phone', 'course', ...(showBranchField ? ['branch'] : []), 'conversion_date']
   const shouldShowField = (field) => {
     if (field === 'branch') return showBranchField
     if (!isEnrollment) return true
@@ -278,17 +319,16 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-8 backdrop-blur-sm">
-      <form onSubmit={submit} className="w-full max-w-3xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)]">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-          Convert Lead
-        </p>
-        <h2 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
-          Convert to {label}
-        </h2>
-        <p className="mt-4 text-sm leading-6 text-slate-600">
-          Complete the required details before creating the {isEnrollment ? 'enrollment' : 'walk-in'} record.
-        </p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
+      <form onSubmit={submit} className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)]">
+        <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Convert Lead</p>
+          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Convert to {label}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Fill the available details. Optional fields can be completed later from the Walk-in page.
+          </p>
+        </div>
+        <div className="overflow-y-auto px-5 pb-5 sm:px-6">
         {pendingCourseChangePayload && (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4">
             <p className="text-sm font-semibold leading-6 text-amber-950">
@@ -495,7 +535,8 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
             {error}
           </p>
         )}
-        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+        </div>
+        <div className="sticky bottom-0 flex flex-col-reverse gap-3 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end sm:px-6">
           <button
             type="button"
             onClick={onCancel}
@@ -588,12 +629,7 @@ export default function LeadDetailPage() {
       const { data } = await api.post(`/leads/${lead.id}/${endpoint}/`, payload)
       handleConverted(data, conversionType)
     } catch (err) {
-      const missing = err.response?.data?.missing_fields
-      setConversionError(
-        missing?.length
-          ? `Please update missing lead details first: ${missing.map((field) => requiredLabels[field] || field).join(', ')}.`
-          : err.response?.data?.detail || 'Conversion failed.'
-      )
+      setConversionError(formatBackendError(err, 'Conversion failed. Please check the details and try again.'))
     } finally {
       setConverting(false)
     }
@@ -616,6 +652,7 @@ export default function LeadDetailPage() {
   }
 
   const detailFields = [
+    { field: 'status', label: 'Lead Status', value: lead.status || 'new', displayValue: statusLabel(lead.status), displayNew: statusLabel },
     { field: 'name', label: 'Name', value: lead.name },
     { field: 'phone', label: 'Phone Number', value: lead.phone },
     { field: 'dob', label: 'Date of Birth', value: lead.dob },
@@ -729,6 +766,14 @@ export default function LeadDetailPage() {
             )}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <DetailField label="Lead Status" value={statusLabel(lead.status)} editing={editingDetails}>
+              <select value={detailsForm.status || 'new'} onChange={(event) => updateDetail('status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                {leadStatusSelectOptions(detailsForm.status || lead.status || 'new').map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              {detailErrorFor('status')}
+            </DetailField>
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
