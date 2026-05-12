@@ -10,18 +10,50 @@ function statusLabel(status) {
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-const sourceFilters = [
-  { value: '', label: 'All Sources' },
-  { value: 'website', label: 'Website' },
-  { value: 'manual', label: 'Manual' },
-  { value: 'csv_import', label: 'CSV Import' },
-  { value: 'google', label: 'Google' },
-  { value: 'justdial', label: 'Justdial' },
+const statusFilters = [
+  { value: '', label: 'All Status' },
+  { value: 'new', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walk_in', label: 'Walked-in' },
+  { value: 'counseling_completed', label: 'Counseling Completed' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'will_enroll', label: 'Will Enroll' },
+  { value: 'enrolled', label: 'Enrolled' },
+  { value: 'not_answering', label: 'Not Answering (NA)' },
+  { value: 'call_not_attended', label: 'Call Not Attended (CNA)' },
+  { value: 'switched_off', label: 'Switched Off' },
+  { value: 'wrong_number', label: 'Wrong Number' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'joined_other_institute', label: 'Joined Other Institute' },
+  { value: 'callback_later', label: 'Callback Later' },
+  { value: 'future_lead', label: 'Future Lead' },
 ]
+
+function isoDate(value) {
+  return value.toISOString().slice(0, 10)
+}
+
+function addDays(value, days) {
+  const next = new Date(value)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+function formatDate(value) {
+  if (!value) return 'Not set'
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
 
 export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
-  const [filters, setFilters] = useState({ name: '', phone: '', source: '' })
+  const [filters, setFilters] = useState({ name: '', phone: '', status: '', followUp: '' })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -42,24 +74,29 @@ export default function LeadsListPage() {
   const filteredLeads = useMemo(() => {
     const nameQuery = filters.name.trim().toLowerCase()
     const phoneQuery = filters.phone.trim()
+    const today = new Date()
+    const todayValue = isoDate(today)
+    const tomorrowValue = isoDate(addDays(today, 1))
+    const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
       const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
       const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
-      let matchesSource = true
-
-      if (filters.source === 'manual') {
-        matchesSource = Boolean(lead.created_by) && !lead.imported_via_csv
-      } else if (filters.source === 'csv_import') {
-        matchesSource = Boolean(lead.imported_via_csv)
-      } else if (filters.source) {
-        matchesSource = lead.source === filters.source
+      const matchesStatus = !filters.status || lead.status === filters.status
+      let matchesFollowUp = true
+      const followUpDate = lead.next_follow_up_date || ''
+      if (filters.followUp === 'today') {
+        matchesFollowUp = followUpDate === todayValue
+      } else if (filters.followUp === 'tomorrow') {
+        matchesFollowUp = followUpDate === tomorrowValue
+      } else if (filters.followUp === 'next7') {
+        matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesSource
+      return matchesName && matchesPhone && matchesStatus && matchesFollowUp
     })
   }, [filters, leads])
 
-  const hasFilters = Boolean(filters.name || filters.phone || filters.source)
+  const hasFilters = Boolean(filters.name || filters.phone || filters.status || filters.followUp)
 
   useEffect(() => {
     fetchLeads()
@@ -94,7 +131,7 @@ export default function LeadsListPage() {
   }
 
   const clearFilters = () => {
-    setFilters({ name: '', phone: '', source: '' })
+    setFilters({ name: '', phone: '', status: '', followUp: '' })
   }
 
   const submitImport = async (event) => {
@@ -236,13 +273,13 @@ export default function LeadsListPage() {
             />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Source</span>
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Status</span>
             <select
-              value={filters.source}
-              onChange={(event) => updateFilter('source', event.target.value)}
+              value={filters.status}
+              onChange={(event) => updateFilter('status', event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             >
-              {sourceFilters.map((option) => (
+              {statusFilters.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>{option.label}</option>
               ))}
             </select>
@@ -255,6 +292,26 @@ export default function LeadsListPage() {
           >
             Clear Filters
           </button>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {[
+            ['today', 'Today Follow-up'],
+            ['tomorrow', 'Tomorrow Follow-up'],
+            ['next7', 'Next 7 Days Follow-up'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => updateFilter('followUp', filters.followUp === value ? '' : value)}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
+                filters.followUp === value
+                  ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </section>
 
@@ -322,8 +379,17 @@ export default function LeadsListPage() {
                         </Link>
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
                           <PhoneNumberEditor recordType="lead" recordId={lead.id} phone={lead.phone} onSaved={(phone) => updateLeadPhone(lead.id, phone)} />
-                          <span>{lead.location || 'Location pending'}</span>
                           <span>{lead.course_name || 'Course not selected'}</span>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                          <div>
+                            <span className="font-semibold text-slate-800">Latest Remark: </span>
+                            {lead.remarks || 'No remarks'}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-800">Next Follow-up: </span>
+                            {formatDate(lead.next_follow_up_date)}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -331,9 +397,6 @@ export default function LeadsListPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                         {statusLabel(lead.status)}
-                      </div>
-                      <div className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                        {lead.source_display || (lead.source ? statusLabel(lead.source) : 'No source')}
                       </div>
                     </div>
                   </div>
