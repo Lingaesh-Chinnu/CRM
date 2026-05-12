@@ -941,6 +941,8 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
     document_number = serializers.SerializerMethodField()
     document_is_generated = serializers.SerializerMethodField()
     document_type_display = serializers.SerializerMethodField()
+    document_status = serializers.SerializerMethodField()
+    document_status_display = serializers.SerializerMethodField()
     installment_status = serializers.SerializerMethodField()
 
     class Meta:
@@ -966,7 +968,23 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
     def get_document_type_display(self, obj):
         if obj.bill_number or obj.document_type == PaymentInstallment.DocumentType.BILL:
             return 'Bill'
-        return 'Receipt'
+        if obj.receipt_number:
+            return 'Receipt'
+        return 'Pending Approval'
+
+    def get_document_status(self, obj):
+        if obj.bill_number:
+            return 'bill_generated'
+        if obj.receipt_number:
+            return 'receipt_generated'
+        return 'pending_approval'
+
+    def get_document_status_display(self, obj):
+        return {
+            'pending_approval': 'Pending Approval',
+            'receipt_generated': 'Receipt Generated',
+            'bill_generated': 'Bill Generated',
+        }.get(self.get_document_status(obj), 'Pending Approval')
 
     def get_installment_status(self, obj):
         for item in payment_installment_summary(obj.payment):

@@ -63,13 +63,25 @@ const qualificationOptions = [
 ]
 
 const leadStatusOptions = [
-  { value: 'new', label: 'New' },
-  { value: 'interested', label: 'Interested' },
+  { value: 'new', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
   { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walked_in', label: 'Walked-in' },
+  { value: 'counseling_completed', label: 'Counseling Completed' },
+  { value: 'interested', label: 'Interested' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'will_enroll', label: 'Will Enroll' },
+  { value: 'enrolled', label: 'Enrolled' },
+  { value: 'not_answering_na', label: 'Not Answering (NA)' },
+  { value: 'call_not_attended_cna', label: 'Call Not Attended (CNA)' },
+  { value: 'switched_off', label: 'Switched Off' },
+  { value: 'wrong_number', label: 'Wrong Number' },
   { value: 'not_interested', label: 'Not Interested' },
-  { value: 'continuously_not_answering_calls', label: 'Continuously Not Answering Calls' },
-  { value: 'not_answering', label: 'Not Answering' },
-]
+  { value: 'joined_other_institute', label: 'Joined Other Institute' },
+  { value: 'callback_later', label: 'Callback Later' },
+  { value: 'future_lead', label: 'Future Lead' },
+];
 
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions

@@ -3470,9 +3470,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Payment amount cannot exceed the pending total fee balance.'}, status=status.HTTP_400_BAD_REQUEST)
 
         active = self._active_installment(payment)
-        paid_after_entry = active['paid_amount'] + amount
-        completed = paid_after_entry >= active['required_amount'] and active['required_amount'] > 0
-        now = timezone.now()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         save_kwargs = {
@@ -3481,25 +3478,39 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'collected_by': request.user,
             'installment_index': active['index'],
             'installment_label': active['label'],
-            'document_type': PaymentInstallment.DocumentType.BILL if completed else PaymentInstallment.DocumentType.RECEIPT,
-            'bill_generated_at': now,
+            'document_type': PaymentInstallment.DocumentType.RECEIPT,
         }
-        if completed:
-            save_kwargs['bill_number'] = self._generate_document_number(payment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
-            save_kwargs['bill_generated_by'] = request.user
-        else:
-            save_kwargs['receipt_number'] = self._generate_document_number(payment.enrollment.branch, PaymentInstallment.DocumentType.RECEIPT)
         self.perform_create(serializer, save_kwargs)
         headers = self.get_success_headers(serializer.data)
-        message = (
-            'Installment completed successfully. Official bill will be generated.'
-            if completed else
-            'Minimum installment amount not completed. Receipt only will be generated.'
-        )
+        message = 'Payment entry saved and marked Pending Approval.'
+        self._notify_admins_payment_added(serializer.instance)
         return Response({'detail': message, 'installment': serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer, save_kwargs=None):
         serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
+
+    def _notify_admins_payment_added(self, installment):
+        message = f'{installment.enrollment.name} payment added and awaiting approval.'
+        for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+            create_user_notification(
+                admin_user,
+                'Payment Awaiting Approval',
+                message,
+                Notification.NType.INFO,
+                f'/payments/{installment.payment_id}',
+            )
+
+    def _notify_collector_document_generated(self, installment):
+        if not installment.collected_by_id:
+            return
+        document_label = 'Bill' if installment.bill_number else 'Receipt'
+        create_notification_once(
+            installment.collected_by,
+            f'{document_label} Generated',
+            f'{document_label} generated for {installment.enrollment.name}.',
+            Notification.NType.SUCCESS,
+            f'/payments/{installment.payment_id}',
+        )
 
     def update(self, request, *args, **kwargs):
         installment = self.get_object()
@@ -3746,6 +3757,23 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
         installment.save(update_fields=['document_type', 'bill_number', 'bill_generated_at', 'bill_generated_by'])
+        self._notify_collector_document_generated(installment)
+        return Response(PaymentInstallmentSerializer(installment).data)
+
+    @action(detail=True, methods=['post'], url_path='generate-receipt')
+    def generate_receipt(self, request, pk=None):
+        installment = self.get_object()
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can generate receipts.'}, status=403)
+        if installment.bill_number:
+            return Response({'detail': 'Official bill already generated for this payment entry.'}, status=400)
+        if not installment.receipt_number:
+            installment.receipt_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.RECEIPT)
+        installment.document_type = PaymentInstallment.DocumentType.RECEIPT
+        installment.bill_generated_at = timezone.now()
+        installment.bill_generated_by = request.user
+        installment.save(update_fields=['document_type', 'receipt_number', 'bill_generated_at', 'bill_generated_by'])
+        self._notify_collector_document_generated(installment)
         return Response(PaymentInstallmentSerializer(installment).data)
 
     @action(detail=True, methods=['get'], url_path='view-bill')
