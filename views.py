@@ -476,6 +476,34 @@ def create_notification_once(user, title, message, notification_type=Notificatio
     return notification
 
 
+def notify_rules_signed(enrollment, submitted_at=None):
+    title = 'Rules & Regulations Signed'
+    submitted_value = submitted_at or timezone.now()
+    course_name = enrollment.course.name if enrollment.course else ''
+    branch_name = enrollment.branch.name if enrollment.branch else ''
+    detail_lines = [
+        f'{enrollment.name} has submitted the signed Rules & Regulations form.',
+    ]
+    if course_name:
+        detail_lines.append(f'Course: {course_name}')
+    if branch_name:
+        detail_lines.append(f'Branch: {branch_name}')
+    detail_lines.append(f'Submitted on: {submitted_value.strftime("%d %b %Y, %I:%M %p")}')
+    message = '\n'.join(detail_lines)
+    related_url = f'/enrollments/{enrollment.id}'
+    recipients = list(User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True))
+    if enrollment.branch_id:
+        recipients.extend(
+            User.objects.filter(branch=enrollment.branch, is_active=True).exclude(role=User.Role.SUPER_ADMIN)
+        )
+    seen = set()
+    for user in recipients:
+        if user.id in seen:
+            continue
+        seen.add(user.id)
+        create_notification_once(user, title, message, Notification.NType.SUCCESS, related_url)
+
+
 LEAD_CLOSED_FOLLOW_UP_STATUSES = [
     Lead.Status.WALK_IN,
     Lead.Status.ENROLLED,
@@ -2815,6 +2843,7 @@ class PublicRulesSigningView(APIView):
         if enrollment.status != Enrollment.Status.ENROLLED:
             enrollment.status = Enrollment.Status.RULES_SUBMITTED
             enrollment.save(update_fields=['status', 'updated_at'])
+        notify_rules_signed(enrollment, signing.submitted_at)
         return Response({
             'detail': 'Rules & Regulation form submitted successfully.',
             'status': signing.status,
