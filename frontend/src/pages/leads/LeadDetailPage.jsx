@@ -3,7 +3,6 @@ import { Link, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -107,22 +106,42 @@ function discountAmount(discount, courseFee) {
   return Math.min(value, fee)
 }
 
-function DetailField({ label, value, children }) {
+function DetailField({ label, value, editing = false, children }) {
   const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      {hasValue ? (
-        <>
-          <p className="mt-2 font-semibold text-slate-900">{value}</p>
-          {children && <div className="mt-3">{children}</div>}
-        </>
+      {editing && children ? (
+        <div className="mt-3">{children}</div>
       ) : (
-        <>
-          <p className="mt-2 font-semibold text-slate-900">Not provided</p>
-          {children && <div className="mt-3">{children}</div>}
-        </>
+        <p className="mt-2 font-semibold text-slate-900">{hasValue ? value : 'Not provided'}</p>
       )}
+    </div>
+  )
+}
+
+function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+        <div className="mt-4 space-y-3">
+          {changes.map((change) => (
+            <p key={change.field} className="text-sm leading-6 text-slate-700">
+              <span className="font-semibold text-slate-950">{change.label}:</span>{' '}
+              {change.oldValue || 'Not provided'} <span className="text-slate-400">→</span> {change.newValue || 'Not provided'}
+            </p>
+          ))}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+            {saving ? 'Saving...' : 'Confirm & Update'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -509,6 +528,8 @@ export default function LeadDetailPage() {
   const [conversionError, setConversionError] = useState('')
   const [detailsForm, setDetailsForm] = useState({})
   const [detailErrors, setDetailErrors] = useState({})
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [pendingDetailChanges, setPendingDetailChanges] = useState([])
   const [savingDetails, setSavingDetails] = useState(false)
   const [message, setMessage] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -594,40 +615,71 @@ export default function LeadDetailPage() {
     setDetailErrors((current) => ({ ...current, [field]: '' }))
   }
 
-  const saveCandidateDetails = async () => {
-    const editableFields = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'qualification', 'conversion_date']
-      .filter((field) => {
-        if (field === 'course') return !lead.course
-        if (field === 'branch') return !lead.branch
-        if (field === 'conversion_date') return !lead.walkin_date
-        return !lead[field]
-      })
-    const missing = editableFields.filter((field) => !String(detailsForm[field] || '').trim())
+  const detailFields = [
+    { field: 'name', label: 'Name', value: lead.name },
+    { field: 'phone', label: 'Phone Number', value: lead.phone },
+    { field: 'dob', label: 'Date of Birth', value: lead.dob },
+    { field: 'email', label: 'Email', value: lead.email },
+    { field: 'pincode', label: 'Pincode', value: lead.pincode },
+    { field: 'location', label: 'Address', value: lead.location },
+    { field: 'conversion_date', payloadField: 'walkin_date', label: 'Visit Date', value: lead.walkin_date },
+    ...(isSuperAdmin ? [{ field: 'branch', label: 'Branch', value: lead.branch, displayValue: lead.branch_name, displayNew: (value) => branches.find((branch) => String(branch.id) === String(value))?.name || value }] : []),
+    { field: 'course', label: 'Course Interested', value: lead.course, displayValue: lead.course_name, displayNew: (value) => courses.find((course) => String(course.id) === String(value))?.name || value },
+    { field: 'preferred_timing', label: 'Preferred Timing', value: lead.preferred_timing, displayValue: timingLabel(lead.preferred_timing), displayNew: timingLabel },
+    { field: 'qualification', label: 'Qualification', value: lead.qualification, displayValue: lead.qualification_display || lead.qualification, displayNew: (value) => qualificationSelectOptions(value).find((option) => option.value === value)?.label || value },
+    { field: 'degree', label: 'Degree', value: lead.degree },
+  ]
+
+  const detailChanges = () => detailFields
+    .filter(({ field, value }) => String(detailsForm[field] || '') !== String(value || ''))
+    .map((config) => ({
+      ...config,
+      oldValue: config.displayValue ?? config.value ?? '',
+      newValue: config.displayNew ? config.displayNew(detailsForm[config.field] || '') : detailsForm[config.field] || '',
+    }))
+
+  const resetDetailsEdit = () => {
+    setDetailsForm(buildConversionForm(lead))
+    setDetailErrors({})
+    setEditingDetails(false)
+    setPendingDetailChanges([])
+  }
+
+  const requestSaveCandidateDetails = () => {
+    const changes = detailChanges()
+    if (changes.length === 0) {
+      setMessage('No changes to update.')
+      return
+    }
+    const missing = changes.filter(({ field }) => !String(detailsForm[field] || '').trim())
     if (missing.length > 0) {
       setDetailErrors((current) => ({
         ...current,
-        ...Object.fromEntries(missing.map((field) => [field, `${requiredLabels[field] || field} is required.`])),
+        ...Object.fromEntries(missing.map(({ field, label }) => [field, `${label || requiredLabels[field] || field} is required.`])),
       }))
-      setMessage(`Please fill: ${missing.map((field) => requiredLabels[field]).join(', ')}.`)
+      setMessage(`Please fill: ${missing.map(({ label, field }) => label || requiredLabels[field]).join(', ')}.`)
       return
     }
+    setMessage('')
+    setPendingDetailChanges(changes)
+  }
 
+  const saveCandidateDetails = async () => {
     setSavingDetails(true)
     setMessage('')
     setDetailErrors({})
     try {
       const payload = {}
-      editableFields.forEach((field) => {
-        if (field === 'conversion_date') payload.walkin_date = detailsForm[field]
-        else if (field === 'course' || field === 'branch') payload[field] = Number(detailsForm[field])
-        else payload[field] = detailsForm[field]
+      pendingDetailChanges.forEach(({ field, payloadField }) => {
+        if (field === 'course' || field === 'branch') payload[payloadField || field] = Number(detailsForm[field])
+        else payload[payloadField || field] = detailsForm[field]
       })
-      if ((detailsForm.qualification || '') !== (lead.qualification || '')) payload.qualification = detailsForm.qualification || ''
-      if (!lead.degree || detailsForm.degree !== lead.degree) payload.degree = detailsForm.degree || ''
       const { data } = await api.patch(`/leads/${id}/`, payload)
       setLead(data)
       setDetailsForm(buildConversionForm(data))
       setMessage('Candidate details updated.')
+      setEditingDetails(false)
+      setPendingDetailChanges([])
     } catch (error) {
       setMessage(error.response?.data?.detail || error.response?.data?.error || 'Failed to update candidate details.')
     } finally {
@@ -635,9 +687,6 @@ export default function LeadDetailPage() {
     }
   }
 
-  const hasMissingDetails = ['name', 'phone', 'dob', 'email', 'pincode', 'location', 'course', 'branch', 'preferred_timing', 'qualification', 'walkin_date']
-    .some((field) => !lead[field])
-  const hasDetailChanges = ['qualification', 'degree'].some((field) => String(detailsForm[field] || '') !== String(lead[field] || ''))
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
   const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Converted to Enrollment' : ''
@@ -651,7 +700,14 @@ export default function LeadDetailPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Lead</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{lead.name}</h1>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <h1 className="text-3xl font-black tracking-tight text-slate-950">{lead.name}</h1>
+          {!editingDetails && (
+            <button type="button" onClick={() => { setDetailsForm(buildConversionForm(lead)); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+              Edit
+            </button>
+          )}
+        </div>
         <p className="mt-3 text-sm text-slate-500">
           {lead.lead_number} • {lead.phone} • {lead.course_name || 'No course'} • {conversionStatusLabel(lead)}
         </p>
@@ -659,57 +715,71 @@ export default function LeadDetailPage() {
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">Lead details</h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-black tracking-tight text-slate-950">Lead details</h2>
+            {editingDetails && (
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={resetDetailsEdit} disabled={savingDetails} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+                  Cancel
+                </button>
+                <button type="button" onClick={requestSaveCandidateDetails} disabled={savingDetails} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                  {savingDetails ? 'Saving...' : 'Save Update'}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <DetailField label="Name" value={lead.name}>
+            <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Phone Number</p>
-              <div className="mt-2">
-                <PhoneNumberEditor recordType="lead" recordId={lead.id} phone={lead.phone} onSaved={(phone) => {
-                  setLead((current) => ({ ...current, phone }))
-                  setDetailsForm((current) => ({ ...current, phone }))
-                }} />
-              </div>
+              {editingDetails ? (
+                <div className="mt-3">
+                  <input value={detailsForm.phone || ''} onChange={(event) => updateDetail('phone', event.target.value)} placeholder="Enter Phone Number" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+                  {detailErrorFor('phone')}
+                </div>
+              ) : (
+                <p className="mt-2 font-semibold text-slate-900">{lead.phone || 'Not provided'}</p>
+              )}
             </div>
-            <DetailField label="Date of Birth" value={lead.dob}>
+            <DetailField label="Date of Birth" value={lead.dob} editing={editingDetails}>
               <input type="date" value={detailsForm.dob || ''} onChange={(event) => updateDetail('dob', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('dob')}
             </DetailField>
-            <DetailField label="Email" value={lead.email}>
+            <DetailField label="Email" value={lead.email} editing={editingDetails}>
               <input type="email" value={detailsForm.email || ''} onChange={(event) => updateDetail('email', event.target.value)} placeholder="Enter Email" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('email')}
             </DetailField>
-            <DetailField label="Pincode" value={lead.pincode}>
+            <DetailField label="Pincode" value={lead.pincode} editing={editingDetails}>
               <input value={detailsForm.pincode || ''} onChange={(event) => updateDetail('pincode', event.target.value)} placeholder="Enter Pincode" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('pincode')}
             </DetailField>
-            <DetailField label="Address" value={lead.location}>
+            <DetailField label="Address" value={lead.location} editing={editingDetails}>
               <textarea value={detailsForm.location || ''} onChange={(event) => updateDetail('location', event.target.value)} placeholder="Enter Address" className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('location')}
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">Source</p><p className="mt-2 font-semibold text-slate-900">{lead.source_display || lead.source}</p></div>
-            <DetailField label="Visit Date" value={lead.walkin_date}>
+            <DetailField label="Visit Date" value={lead.walkin_date} editing={editingDetails}>
               <input type="date" value={detailsForm.conversion_date || ''} onChange={(event) => updateDetail('conversion_date', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('conversion_date')}
             </DetailField>
-            <DetailField label="Branch" value={lead.branch_name}>
+            <DetailField label="Branch" value={lead.branch_name} editing={editingDetails && isSuperAdmin}>
               <select value={detailsForm.branch || ''} onChange={(event) => updateDetail('branch', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Branch</option>
                 {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
               </select>
               {detailErrorFor('branch')}
             </DetailField>
-            <DetailField label="Course Interested" value={lead.course_name}>
+            <DetailField label="Course Interested" value={lead.course_name} editing={editingDetails}>
               <select value={detailsForm.course || ''} onChange={(event) => updateDetail('course', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Course</option>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
               </select>
               {detailErrorFor('course')}
             </DetailField>
-            <DetailField label="Preferred Timing" value={timingLabel(lead.preferred_timing)}>
+            <DetailField label="Preferred Timing" value={timingLabel(lead.preferred_timing)} editing={editingDetails}>
               <select value={detailsForm.preferred_timing || ''} onChange={(event) => updateDetail('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Preferred Timing</option>
                 <option value="weekday_morning">Weekdays (Morning)</option>
@@ -718,27 +788,17 @@ export default function LeadDetailPage() {
               </select>
               {detailErrorFor('preferred_timing')}
             </DetailField>
-            <DetailField label="Qualification" value={lead.qualification_display || lead.qualification}>
+            <DetailField label="Qualification" value={lead.qualification_display || lead.qualification} editing={editingDetails}>
               <select value={detailsForm.qualification || ''} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Qualification</option>
                 {qualificationSelectOptions(detailsForm.qualification || '').map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {detailErrorFor('qualification')}
             </DetailField>
-            <DetailField label="Degree" value={lead.degree}>
+            <DetailField label="Degree" value={lead.degree} editing={editingDetails}>
               <input value={detailsForm.degree || ''} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
           </div>
-          {(hasMissingDetails || hasDetailChanges) && (
-            <button
-              type="button"
-              onClick={saveCandidateDetails}
-              disabled={savingDetails}
-              className="mt-5 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-            >
-              {savingDetails ? 'Saving...' : 'Update Details'}
-            </button>
-          )}
           <FollowUpHistory
             followUps={lead.follow_ups || []}
             onSave={saveFollowUp}
@@ -793,6 +853,14 @@ export default function LeadDetailPage() {
           error={conversionError}
           onCancel={closeConversionModal}
           onSubmit={confirmConversion}
+        />
+      )}
+      {pendingDetailChanges.length > 0 && (
+        <ConfirmChangesModal
+          changes={pendingDetailChanges}
+          saving={savingDetails}
+          onCancel={() => setPendingDetailChanges([])}
+          onConfirm={saveCandidateDetails}
         />
       )}
     </div>

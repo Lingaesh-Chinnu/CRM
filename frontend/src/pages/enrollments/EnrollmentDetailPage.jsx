@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { openWhatsApp } from '../../utils/whatsappTemplates'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
@@ -74,25 +74,65 @@ function DetailCard({ label, value }) {
   )
 }
 
+function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+        <div className="mt-4 space-y-3">
+          {changes.map((change) => (
+            <p key={change.field} className="text-sm leading-6 text-slate-700">
+              <span className="font-semibold text-slate-950">{change.label}:</span>{' '}
+              {change.oldValue || 'Not provided'} <span className="text-slate-400">→</span> {change.newValue || 'Not provided'}
+            </p>
+          ))}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+            {saving ? 'Saving...' : 'Confirm & Update'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function EnrollmentDetailPage() {
   const { id } = useParams()
+  const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
+  const [branches, setBranches] = useState([])
   const [startDate, setStartDate] = useState('')
   const [batchTiming, setBatchTiming] = useState('')
+  const [phone, setPhone] = useState('')
+  const [branch, setBranch] = useState('')
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [pendingDetailChanges, setPendingDetailChanges] = useState([])
   const [message, setMessage] = useState('')
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
+  const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
     setLoadError('')
-    api.get(`/enrollments/${id}/`)
-      .then(({ data }) => {
+    Promise.all([
+      api.get(`/enrollments/${id}/`),
+      isSuperAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
+    ])
+      .then(([enrollmentRes, branchesRes]) => {
+        const data = enrollmentRes.data
         setRow(data)
+        setBranches(branchesRes.data.results || branchesRes.data)
+        setBranch(data.branch || '')
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
+        setPhone(data.phone || '')
       })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
-  }, [id])
+  }, [id, isSuperAdmin])
 
   if (!row) {
     return (
@@ -131,6 +171,66 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const editableFields = [
+    ...(isSuperAdmin ? [{ field: 'branch', label: 'Branch', value: row.branch, draft: branch, displayValue: row.branch_name, displayNew: (value) => branches.find((item) => String(item.id) === String(value))?.name || value }] : []),
+    { field: 'phone', label: 'Phone Number', value: row.phone, draft: phone },
+    { field: 'start_date', label: 'Course Start Date', value: row.start_date, draft: startDate },
+    { field: 'batch_timing', label: 'Batch Timing', value: row.batch_timing, draft: batchTiming },
+  ]
+
+  const resetDetailsEdit = () => {
+    setPhone(row.phone || '')
+    setBranch(row.branch || '')
+    setStartDate(row.start_date || '')
+    setBatchTiming(row.batch_timing || '')
+    setPendingDetailChanges([])
+    setEditingDetails(false)
+  }
+
+  const requestSaveDetails = () => {
+    const changes = editableFields
+      .filter(({ value, draft }) => String(draft || '') !== String(value || ''))
+      .map(({ field, label, value, draft, displayValue, displayNew }) => ({
+        field,
+        label,
+        oldValue: displayValue ?? value ?? '',
+        newValue: displayNew ? displayNew(draft || '') : draft || '',
+      }))
+    if (changes.length === 0) {
+      setMessage('No changes to update.')
+      return
+    }
+    setMessage('')
+    setPendingDetailChanges(changes)
+  }
+
+  const saveDetails = async () => {
+    setSaving(true)
+    setMessage('')
+    try {
+      const payload = {}
+      pendingDetailChanges.forEach(({ field }) => {
+        if (field === 'branch') payload.branch = Number(branch)
+        if (field === 'phone') payload.phone = phone
+        if (field === 'start_date') payload.start_date = startDate || null
+        if (field === 'batch_timing') payload.batch_timing = batchTiming || ''
+      })
+      const { data } = await api.patch(`/enrollments/${id}/`, payload)
+      setRow(data)
+      setBranch(data.branch || '')
+      setPhone(data.phone || '')
+      setStartDate(data.start_date || '')
+      setBatchTiming(data.batch_timing || '')
+      setPendingDetailChanges([])
+      setEditingDetails(false)
+      setMessage('Enrollment details updated.')
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to update enrollment details.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const enrollStudent = async () => {
     setSaving(true)
     setMessage('')
@@ -154,12 +254,23 @@ export default function EnrollmentDetailPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Enrollment</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{row.name}</h1>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <h1 className="text-3xl font-black tracking-tight text-slate-950">{row.name}</h1>
+          {!editingDetails && (
+            <button type="button" onClick={() => { resetDetailsEdit(); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+              Edit
+            </button>
+          )}
+        </div>
         <p className="mt-3 text-sm text-slate-500">
           {row.student_number || 'Student ID pending'} | {row.course_name || 'No course'} | {statusLabel(row.status)}
         </p>
         <div className="mt-3 text-sm text-slate-600">
-          <PhoneNumberEditor recordType="enrollment" recordId={row.id} phone={row.phone} onSaved={(phone) => setRow((current) => ({ ...current, phone }))} />
+          {editingDetails ? (
+            <input value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="Phone Number" className="w-full max-w-xs rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+          ) : (
+            <span className="font-semibold text-slate-900">{row.phone || 'Phone not added'}</span>
+          )}
         </div>
       </section>
 
@@ -187,7 +298,17 @@ export default function EnrollmentDetailPage() {
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DetailCard label="Qualification" value={row.qualification_display || row.qualification} />
           <DetailCard label="Degree" value={row.degree} />
-          <DetailCard label="Branch" value={row.branch_name} />
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Branch</p>
+            {editingDetails && isSuperAdmin ? (
+              <select value={branch || ''} onChange={(event) => setBranch(event.target.value)} className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Branch</option>
+                {branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            ) : (
+              <p className="mt-2 font-semibold text-slate-900">{prettyValue(row.branch_name)}</p>
+            )}
+          </div>
           <DetailCard label="Preferred Timing" value={row.preferred_timing_display} />
         </div>
       </section>
@@ -204,33 +325,51 @@ export default function EnrollmentDetailPage() {
             {rulesStatus}
           </span>
         </div>
+        {editingDetails && (
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button type="button" onClick={resetDetailsEdit} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+              Cancel
+            </button>
+            <button type="button" onClick={requestSaveDetails} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+              {saving ? 'Saving...' : 'Save Update'}
+            </button>
+          </div>
+        )}
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Course Start Date</p>
-            <input
-              type="date"
-              value={startDate || ''}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            />
+            {editingDetails ? (
+              <input
+                type="date"
+                value={startDate || ''}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              />
+            ) : (
+              <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold text-slate-900">{prettyValue(row.start_date)}</p>
+            )}
           </div>
           <div>
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Batch Timing</p>
-            <select
-              value={batchTiming}
-              onChange={(e) => setBatchTiming(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            >
-              <option value="">Select batch timing</option>
-              {batchTiming && !batchTimingOptions.includes(batchTiming) ? (
-                <option value={batchTiming}>{batchTiming}</option>
-              ) : null}
-              {batchTimingOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+            {editingDetails ? (
+              <select
+                value={batchTiming}
+                onChange={(e) => setBatchTiming(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <option value="">Select batch timing</option>
+                {batchTiming && !batchTimingOptions.includes(batchTiming) ? (
+                  <option value={batchTiming}>{batchTiming}</option>
+                ) : null}
+                {batchTimingOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold text-slate-900">{prettyValue(row.batch_timing)}</p>
+            )}
           </div>
         </div>
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -294,6 +433,14 @@ export default function EnrollmentDetailPage() {
           </p>
         )}
       </section>
+      {pendingDetailChanges.length > 0 && (
+        <ConfirmChangesModal
+          changes={pendingDetailChanges}
+          saving={saving}
+          onCancel={() => setPendingDetailChanges([])}
+          onConfirm={saveDetails}
+        />
+      )}
     </div>
   )
 }

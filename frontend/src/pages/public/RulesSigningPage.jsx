@@ -19,6 +19,7 @@ export default function RulesSigningPage() {
   const { token } = useParams()
   const canvasRef = useRef(null)
   const videoRef = useRef(null)
+  const fileInputRef = useRef(null)
   const streamRef = useRef(null)
   const drawingRef = useRef(false)
   const [data, setData] = useState(null)
@@ -26,6 +27,7 @@ export default function RulesSigningPage() {
   const [submitting, setSubmitting] = useState(false)
   const [hasSignature, setHasSignature] = useState(false)
   const [selfie, setSelfie] = useState('')
+  const [identitySource, setIdentitySource] = useState('')
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [message, setMessage] = useState('')
@@ -152,20 +154,75 @@ export default function RulesSigningPage() {
     canvas.width = video.videoWidth || 640
     canvas.height = video.videoHeight || 480
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
-    setSelfie(canvas.toDataURL('image/jpeg', 0.9))
+    setSelfie(canvas.toDataURL('image/jpeg', 0.86))
+    setIdentitySource('camera')
     clearSignature()
     stopCamera()
   }
 
   const retakeSelfie = () => {
     setSelfie('')
+    setIdentitySource('')
     clearSignature()
     openCamera()
   }
 
+  const resizeImageFile = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const image = new Image()
+      image.onload = () => {
+        const maxDimension = 1280
+        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(image.width * scale))
+        canvas.height = Math.max(1, Math.round(image.height * scale))
+        canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height)
+        resolve(canvas.toDataURL('image/jpeg', 0.84))
+      }
+      image.onerror = () => reject(new Error('Invalid image file.'))
+      image.src = reader.result
+    }
+    reader.onerror = () => reject(new Error('Unable to read image file.'))
+    reader.readAsDataURL(file)
+  })
+
+  const uploadImage = async (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      setMessage('Only jpg, jpeg, png, or webp image files are allowed.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setMessage('Identity photo must be 5MB or smaller.')
+      return
+    }
+    try {
+      stopCamera()
+      const imageData = await resizeImageFile(file)
+      setSelfie(imageData)
+      setIdentitySource('upload')
+      clearSignature()
+      setMessage('')
+      setCameraError('')
+    } catch (error) {
+      setMessage(error.message || 'Unable to process selected image.')
+    }
+  }
+
+  const replaceImage = () => {
+    setSelfie('')
+    setIdentitySource('')
+    clearSignature()
+    fileInputRef.current?.click()
+  }
+
   const submitSignature = async () => {
     if (!selfie) {
-      setMessage('Selfie is required before signing the form.')
+      setMessage('Identity photo is required before signing the form.')
       return
     }
     if (!hasSignature) {
@@ -216,31 +273,29 @@ export default function RulesSigningPage() {
           <p className="mt-2 text-sm text-slate-600">
             This form has already been submitted and is locked.
           </p>
+          {data.submitted_at && (
+            <p className="mt-3 text-sm font-semibold text-slate-700">
+              Submitted on {formatDate(data.submitted_at)}
+            </p>
+          )}
           {data.signed_pdf_url ? (
-            <>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <a
-                  href={data.signed_pdf_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
-                >
-                  View Signed PDF
-                </a>
-                <a
-                  href={data.signed_pdf_url}
-                  download
-                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
-                >
-                  Download PDF
-                </a>
-              </div>
-              <iframe
-                title="Signed Rules PDF"
-                src={data.signed_pdf_url}
-                className="mt-6 h-[70vh] w-full rounded-2xl border border-slate-200"
-              />
-            </>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <a
+                href={data.signed_pdf_url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+              >
+                View Signed PDF
+              </a>
+              <a
+                href={data.signed_pdf_url}
+                download
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+              >
+                Download PDF
+              </a>
+            </div>
           ) : (
             <p className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
               Signed PDF is not available.
@@ -304,10 +359,10 @@ export default function RulesSigningPage() {
         </section>
 
         <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <h2 className="text-lg font-black text-slate-950">Take Selfie</h2>
+          <h2 className="text-lg font-black text-slate-950">Identity Photo</h2>
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
             {selfie ? (
-              <img src={selfie} alt="Captured selfie preview" className="mx-auto max-h-80 w-full object-contain" />
+              <img src={selfie} alt="Identity photo preview" className="mx-auto max-h-80 w-full object-contain" />
             ) : (
               <video
                 ref={videoRef}
@@ -319,38 +374,72 @@ export default function RulesSigningPage() {
             )}
             {!selfie && !cameraActive && (
               <div className="flex min-h-48 items-center justify-center px-4 py-8 text-center text-sm font-semibold text-slate-500">
-                Camera preview will appear here.
+                Camera preview or uploaded image will appear here.
               </div>
             )}
           </div>
           {cameraError && <p className="mt-4 text-sm font-semibold text-rose-700">{cameraError}</p>}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png,image/webp"
+            onChange={uploadImage}
+            className="hidden"
+          />
           <div className="mt-5 flex flex-wrap gap-3">
             {!selfie && !cameraActive && (
-              <button
-                type="button"
-                onClick={openCamera}
-                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
-              >
-                Take Selfie
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={openCamera}
+                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+                >
+                  Take Selfie
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+                >
+                  Upload Image
+                </button>
+              </>
             )}
             {!selfie && cameraActive && (
-              <button
-                type="button"
-                onClick={captureSelfie}
-                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
-              >
-                Capture Selfie
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={captureSelfie}
+                  className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+                >
+                  Capture Selfie
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { stopCamera(); fileInputRef.current?.click() }}
+                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+                >
+                  Upload Image
+                </button>
+              </>
             )}
             {selfie && (
-              <button
-                type="button"
-                onClick={retakeSelfie}
-                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
-              >
-                Retake Selfie
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={identitySource === 'camera' ? retakeSelfie : replaceImage}
+                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+                >
+                  {identitySource === 'camera' ? 'Retake' : 'Replace Image'}
+                </button>
+                <button
+                  type="button"
+                  onClick={identitySource === 'camera' ? replaceImage : retakeSelfie}
+                  className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
+                >
+                  {identitySource === 'camera' ? 'Replace Image' : 'Retake'}
+                </button>
+              </>
             )}
           </div>
         </section>

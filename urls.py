@@ -57,6 +57,9 @@ api_urlpatterns = [
     path('leads/import/', LeadImportView.as_view(), name='lead-import'),
     path('external-leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),
     path('external/leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture-legacy'),
+    path('students/', EnrollmentViewSet.as_view({'get': 'list'}), name='student-list'),
+    path('students/<int:pk>/', EnrollmentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
+    path('dashboard/', DashboardSummaryView.as_view(), name='dashboard-summary-alias'),
     path('', include(router.urls)),
 
     path('dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),

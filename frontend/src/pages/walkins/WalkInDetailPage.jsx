@@ -3,7 +3,6 @@ import { Link, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 function prettyValue(value, fallback = '') {
@@ -83,22 +82,42 @@ const requiredLabels = {
   start_date: 'Course Start Date',
 }
 
-function DetailField({ label, value, children }) {
+function DetailField({ label, value, editing = false, children }) {
   const hasValue = value !== null && value !== undefined && String(value).trim() !== ''
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
       <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      {hasValue ? (
-        <>
-          <p className="mt-2 font-semibold text-slate-900">{value}</p>
-          {children && <div className="mt-3">{children}</div>}
-        </>
+      {editing && children ? (
+        <div className="mt-3">{children}</div>
       ) : (
-        <>
-          <p className="mt-2 font-semibold text-slate-900">Not provided</p>
-          {children && <div className="mt-3">{children}</div>}
-        </>
+        <p className="mt-2 font-semibold text-slate-900">{hasValue ? value : 'Not provided'}</p>
       )}
+    </div>
+  )
+}
+
+function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+        <div className="mt-4 space-y-3">
+          {changes.map((change) => (
+            <p key={change.field} className="text-sm leading-6 text-slate-700">
+              <span className="font-semibold text-slate-950">{change.label}:</span>{' '}
+              {change.oldValue || 'Not provided'} <span className="text-slate-400">→</span> {change.newValue || 'Not provided'}
+            </p>
+          ))}
+        </div>
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button type="button" onClick={onCancel} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+            {saving ? 'Saving...' : 'Confirm & Update'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -124,6 +143,9 @@ export default function WalkInDetailPage() {
   const [availableDiscounts, setAvailableDiscounts] = useState([])
   const [fieldErrors, setFieldErrors] = useState({})
   const [detailErrors, setDetailErrors] = useState({})
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [pendingDetailChanges, setPendingDetailChanges] = useState([])
+  const [savingDetails, setSavingDetails] = useState(false)
   const [branchCorrectionOpen, setBranchCorrectionOpen] = useState(false)
   const [branchCorrection, setBranchCorrection] = useState({ branch: '', reason: '' })
   const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
@@ -310,49 +332,86 @@ export default function WalkInDetailPage() {
     setDetailErrors((current) => ({ ...current, [field]: '' }))
   }
 
-  const saveCandidateDetails = async () => {
-    const editableFields = [
-      ['branch', 'Branch'],
-      ['name', 'Name'],
-      ['phone', 'Phone Number'],
-      ['dob', 'Date of Birth'],
-      ['email', 'Email'],
-      ['location', 'Address'],
-      ['pincode', 'Pincode'],
-      ['qualification', 'Qualification'],
-      ['year_of_passing', 'Passed Out Year'],
-      ['college_company', 'College / Company Name'],
-      ['course', 'Course Interested'],
-      ['preferred_timing', 'Preferred Timing'],
-      ['visit_date', 'Visit Date'],
-    ].filter(([field]) => {
-      if (field === 'branch') return !walkin.branch
-      if (field === 'course') return !walkin.course
-      if (field === 'visit_date') return !walkin.visit_date
-      return !walkin[field]
-    })
-    const missing = editableFields
-      .filter(([field]) => !String(form[field] || '').trim())
-    const missingLabels = missing.map(([, label]) => label)
+  const detailFields = [
+    ...(isSuperAdmin ? [{ field: 'branch', label: 'Branch', value: walkin.branch, displayValue: walkin.branch_name, displayNew: (value) => branches.find((branch) => String(branch.id) === String(value))?.name || value }] : []),
+    { field: 'name', label: 'Name', value: walkin.name },
+    { field: 'phone', label: 'Phone Number', value: walkin.phone },
+    { field: 'course', label: 'Course Interested', value: walkin.course, displayValue: walkin.course_name, displayNew: (value) => courses.find((course) => String(course.id) === String(value))?.name || value },
+    { field: 'visit_date', label: 'Visit Date', value: walkin.visit_date },
+    { field: 'dob', label: 'Date of Birth', value: walkin.dob },
+    { field: 'preferred_timing', label: 'Preferred Timing', value: walkin.preferred_timing, displayValue: walkin.preferred_timing_display, displayNew: (value) => value === 'weekday_morning' ? 'Weekdays (Morning)' : value === 'weekday_evening' ? 'Weekdays (Evening)' : value === 'weekends' ? 'Weekends' : value },
+    { field: 'pincode', label: 'Pincode', value: walkin.pincode },
+    { field: 'location', label: 'Address', value: walkin.location },
+    { field: 'email', label: 'Email', value: walkin.email },
+    { field: 'qualification', label: 'Qualification', value: walkin.qualification, displayValue: walkin.qualification_display || walkin.qualification, displayNew: (value) => qualificationSelectOptions(value).find((option) => option.value === value)?.label || value },
+    { field: 'degree', label: 'Degree', value: walkin.degree },
+    { field: 'year_of_passing', label: 'Passed Out Year', value: walkin.year_of_passing },
+    { field: 'college_company', label: 'College / Company Name', value: walkin.college_company },
+  ]
+
+  const detailChanges = () => detailFields
+    .filter(({ field, value }) => String(form[field] || '') !== String(value || ''))
+    .map((config) => ({
+      ...config,
+      oldValue: config.displayValue ?? config.value ?? '',
+      newValue: config.displayNew ? config.displayNew(form[config.field] || '') : form[config.field] || '',
+    }))
+
+  const resetDetailsEdit = () => {
+    const matchedCourse = courses.find((course) => String(course.id) === String(walkin.course))
+    setForm((current) => ({
+      ...current,
+      branch: walkin.branch || '',
+      name: walkin.name || '',
+      dob: walkin.dob || '',
+      phone: walkin.phone || '',
+      email: walkin.email || '',
+      location: walkin.location || '',
+      pincode: walkin.pincode || '',
+      course: walkin.course || '',
+      preferred_timing: walkin.preferred_timing || '',
+      qualification: walkin.qualification || '',
+      degree: walkin.degree || '',
+      year_of_passing: walkin.year_of_passing || '',
+      college_company: walkin.college_company || '',
+      visit_date: walkin.visit_date || '',
+      actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
+    }))
+    setDetailErrors({})
+    setPendingDetailChanges([])
+    setEditingDetails(false)
+  }
+
+  const requestSaveCandidateDetails = () => {
+    const changes = detailChanges()
+    if (changes.length === 0) {
+      setMessage('No changes to update.')
+      return
+    }
+    const missing = changes.filter(({ field }) => !String(form[field] || '').trim())
+    const missingLabels = missing.map(({ label }) => label)
 
     if (missing.length > 0) {
       setDetailErrors((current) => ({
         ...current,
-        ...Object.fromEntries(missing.map(([field, label]) => [field, `${label} is required.`])),
+        ...Object.fromEntries(missing.map(({ field, label }) => [field, `${label} is required.`])),
       }))
       setMessage(`Please fill: ${missingLabels.join(', ')}.`)
       return
     }
+    setMessage('')
+    setPendingDetailChanges(changes)
+  }
 
+  const saveCandidateDetails = async () => {
     try {
+      setSavingDetails(true)
       setDetailErrors({})
       const payload = {}
-      editableFields.forEach(([field]) => {
-        if (field === 'branch' || field === 'course') payload[field] = Number(form[field])
+      pendingDetailChanges.forEach(({ field }) => {
+        if (field === 'course' || field === 'branch') payload[field] = Number(form[field])
         else payload[field] = form[field]
       })
-      if ((form.qualification || '') !== (walkin.qualification || '')) payload.qualification = form.qualification || ''
-      if (!walkin.degree || form.degree !== walkin.degree) payload.degree = form.degree || ''
       const { data } = await api.patch(`/walkins/${id}/`, payload)
       const matchedCourse = courses.find((course) => String(course.id) === String(data.course))
       setWalkin(data)
@@ -375,8 +434,12 @@ export default function WalkInDetailPage() {
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
       setMessage('Candidate details updated.')
+      setEditingDetails(false)
+      setPendingDetailChanges([])
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to update candidate details.')
+    } finally {
+      setSavingDetails(false)
     }
   }
 
@@ -415,9 +478,6 @@ export default function WalkInDetailPage() {
     }
   }
 
-  const hasMissingDetails = ['branch', 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'qualification', 'year_of_passing', 'college_company', 'course', 'preferred_timing', 'visit_date']
-    .some((field) => !walkin[field])
-  const hasDetailChanges = ['qualification', 'degree'].some((field) => String(form[field] || '') !== String(walkin[field] || ''))
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = walkin.converted_to_type || (walkin.status === 'converted' ? 'enrollment' : '')
@@ -427,7 +487,14 @@ export default function WalkInDetailPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Walk-in Detail</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{walkin.name}</h1>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <h1 className="text-3xl font-black tracking-tight text-slate-950">{walkin.name}</h1>
+          {!editingDetails && (
+            <button type="button" onClick={() => { resetDetailsEdit(); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+              Edit
+            </button>
+          )}
+        </div>
         <p className="mt-3 text-sm text-slate-500">
           {walkin.candidate_number} | {walkin.branch_name || 'No branch'} | {walkin.phone}
         </p>
@@ -435,19 +502,41 @@ export default function WalkInDetailPage() {
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">Candidate details</h2>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-xl font-black tracking-tight text-slate-950">Candidate details</h2>
+            {editingDetails && (
+              <div className="flex flex-wrap gap-3">
+                <button type="button" onClick={resetDetailsEdit} disabled={savingDetails} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+                  Cancel
+                </button>
+                <button type="button" onClick={requestSaveCandidateDetails} disabled={savingDetails} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                  {savingDetails ? 'Saving...' : 'Save Update'}
+                </button>
+              </div>
+            )}
+          </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <DetailField label="Branch" value={walkin.branch_name}>
-              <p className="font-semibold text-slate-900">{walkin.branch_name || 'No branch'}</p>
+            <DetailField label="Branch" value={walkin.branch_name} editing={editingDetails && isSuperAdmin}>
+              <select value={form.branch || ''} onChange={(event) => updateDetail('branch', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Branch</option>
+                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+              {detailErrorFor('branch')}
+            </DetailField>
+            <DetailField label="Name" value={walkin.name} editing={editingDetails}>
+              <input value={form.name} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+              {detailErrorFor('name')}
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Phone Number</p>
-              <div className="mt-2">
-                <PhoneNumberEditor recordType="walkin" recordId={walkin.id} phone={walkin.phone} onSaved={(phone) => {
-                  setWalkin((current) => ({ ...current, phone }))
-                  setForm((current) => ({ ...current, phone }))
-                }} />
-              </div>
+              {editingDetails ? (
+                <div className="mt-3">
+                  <input value={form.phone} onChange={(event) => updateDetail('phone', event.target.value)} placeholder="Enter Phone Number" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+                  {detailErrorFor('phone')}
+                </div>
+              ) : (
+                <p className="mt-2 font-semibold text-slate-900">{walkin.phone || 'Not provided'}</p>
+              )}
             </div>
             {isSuperAdmin && (
               <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4">
@@ -488,22 +577,22 @@ export default function WalkInDetailPage() {
                 )}
               </div>
             )}
-            <DetailField label="Course Interested" value={walkin.course_name}>
+            <DetailField label="Course Interested" value={walkin.course_name} editing={editingDetails}>
               <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Course</option>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
               </select>
               {detailErrorFor('course')}
             </DetailField>
-            <DetailField label="Visit Date" value={walkin.visit_date}>
+            <DetailField label="Visit Date" value={walkin.visit_date} editing={editingDetails}>
               <input type="date" value={form.visit_date || ''} onChange={(event) => updateDetail('visit_date', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('visit_date')}
             </DetailField>
-            <DetailField label="Date of Birth" value={walkin.dob}>
+            <DetailField label="Date of Birth" value={walkin.dob} editing={editingDetails}>
               <input type="date" value={form.dob} onChange={(event) => updateDetail('dob', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('dob')}
             </DetailField>
-            <DetailField label="Preferred Timing" value={walkin.preferred_timing_display}>
+            <DetailField label="Preferred Timing" value={walkin.preferred_timing_display} editing={editingDetails}>
               <select value={form.preferred_timing} onChange={(event) => updateDetail('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Preferred Timing</option>
                 <option value="weekday_morning">Weekdays (Morning)</option>
@@ -528,29 +617,29 @@ export default function WalkInDetailPage() {
                 ))}
               </select>
             </div>
-            <DetailField label="Pincode" value={walkin.pincode}>
+            <DetailField label="Pincode" value={walkin.pincode} editing={editingDetails}>
               <input value={form.pincode} onChange={(event) => updateDetail('pincode', event.target.value)} placeholder="Enter Pincode" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('pincode')}
             </DetailField>
-            <DetailField label="Address" value={walkin.location}>
+            <DetailField label="Address" value={walkin.location} editing={editingDetails}>
               <textarea value={form.location} onChange={(event) => updateDetail('location', event.target.value)} placeholder="Enter Address" className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('location')}
             </DetailField>
-            <DetailField label="Email" value={walkin.email}>
+            <DetailField label="Email" value={walkin.email} editing={editingDetails}>
               <input type="email" value={form.email} onChange={(event) => updateDetail('email', event.target.value)} placeholder="Enter Email" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('email')}
             </DetailField>
-            <DetailField label="Qualification" value={walkin.qualification_display || walkin.qualification}>
+            <DetailField label="Qualification" value={walkin.qualification_display || walkin.qualification} editing={editingDetails}>
               <select value={form.qualification} onChange={(event) => updateDetail('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Qualification</option>
                 {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {detailErrorFor('qualification')}
             </DetailField>
-            <DetailField label="Degree" value={walkin.degree}>
+            <DetailField label="Degree" value={walkin.degree} editing={editingDetails}>
               <input value={form.degree} onChange={(event) => updateDetail('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>
-            <DetailField label="Passed Out Year" value={walkin.year_of_passing}>
+            <DetailField label="Passed Out Year" value={walkin.year_of_passing} editing={editingDetails}>
               <input
                 type="number"
                 min="1900"
@@ -562,20 +651,11 @@ export default function WalkInDetailPage() {
               />
               {detailErrorFor('year_of_passing')}
             </DetailField>
-            <DetailField label="College / Company Name" value={walkin.college_company}>
+            <DetailField label="College / Company Name" value={walkin.college_company} editing={editingDetails}>
               <input value={form.college_company} onChange={(event) => updateDetail('college_company', event.target.value)} placeholder="College, school, or company name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('college_company')}
             </DetailField>
           </div>
-          {(hasMissingDetails || hasDetailChanges) && (
-            <button
-              type="button"
-              onClick={saveCandidateDetails}
-              className="mt-5 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
-              Update Details
-            </button>
-          )}
           <FollowUpHistory
             followUps={walkin.follow_ups || []}
             onSave={saveFollowUp}
@@ -744,6 +824,14 @@ export default function WalkInDetailPage() {
           )}
         </form>
       </section>
+      {pendingDetailChanges.length > 0 && (
+        <ConfirmChangesModal
+          changes={pendingDetailChanges}
+          saving={savingDetails}
+          onCancel={() => setPendingDetailChanges([])}
+          onConfirm={saveCandidateDetails}
+        />
+      )}
     </div>
   )
 }

@@ -481,9 +481,9 @@ class WalkInListSerializer(serializers.ModelSerializer):
     assigned_name= serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
-    preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
+    preferred_timing_display = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
-    walk_in_by_display = serializers.CharField(source='get_walk_in_by_display', read_only=True)
+    walk_in_by_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -493,6 +493,21 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at']
+
+    def to_representation(self, instance):
+        defaults = {
+            'preferred_timing': '',
+            'walk_in_by': '',
+            'converted_to_type': '',
+            'converted_record_id': None,
+            'converted_at': None,
+            'converted_by_id': None,
+        }
+        deferred = getattr(instance, 'get_deferred_fields', lambda: set())()
+        for field_name, default in defaults.items():
+            if field_name in deferred:
+                instance.__dict__[field_name] = default
+        return super().to_representation(instance)
 
     def get_assigned_name(self, obj):
         try:
@@ -512,17 +527,37 @@ class WalkInListSerializer(serializers.ModelSerializer):
         except Exception:
             return ''
 
+    def get_preferred_timing_display(self, obj):
+        if 'preferred_timing' in getattr(obj, 'get_deferred_fields', lambda: set())():
+            return ''
+        try:
+            return obj.get_preferred_timing_display()
+        except Exception:
+            return ''
+
+    def get_walk_in_by_display(self, obj):
+        if 'walk_in_by' in getattr(obj, 'get_deferred_fields', lambda: set())():
+            return ''
+        try:
+            return obj.get_walk_in_by_display()
+        except Exception:
+            return ''
+
 
 class WalkInDetailSerializer(serializers.ModelSerializer):
     course_name   = serializers.CharField(source='course.name',          read_only=True)
     branch_name   = serializers.CharField(source='branch.name',          read_only=True)
+    course_interested = serializers.CharField(source='course.name', read_only=True)
     assigned_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
     converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
-    preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
+    preferred_timing_display = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
-    walk_in_by_display = serializers.CharField(source='get_walk_in_by_display', read_only=True)
+    walk_in_by_display = serializers.SerializerMethodField()
     qualification_display = serializers.SerializerMethodField()
+    degree_department = serializers.CharField(source='degree', read_only=True)
+    passed_out_year = serializers.IntegerField(source='year_of_passing', read_only=True)
+    college_company_name = serializers.CharField(source='college_company', read_only=True)
     follow_ups = serializers.SerializerMethodField()
     branch_change_history = serializers.SerializerMethodField()
 
@@ -530,6 +565,28 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
         model  = WalkIn
         fields = '__all__'
         read_only_fields = ['candidate_number', 'created_by', 'walk_in_by']
+
+    def to_representation(self, instance):
+        defaults = {
+            'qualification': '',
+            'degree': '',
+            'profession': '',
+            'year_of_passing': None,
+            'college_company': '',
+            'preferred_timing': '',
+            'interested_global_certification': False,
+            'walk_in_by': '',
+            'follow_up_date': None,
+            'converted_to_type': '',
+            'converted_record_id': None,
+            'converted_at': None,
+            'converted_by_id': None,
+        }
+        deferred = getattr(instance, 'get_deferred_fields', lambda: set())()
+        for field_name, default in defaults.items():
+            if field_name in deferred:
+                instance.__dict__[field_name] = default
+        return super().to_representation(instance)
 
     def get_follow_ups(self, obj):
         follow_ups = FollowUp.objects.filter(
@@ -539,12 +596,31 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
         return FollowUpSerializer(follow_ups, many=True).data
 
     def get_qualification_display(self, obj):
-        return qualification_display_value(obj.qualification)
+        return qualification_display_value(safe_deferred_value(obj, 'qualification', ''))
+
+    def get_preferred_timing_display(self, obj):
+        if 'preferred_timing' in getattr(obj, 'get_deferred_fields', lambda: set())():
+            return ''
+        try:
+            return obj.get_preferred_timing_display()
+        except Exception:
+            return ''
+
+    def get_walk_in_by_display(self, obj):
+        if 'walk_in_by' in getattr(obj, 'get_deferred_fields', lambda: set())():
+            return ''
+        try:
+            return obj.get_walk_in_by_display()
+        except Exception:
+            return ''
 
     def get_branch_change_history(self, obj):
-        return WalkInBranchChangeHistorySerializer(obj.branch_change_history.select_related(
-            'old_branch', 'new_branch', 'changed_by',
-        ), many=True).data
+        try:
+            return WalkInBranchChangeHistorySerializer(obj.branch_change_history.select_related(
+                'old_branch', 'new_branch', 'changed_by',
+            ), many=True).data
+        except (OperationalError, ProgrammingError):
+            return []
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -840,13 +916,16 @@ class PaymentSerializer(serializers.ModelSerializer):
     student_number= serializers.CharField(source='enrollment.student_number', read_only=True)
     student_phone = serializers.CharField(source='enrollment.phone', read_only=True)
     course_name = serializers.CharField(source='enrollment.course.name', read_only=True)
+    first_class_date = serializers.DateField(source='enrollment.start_date', read_only=True)
+    branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
     branch_name = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
-                  'course_name','branch_name','total_fees','paid_amount','balance','status',
+                  'course_name','first_class_date','branch','branch_name',
+                  'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','manual_installment_schedule',
                   'installments','updated_at']
         read_only_fields = ['paid_amount','balance','status']

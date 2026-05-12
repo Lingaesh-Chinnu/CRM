@@ -710,7 +710,7 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
         selfie_x = width - margin - 180
         draw.rectangle((selfie_x - 8, margin - 8, selfie_x + 188, margin + 228), outline='black')
         page.paste(selfie, (selfie_x, margin))
-        draw.text((selfie_x, margin + 205), 'Student Selfie', fill='black', font=font)
+        draw.text((selfie_x, margin + 205), 'Student Identity Photo', fill='black', font=font)
     details = [
         f'Name: {enrollment.name}',
         f'Phone: {enrollment.phone}',
@@ -1395,9 +1395,11 @@ class LeadViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         # Staff can update candidate details and follow-up fields only.
         if not request.user.is_super_admin:
+            if 'branch' in request.data:
+                return Response({'detail': 'Only admin can change a lead branch.'}, status=status.HTTP_403_FORBIDDEN)
             allowed = {
                 'name', 'phone', 'dob', 'email', 'location', 'pincode',
-                'course', 'branch', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
+                'course', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
                 'next_follow_up_date', 'remarks', 'status',
             }
             if set(request.data.keys()) - allowed:
@@ -2226,7 +2228,12 @@ class WalkInViewSet(viewsets.ModelViewSet):
             qs = WalkIn.objects.select_related('course', 'branch')
         else:
             qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead')
-        missing_columns = missing_model_columns(WalkIn, ['degree'])
+        missing_columns = missing_model_columns(WalkIn, [
+            'qualification', 'degree', 'profession', 'year_of_passing',
+            'college_company', 'preferred_timing', 'interested_global_certification',
+            'walk_in_by', 'follow_up_date', 'converted_to_type',
+            'converted_record_id', 'converted_at', 'converted_by',
+        ])
         if missing_columns:
             qs = qs.defer(*missing_columns)
         if not self.request.user.is_super_admin:
@@ -2267,7 +2274,9 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         if request.query_params.get('sectioned') not in ('1', 'true', 'yes'):
             return super().list(request, *args, **kwargs)
+        return self._sectioned_response()
 
+    def _sectioned_response(self):
         queryset = self.filter_queryset(self.get_queryset())
         now = timezone.localtime(timezone.now())
         current_month_filter = {
@@ -2285,6 +2294,10 @@ class WalkInViewSet(viewsets.ModelViewSet):
             'current_month_count': current_month_walkins.count(),
             'other_walkins_count': other_walkins.count(),
         })
+
+    @action(detail=False, methods=['get'], url_path='sectioned')
+    def sectioned(self, request):
+        return self._sectioned_response()
 
     def perform_create(self, serializer):
         branch = self.request.user.branch if not self.request.user.is_super_admin else None
@@ -2321,24 +2334,49 @@ class WalkInViewSet(viewsets.ModelViewSet):
         return Response(rows)
 
     def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        walkin = self.get_object()
+        data = request.data.copy()
+        branch_changed = False
+        old_branch = walkin.branch
+        new_branch = None
+
         if 'branch' in request.data:
             if not request.user.is_super_admin:
                 return Response({'detail': 'Only admin can change a walk-in branch.'}, status=status.HTTP_403_FORBIDDEN)
-            return Response({'detail': 'Use the branch correction action to change a walk-in branch.'}, status=status.HTTP_400_BAD_REQUEST)
-        assigned_to = request.data.get('assigned_to')
+            new_branch = Branch.objects.filter(pk=request.data.get('branch'), is_active=True).first()
+            if not new_branch:
+                return Response({'detail': 'Select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+            branch_changed = walkin.branch_id != new_branch.id
+            if branch_changed and walkin.assigned_to_id and walkin.assigned_to.branch_id != new_branch.id:
+                data['assigned_to'] = None
+        data.pop('branch_change_reason', None)
+
+        assigned_to = data.get('assigned_to')
         if assigned_to not in (None, ''):
-            walkin = self.get_object()
             user_qs = User.objects.filter(
                 pk=assigned_to,
                 is_active=True,
                 role=User.Role.STAFF,
-                branch=walkin.branch,
+                branch=new_branch or walkin.branch,
             )
             if not request.user.is_super_admin:
                 user_qs = user_qs.filter(branch=request.user.branch)
             if not user_qs.exists():
                 return Response({'detail': 'Select a valid staff user for Walk-in By.'}, status=status.HTTP_400_BAD_REQUEST)
-        return super().update(request, *args, **kwargs)
+
+        serializer = self.get_serializer(walkin, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if branch_changed:
+            WalkInBranchChangeHistory.objects.create(
+                walkin=walkin,
+                old_branch=old_branch,
+                new_branch=new_branch,
+                changed_by=request.user,
+                reason='Updated from walk-in detail edit.',
+            )
+        return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='change-branch')
     def change_branch(self, request, pk=None):
@@ -2734,14 +2772,14 @@ class PublicRulesSigningView(APIView):
             return Response({'detail': 'Rules & Regulation form has already been submitted.'}, status=400)
 
         try:
-            selfie_bytes = validate_data_image(request.data.get('selfie'), 'Selfie')
+            selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
             signature_bytes = validate_data_image(request.data.get('signature'), 'Signature')
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
         except ValueError as exc:
             detail = str(exc)
-            if detail == 'Selfie is required.':
-                detail = 'Selfie is required before signing the form.'
+            if detail == 'Identity photo is required.':
+                detail = 'Identity photo is required before signing the form.'
             return Response({'detail': detail}, status=400)
 
         enrollment = signing.enrollment
@@ -2928,6 +2966,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(enrolled_by=self.request.user, created_by=self.request.user)
 
+    def update(self, request, *args, **kwargs):
+        if 'branch' in request.data and not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can change an enrollment branch.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().update(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
         enrollment = self.get_object()
@@ -3077,7 +3120,21 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
     filter_backends    = [DjangoFilterBackend, SearchFilter]
     filterset_class    = PaymentFilter
     pagination_class   = None
-    search_fields      = ['enrollment__name', 'enrollment__student_number']
+    search_fields      = ['enrollment__name', 'enrollment__student_number', 'enrollment__phone']
+
+    def _month_bounds(self):
+        raw_month = self.request.query_params.get('month')
+        today = timezone.localdate()
+        if raw_month:
+            try:
+                year, month = [int(part) for part in raw_month.split('-', 1)]
+                start = today.replace(year=year, month=month, day=1)
+            except (TypeError, ValueError):
+                start = today.replace(day=1)
+        else:
+            start = today.replace(day=1)
+        end = start.replace(day=monthrange(start.year, start.month)[1])
+        return start, end
 
     def get_queryset(self):
         qs = Payment.objects.select_related(
@@ -3085,7 +3142,151 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
         ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES)
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
+        elif self.request.query_params.get('branch'):
+            qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
+        if self.action in ('list', 'export'):
+            month_start, month_end = self._month_bounds()
+            qs = qs.filter(
+                Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)
+                | Q(next_payment_date__gte=month_start, next_payment_date__lte=month_end)
+                | Q(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL], enrollment__enrollment_date__lte=month_end)
+            ).distinct().order_by('enrollment__name', 'id')
         return qs
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        month_start, month_end = self._month_bounds()
+        today = timezone.localdate()
+        collection = PaymentInstallment.objects.filter(
+            payment__in=queryset,
+            payment_date__gte=month_start,
+            payment_date__lte=month_end,
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        pending = sum((payment.balance for payment in queryset), Decimal('0'))
+        due_queryset = queryset.filter(
+            status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+            next_payment_date__isnull=False,
+            next_payment_date__gte=month_start,
+            next_payment_date__lte=month_end,
+        )
+        if month_start <= today <= month_end:
+            upcoming = due_queryset.filter(next_payment_date__gte=today).count()
+            overdue = queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                next_payment_date__lt=today,
+            ).count()
+        else:
+            upcoming = due_queryset.count()
+            overdue = queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                next_payment_date__lte=month_end,
+            ).count()
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'results': serializer.data,
+            'summary': {
+                'total_collection': collection,
+                'pending_amount': pending,
+                'upcoming_payments': upcoming,
+                'overdue_payments': overdue,
+            },
+            'filters': {
+                'month': month_start.strftime('%Y-%m'),
+                'month_start': month_start,
+                'month_end': month_end,
+            },
+        })
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        try:
+            import openpyxl
+        except ImportError:
+            return self._export_csv()
+        queryset = self.filter_queryset(self.get_queryset())
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = 'Payment Worksheet'
+        headers = [
+            'Student Name', 'Student ID', 'Course', 'Total Fees', 'First Class Date',
+            '1st Payment Amount', '1st Payment Date',
+            '2nd Payment Amount', '2nd Payment Date',
+            '3rd Payment Amount', '3rd Payment Date',
+            'Balance Amount', 'Payment Status',
+        ]
+        max_installments = max([payment.installments.count() for payment in queryset] or [3])
+        for index in range(4, max_installments + 1):
+            headers.insert(-2, f'{index}th Payment Amount')
+            headers.insert(-2, f'{index}th Payment Date')
+        sheet.append(headers)
+        for payment in queryset:
+            installments = list(payment.installments.all().order_by('payment_date', 'id'))
+            row = [
+                payment.enrollment.name,
+                payment.enrollment.student_number,
+                payment.enrollment.course.name if payment.enrollment.course else '',
+                payment.total_fees,
+                payment.enrollment.start_date,
+            ]
+            for index in range(max_installments):
+                installment = installments[index] if index < len(installments) else None
+                row.extend([
+                    installment.amount if installment else '',
+                    installment.payment_date if installment else '',
+                ])
+            row.extend([payment.balance, payment.get_status_display()])
+            sheet.append(row)
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        month_start, _ = self._month_bounds()
+        response['Content-Disposition'] = f'attachment; filename="payment-worksheet-{month_start:%Y-%m}.xlsx"'
+        workbook.save(response)
+        return response
+
+    def _worksheet_export_rows(self, queryset):
+        max_installments = max([payment.installments.count() for payment in queryset] or [3])
+        headers = [
+            'Student Name', 'Student ID', 'Course', 'Total Fees', 'First Class Date',
+            '1st Payment Amount', '1st Payment Date',
+            '2nd Payment Amount', '2nd Payment Date',
+            '3rd Payment Amount', '3rd Payment Date',
+            'Balance Amount', 'Payment Status',
+        ]
+        for index in range(4, max_installments + 1):
+            headers.insert(-2, f'{index}th Payment Amount')
+            headers.insert(-2, f'{index}th Payment Date')
+        rows = []
+        for payment in queryset:
+            installments = list(payment.installments.all().order_by('payment_date', 'id'))
+            row = [
+                payment.enrollment.name,
+                payment.enrollment.student_number,
+                payment.enrollment.course.name if payment.enrollment.course else '',
+                payment.total_fees,
+                payment.enrollment.start_date,
+            ]
+            for index in range(max_installments):
+                installment = installments[index] if index < len(installments) else None
+                row.extend([
+                    installment.amount if installment else '',
+                    installment.payment_date if installment else '',
+                ])
+            row.extend([payment.balance, payment.get_status_display()])
+            rows.append(row)
+        return headers, rows
+
+    def _export_csv(self):
+        import csv
+        queryset = self.filter_queryset(self.get_queryset())
+        headers, rows = self._worksheet_export_rows(queryset)
+        month_start, _ = self._month_bounds()
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="payment-worksheet-{month_start:%Y-%m}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        return response
 
     @action(detail=True, methods=['post'], url_path='send-reminder')
     def send_reminder(self, request, pk=None):

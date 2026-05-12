@@ -1,6 +1,15 @@
 export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
   const status = error?.response?.status
   const data = error?.response?.data
+  if (typeof data === 'string') {
+    if (/<html|<!doctype/i.test(data)) {
+      return status >= 500
+        ? 'The server returned an error. Please try again later.'
+        : fallback
+    }
+    const text = data.trim()
+    if (text && text.length < 240) return text
+  }
   const detail = data?.detail
   if (detail) return detail
   if (data && typeof data === 'object') {
