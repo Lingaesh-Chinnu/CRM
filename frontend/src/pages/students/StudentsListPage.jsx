@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -94,10 +93,6 @@ export default function StudentsListPage() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const updateStudentPhone = (studentId, phone) => {
-    setRows((current) => current.map((student) => student.id === studentId ? { ...student, phone } : student))
   }
 
   return (
@@ -208,7 +203,7 @@ export default function StudentsListPage() {
                     </div>
 
                     <div className="min-w-0 space-y-1 pr-2 text-slate-700">
-                      <PhoneNumberEditor recordType="student" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentPhone(row.id, phone)} />
+                      <p className="break-words text-sm font-semibold leading-5 text-slate-900">{compactValue(row.phone, 'Phone not added')}</p>
                       <p className="break-words text-xs leading-5">{compactValue(row.email, 'Email not added')}</p>
                     </div>
 
@@ -260,7 +255,7 @@ export default function StudentsListPage() {
                   <div className="grid gap-3 text-sm text-slate-700">
                     <div>
                       <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Contact</p>
-                      <PhoneNumberEditor recordType="student" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentPhone(row.id, phone)} />
+                      <p className="font-semibold text-slate-900">{compactValue(row.phone, 'Phone not added')}</p>
                       <p className="mt-1 break-words">{compactValue(row.email, 'Email not added')}</p>
                     </div>
                     <div>
