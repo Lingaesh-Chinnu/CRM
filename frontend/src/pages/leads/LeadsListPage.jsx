@@ -394,12 +394,12 @@ export default function LeadsListPage() {
             {filteredLeads.map((lead) => (
               <li key={lead.id}>
                 <div className="px-6 py-5 transition hover:bg-slate-50 sm:px-8">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex items-start gap-4">
-                      <Link to={`/leads/${lead.id}`} className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-sm font-black text-slate-700">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_190px] lg:items-center">
+                    <div className="flex min-w-0 items-start gap-4">
+                      <Link to={`/leads/${lead.id}`} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-sm font-black text-slate-700">
                         {lead.name?.charAt(0)?.toUpperCase() || '?'}
                       </Link>
-                      <div>
+                      <div className="min-w-0">
                         <Link to={`/leads/${lead.id}`} className="text-lg font-bold tracking-tight text-slate-950 hover:text-cyan-700">
                           {lead.name}
                         </Link>
@@ -408,11 +408,11 @@ export default function LeadsListPage() {
                           <span>{lead.course_name || 'Course not selected'}</span>
                         </div>
                         <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                          <div>
+                          <div className="min-w-0">
                             <span className="font-semibold text-slate-800">Latest Remark: </span>
-                            {lead.remarks || 'No remarks'}
+                            <span className="break-words">{lead.remarks || 'No remarks'}</span>
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <span className="font-semibold text-slate-800">Next Follow-up: </span>
                             {formatDate(lead.next_follow_up_date)}
                           </div>
@@ -420,11 +420,11 @@ export default function LeadsListPage() {
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                    <div className="flex w-full flex-col gap-2 lg:w-[190px] lg:items-stretch lg:justify-center">
+                      <div className="w-full rounded-full bg-slate-100 px-3 py-1 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                         {statusLabel(lead.status)}
                       </div>
-                      <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                      <div className="w-full rounded-full border border-slate-200 bg-white px-3 py-1 text-center text-xs font-semibold text-slate-600">
                         Follow-up: {assignedUserName(lead)}
                       </div>
                     </div>
