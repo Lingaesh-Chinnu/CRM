@@ -329,17 +329,17 @@ export default function PaymentDetailPage() {
               <div className="p-6 text-slate-500">No payment entries added yet.</div>
             ) : (
               <>
-              <div className="hidden overflow-hidden md:block">
-                <table className="w-full table-fixed text-left text-sm">
+              <div className="hidden overflow-x-auto md:block">
+                <table className="w-full min-w-[1120px] table-fixed text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase tracking-[0.14em] text-slate-500">
                     <tr>
                       <th className="w-[12%] px-4 py-3">Date</th>
                       <th className="w-[12%] px-4 py-3 text-right">Amount</th>
-                      <th className="w-[17%] px-4 py-3">Document</th>
-                      <th className="w-[15%] px-4 py-3">Installment</th>
-                      <th className="w-[12%] px-4 py-3">Status</th>
+                      <th className="w-[22%] px-4 py-3">Document</th>
+                      <th className="w-[18%] px-4 py-3">Installment</th>
+                      <th className="w-[10%] px-4 py-3">Status</th>
                       <th className="w-[14%] px-4 py-3">Reference</th>
-                      <th className="w-[18%] px-4 py-3 text-right">Actions</th>
+                      <th className="w-[12%] px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -351,23 +351,23 @@ export default function PaymentDetailPage() {
                           <td className="px-4 py-4 align-top text-slate-700">{formatDate(installment.payment_date)}</td>
                           <td className="px-4 py-4 text-right align-top font-black text-slate-950">Rs {money(installment.amount)}</td>
                           <td className="px-4 py-4 align-top">
-                            <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
+                            <span className="inline-flex max-w-full whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
                               {documentStatus}
                             </span>
-                            {installment.document_number ? <p className="mt-1 text-xs text-slate-500">{installment.document_number}</p> : null}
+                            {installment.document_number ? <p className="mt-2 break-words text-xs leading-5 text-slate-500 [word-break:break-word]">{installment.document_number}</p> : null}
                           </td>
-                          <td className="break-words px-4 py-4 align-top text-slate-700">{installment.installment_label || `${installment.installment_index} Installment`}</td>
+                          <td className="break-words px-4 py-4 align-top text-slate-700 [word-break:break-word]">{installment.installment_label || `${installment.installment_index} Installment`}</td>
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
-                          <td className="break-words px-4 py-4 align-top text-slate-500">{installment.reference_number || 'Not provided'}</td>
+                          <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
                           <td className="px-4 py-4 align-top">
-                            <div className="ml-auto flex w-36 flex-col gap-2">
+                            <div className="ml-auto flex w-full flex-col gap-2">
                               {isSuperAdmin && !installment.bill_number ? (
                                 <>
                                   <button
                                     type="button"
                                     onClick={() => generateDocument(installment.id, 'receipt')}
                                     disabled={billActionId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                                   >
                                     {billActionId === installment.id ? 'Generating...' : installment.receipt_number ? 'Re-generate Receipt' : 'Generate Receipt'}
                                   </button>
@@ -376,7 +376,7 @@ export default function PaymentDetailPage() {
                                       type="button"
                                       onClick={() => generateDocument(installment.id, 'bill')}
                                       disabled={billActionId === installment.id}
-                                      className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                      className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                                     >
                                       {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
                                     </button>
@@ -388,7 +388,7 @@ export default function PaymentDetailPage() {
                                   type="button"
                                   onClick={() => generateDocument(installment.id, 'bill')}
                                   disabled={billActionId === installment.id}
-                                  className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                  className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                                 >
                                   {billActionId === installment.id ? 'Generating...' : 'Re-generate Bill'}
                                 </button>
@@ -399,7 +399,7 @@ export default function PaymentDetailPage() {
                                     type="button"
                                     onClick={() => openBill(installment.id, 'view')}
                                     disabled={billActionId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                                   >
                                     View {documentLabel}
                                   </button>
@@ -407,7 +407,7 @@ export default function PaymentDetailPage() {
                                     type="button"
                                     onClick={() => openBill(installment.id, 'download')}
                                     disabled={billActionId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                                   >
                                     Download {documentLabel}
                                   </button>
@@ -432,7 +432,7 @@ export default function PaymentDetailPage() {
                           <p className="font-black text-slate-950">Rs {money(installment.amount)}</p>
                           <p className="mt-1 text-sm text-slate-500">{formatDate(installment.payment_date)}</p>
                         </div>
-                        <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">
+                        <span className="max-w-[56%] shrink-0 whitespace-normal rounded-full bg-slate-100 px-3 py-1 text-center text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">
                           {documentStatus}
                         </span>
                       </div>
