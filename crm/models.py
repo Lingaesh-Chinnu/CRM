@@ -749,10 +749,12 @@ class Enrollment(TimeStampedModel):
         ENROLLED = 'enrolled', 'Enrolled'
         ACTIVE    = 'active',    'Active'
         COMPLETED = 'completed', 'Completed'
+        INACTIVE  = 'inactive',  'Inactive'
         DROPPED   = 'dropped',   'Dropped'
-        ON_HOLD   = 'on_hold',   'On Hold'
+        ON_HOLD   = 'on_hold',   'Hold'
+        TRANSFERRED = 'transferred', 'Transferred'
 
-    FINAL_STATUSES = {'enrolled', 'active', 'completed', 'dropped', 'on_hold'}
+    FINAL_STATUSES = {'enrolled', 'active', 'completed', 'inactive', 'dropped', 'on_hold', 'transferred'}
 
     student_number  = models.CharField(max_length=20, unique=True, editable=False, null=True, blank=True)
     walkin          = models.OneToOneField(WalkIn, null=True, blank=True, on_delete=models.SET_NULL,

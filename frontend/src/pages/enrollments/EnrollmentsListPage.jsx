@@ -20,12 +20,17 @@ function formatDate(value) {
 }
 
 function getStatusLabel(value) {
-  if (value === 'enrolled') return 'Enrolled'
-  if (value === 'active') return 'Active'
+  if (value === 'enrolled' || value === 'active') return 'Active'
   if (value === 'completed') return 'Completed'
-  if (value === 'dropped') return 'Inactive'
-  if (value === 'on_hold') return 'On Hold'
-  return 'Unknown'
+  if (value === 'on_hold') return 'Hold'
+  if (value === 'inactive') return 'Inactive'
+  if (value === 'dropped') return 'Dropped'
+  if (value === 'transferred') return 'Transferred'
+  return 'Active'
+}
+
+function statusSelectValue(value) {
+  return value === 'enrolled' ? 'active' : value || 'active'
 }
 
 function getPaymentLabel(value) {
@@ -189,8 +194,10 @@ export default function EnrollmentsListPage() {
               <option value="">All status</option>
               <option value="active">Active</option>
               <option value="completed">Completed</option>
-              <option value="dropped">Inactive</option>
-              <option value="on_hold">On Hold</option>
+              <option value="on_hold">Hold</option>
+              <option value="inactive">Inactive</option>
+              <option value="dropped">Dropped</option>
+              <option value="transferred">Transferred</option>
             </select>
           </label>
 
@@ -271,7 +278,7 @@ export default function EnrollmentsListPage() {
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status</p>
                   <select
-                    value={row.status || 'enrolled'}
+                    value={statusSelectValue(row.status)}
                     disabled={updatingStudentId === row.id}
                     onChange={async (event) => {
                       const nextStatus = event.target.value
@@ -280,11 +287,12 @@ export default function EnrollmentsListPage() {
                     }}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
                   >
-                    <option value="enrolled">Enrolled</option>
                     <option value="active">Active</option>
                     <option value="completed">Completed</option>
-                    <option value="dropped">Inactive</option>
-                    <option value="on_hold">On Hold</option>
+                    <option value="on_hold">Hold</option>
+                    <option value="inactive">Inactive</option>
+                    <option value="dropped">Dropped</option>
+                    <option value="transferred">Transferred</option>
                   </select>
                   <p className="mt-2 text-xs text-slate-500">{getStatusLabel(row.status)}</p>
                 </div>
@@ -328,7 +336,7 @@ export default function EnrollmentsListPage() {
 
                     <div className="space-y-2">
                       <select
-                        value={row.status || 'enrolled'}
+                        value={statusSelectValue(row.status)}
                         disabled={updatingStudentId === row.id}
                         onChange={async (event) => {
                           const nextStatus = event.target.value
@@ -337,11 +345,12 @@ export default function EnrollmentsListPage() {
                         }}
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
                       >
-                        <option value="enrolled">Enrolled</option>
                         <option value="active">Active</option>
                         <option value="completed">Completed</option>
-                        <option value="dropped">Inactive</option>
-                        <option value="on_hold">On Hold</option>
+                        <option value="on_hold">Hold</option>
+                        <option value="inactive">Inactive</option>
+                        <option value="dropped">Dropped</option>
+                        <option value="transferred">Transferred</option>
                       </select>
                       <p className="text-xs text-slate-500">{getStatusLabel(row.status)}</p>
                     </div>

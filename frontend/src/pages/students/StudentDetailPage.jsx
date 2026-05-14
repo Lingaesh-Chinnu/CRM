@@ -5,8 +5,26 @@ import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 
+const studentStatusOptions = [
+  { value: 'active', label: 'Active' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'on_hold', label: 'Hold' },
+  { value: 'inactive', label: 'Inactive' },
+  { value: 'dropped', label: 'Dropped' },
+  { value: 'transferred', label: 'Transferred' },
+]
+
 function prettyValue(value, fallback = 'Not provided') {
   return value || fallback
+}
+
+function studentStatusValue(value) {
+  return value === 'enrolled' ? 'active' : value || 'active'
+}
+
+function studentStatusLabel(value) {
+  const normalized = studentStatusValue(value)
+  return studentStatusOptions.find((option) => option.value === normalized)?.label || 'Active'
 }
 
 function formatDate(value, fallback = 'Not provided') {
@@ -33,6 +51,7 @@ export default function StudentDetailPage() {
   const [row, setRow] = useState(null)
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
+  const [statusSaving, setStatusSaving] = useState(false)
 
   useEffect(() => {
     setLoadError('')
@@ -45,6 +64,20 @@ export default function StudentDetailPage() {
     return <div className="p-6 text-slate-500">{loadError || 'Loading student profile...'}</div>
   }
 
+  const updateStudentStatus = async (status) => {
+    setStatusSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.patch(`/enrollments/${row.id}/`, { status })
+      setRow(data)
+      setMessage('Student status updated.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to update student status.'))
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -53,16 +86,16 @@ export default function StudentDetailPage() {
         <p className="mt-3 text-sm text-slate-500">
           {row.student_number} | {row.course_name || 'No course'} | {row.branch_name || 'No branch'}
         </p>
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <Link
             to="/students"
-            className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+            className="inline-flex min-w-[140px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
           >
             Back to Students
           </Link>
           <Link
             to={`/enrollments/${row.id}`}
-            className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
             Open Enrollment
           </Link>
@@ -70,7 +103,7 @@ export default function StudentDetailPage() {
             <button
               type="button"
               onClick={() => openProtectedFile(api, row.rules_signed_pdf_url, 'Signed PDF is not available. Please resend and collect the signed form again.', setMessage)}
-              className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+              className="inline-flex min-w-[190px] justify-center whitespace-nowrap rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
             >
               View Signed Rules PDF
             </button>
@@ -79,7 +112,7 @@ export default function StudentDetailPage() {
             <button
               type="button"
               onClick={() => openProtectedFile(api, row.rules_selfie_url, 'Selfie is not available.', setMessage)}
-              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+              className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Selfie
             </button>
@@ -125,9 +158,22 @@ export default function StudentDetailPage() {
         </article>
 
         <article className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">Enrollment snapshot</h2>
+          <h2 className="text-xl font-black tracking-tight text-slate-950">Enrollment Snapshot</h2>
           <div className="mt-5 space-y-4">
-            <DetailCard label="Status" value={prettyValue(row.status)} />
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Student Status</p>
+              <select
+                value={studentStatusValue(row.status)}
+                onChange={(event) => updateStudentStatus(event.target.value)}
+                disabled={statusSaving}
+                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
+              >
+                {studentStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs font-semibold text-slate-500">{statusSaving ? 'Saving...' : studentStatusLabel(row.status)}</p>
+            </div>
             <DetailCard label="Batch Timing" value={prettyValue(row.batch_timing)} />
             <DetailCard label="Final Fees" value={`Rs ${Number(row.final_fees || 0).toLocaleString('en-IN')}`} />
             <DetailCard

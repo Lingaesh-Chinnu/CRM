@@ -76,17 +76,17 @@ export default function PhoneNumberEditor({ recordType, recordId, phone, onSaved
   return (
     <div className="space-y-2">
       {editing ? (
-        <div className="flex flex-nowrap items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Phone number"
             className="h-9 min-w-[150px] rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100"
           />
-          <button type="button" onClick={requestSave} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white">
+          <button type="button" onClick={requestSave} className="inline-flex min-w-[72px] justify-center whitespace-nowrap rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white">
             Save
           </button>
-          <button type="button" onClick={cancelEdit} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">
+          <button type="button" onClick={cancelEdit} className="inline-flex min-w-[72px] justify-center whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700">
             Cancel
           </button>
         </div>
@@ -109,11 +109,11 @@ export default function PhoneNumberEditor({ recordType, recordId, phone, onSaved
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Are you sure you want to change the phone number from {currentPhone} to {pendingPhone}?
             </p>
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <button type="button" onClick={() => setConfirmOpen(false)} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+              <button type="button" onClick={() => setConfirmOpen(false)} disabled={saving} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
                 Cancel
               </button>
-              <button type="button" onClick={confirmSave} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+              <button type="button" onClick={confirmSave} disabled={saving} className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
                 {saving ? 'Saving...' : 'Confirm Change'}
               </button>
             </div>

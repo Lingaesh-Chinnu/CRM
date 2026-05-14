@@ -52,11 +52,13 @@ function statusLabel(value) {
     pending_rules_form: 'Pending Rules Form',
     rules_form_sent: 'Rules Form Sent',
     rules_form_submitted: 'Rules Form Submitted',
-    enrolled: 'Enrolled',
+    enrolled: 'Active',
     active: 'Active',
     completed: 'Completed',
     dropped: 'Dropped',
-    on_hold: 'On Hold',
+    inactive: 'Inactive',
+    on_hold: 'Hold',
+    transferred: 'Transferred',
   }
   return labels[value] || 'Pending Enrollment'
 }
@@ -87,11 +89,11 @@ function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
             </p>
           ))}
         </div>
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button type="button" onClick={onCancel} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+        <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+          <button type="button" onClick={onCancel} disabled={saving} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
             Cancel
           </button>
-          <button type="button" onClick={onConfirm} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+          <button type="button" onClick={onConfirm} disabled={saving} className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
             {saving ? 'Saving...' : 'Confirm & Update'}
           </button>
         </div>
@@ -112,6 +114,7 @@ export default function EnrollmentDetailPage() {
   const [editingDetails, setEditingDetails] = useState(false)
   const [pendingDetailChanges, setPendingDetailChanges] = useState([])
   const [message, setMessage] = useState('')
+  const [rulesErrors, setRulesErrors] = useState({})
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -143,8 +146,18 @@ export default function EnrollmentDetailPage() {
   }
 
   const sendRulesForm = async () => {
+    const errors = {}
+    if (!String(startDate || '').trim()) errors.start_date = 'Course start date is required.'
+    if (!String(batchTiming || '').trim()) errors.batch_timing = 'Batch timing is required.'
+    if (Object.keys(errors).length > 0) {
+      setRulesErrors(errors)
+      setMessage('')
+      return
+    }
+
     setSaving(true)
     setMessage('')
+    setRulesErrors({})
     try {
       const { data: updatedEnrollment } = await api.patch(`/enrollments/${id}/`, {
         start_date: startDate || null,
@@ -165,7 +178,12 @@ export default function EnrollmentDetailPage() {
         setMessage(data.whatsapp_error ? `Automatic WhatsApp failed. Opened WhatsApp Web fallback. ${data.whatsapp_error}` : 'Rules & Regulation signing link is ready and opened in WhatsApp Web.')
       }
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to send Rules & Regulation form.')
+      const data = error.response?.data
+      setRulesErrors({
+        start_date: data?.start_date || '',
+        batch_timing: data?.batch_timing || '',
+      })
+      setMessage(data?.detail || 'Failed to send Rules & Regulation form.')
     } finally {
       setSaving(false)
     }
@@ -184,6 +202,7 @@ export default function EnrollmentDetailPage() {
     setStartDate(row.start_date || '')
     setBatchTiming(row.batch_timing || '')
     setPendingDetailChanges([])
+    setRulesErrors({})
     setEditingDetails(false)
   }
 
@@ -223,6 +242,7 @@ export default function EnrollmentDetailPage() {
       setBatchTiming(data.batch_timing || '')
       setPendingDetailChanges([])
       setEditingDetails(false)
+      setRulesErrors({})
       setMessage('Enrollment details updated.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to update enrollment details.')
@@ -326,36 +346,43 @@ export default function EnrollmentDetailPage() {
           </span>
         </div>
         {editingDetails && (
-          <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={resetDetailsEdit} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <button type="button" onClick={resetDetailsEdit} disabled={saving} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
               Cancel
             </button>
-            <button type="button" onClick={requestSaveDetails} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+            <button type="button" onClick={requestSaveDetails} disabled={saving} className="inline-flex min-w-[130px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
               {saving ? 'Saving...' : 'Save Update'}
             </button>
           </div>
         )}
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Course Start Date</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Course Start Date <span className="text-rose-600">*</span></p>
             {editingDetails ? (
               <input
                 type="date"
                 value={startDate || ''}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                onChange={(e) => {
+                  setStartDate(e.target.value)
+                  setRulesErrors((current) => ({ ...current, start_date: '' }))
+                }}
+                className={`w-full rounded-2xl border bg-slate-50 px-4 py-3 ${rulesErrors.start_date ? 'border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100' : 'border-slate-200'}`}
               />
             ) : (
               <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold text-slate-900">{prettyValue(row.start_date)}</p>
             )}
+            {rulesErrors.start_date && <p className="mt-2 text-sm font-semibold text-rose-600">{rulesErrors.start_date}</p>}
           </div>
           <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Batch Timing</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Batch Timing <span className="text-rose-600">*</span></p>
             {editingDetails ? (
               <select
                 value={batchTiming}
-                onChange={(e) => setBatchTiming(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                onChange={(e) => {
+                  setBatchTiming(e.target.value)
+                  setRulesErrors((current) => ({ ...current, batch_timing: '' }))
+                }}
+                className={`w-full rounded-2xl border bg-slate-50 px-4 py-3 ${rulesErrors.batch_timing ? 'border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100' : 'border-slate-200'}`}
               >
                 <option value="">Select batch timing</option>
                 {batchTiming && !batchTimingOptions.includes(batchTiming) ? (
@@ -370,6 +397,7 @@ export default function EnrollmentDetailPage() {
             ) : (
               <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold text-slate-900">{prettyValue(row.batch_timing)}</p>
             )}
+            {rulesErrors.batch_timing && <p className="mt-2 text-sm font-semibold text-rose-600">{rulesErrors.batch_timing}</p>}
           </div>
         </div>
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
@@ -388,18 +416,18 @@ export default function EnrollmentDetailPage() {
           </p>
         </div>
         {message && <p className="mt-4 text-sm text-slate-600">{message}</p>}
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button
             onClick={sendRulesForm}
             disabled={saving}
-            className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+            className="inline-flex min-w-[230px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
             {saving ? 'Sending...' : 'Send Rules & Regulation Form'}
           </button>
           <button
             onClick={enrollStudent}
             disabled={saving || !canEnroll || isFinalEnrollment}
-            className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isFinalEnrollment ? 'Student Enrolled' : 'Enroll Student'}
           </button>
@@ -407,7 +435,7 @@ export default function EnrollmentDetailPage() {
             <button
               type="button"
               onClick={() => openProtectedFile(api, row.rules_signed_pdf_url, 'Signed PDF is not available. Please resend and collect the signed form again.', setMessage)}
-              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+              className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Signed PDF
             </button>
@@ -416,7 +444,7 @@ export default function EnrollmentDetailPage() {
             <button
               type="button"
               onClick={() => openProtectedFile(api, row.rules_selfie_url, 'Selfie is not available.', setMessage)}
-              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
+              className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
             >
               View Selfie
             </button>

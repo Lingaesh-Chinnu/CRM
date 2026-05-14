@@ -23,6 +23,16 @@ function compactValue(value, fallback = 'Not provided') {
   return value || fallback
 }
 
+function studentStatusLabel(value) {
+  if (value === 'enrolled' || value === 'active') return 'Active'
+  if (value === 'completed') return 'Completed'
+  if (value === 'on_hold') return 'Hold'
+  if (value === 'inactive') return 'Inactive'
+  if (value === 'dropped') return 'Dropped'
+  if (value === 'transferred') return 'Transferred'
+  return 'Active'
+}
+
 export default function StudentsListPage() {
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
@@ -219,7 +229,7 @@ export default function StudentsListPage() {
 
                     <div className="flex w-[150px] min-w-0 flex-col items-center justify-start gap-2 justify-self-end">
                       <div className="max-w-[120px] whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-center text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-                        {row.status}
+                        {studentStatusLabel(row.status)}
                       </div>
                       <Link
                         to={`/students/${row.id}`}
@@ -243,7 +253,7 @@ export default function StudentsListPage() {
                       <p className="mt-2 break-words text-sm font-medium text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
                     </div>
                     <div className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      {row.status}
+                      {studentStatusLabel(row.status)}
                     </div>
                   </div>
 

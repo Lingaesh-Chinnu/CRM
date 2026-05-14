@@ -192,11 +192,11 @@ function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
             </p>
           ))}
         </div>
-        <div className="mt-6 flex flex-wrap justify-end gap-3">
-          <button type="button" onClick={onCancel} disabled={saving} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+        <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+          <button type="button" onClick={onCancel} disabled={saving} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
             Cancel
           </button>
-          <button type="button" onClick={onConfirm} disabled={saving} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+          <button type="button" onClick={onConfirm} disabled={saving} className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
             {saving ? 'Saving...' : 'Confirm & Update'}
           </button>
         </div>
@@ -777,11 +777,11 @@ export default function LeadDetailPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-black tracking-tight text-slate-950">Lead details</h2>
             {editingDetails && (
-              <div className="flex flex-wrap gap-3">
-                <button type="button" onClick={resetDetailsEdit} disabled={savingDetails} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <button type="button" onClick={resetDetailsEdit} disabled={savingDetails} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
                   Cancel
                 </button>
-                <button type="button" onClick={requestSaveCandidateDetails} disabled={savingDetails} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                <button type="button" onClick={requestSaveCandidateDetails} disabled={savingDetails} className="inline-flex min-w-[130px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
                   {savingDetails ? 'Saving...' : 'Save Update'}
                 </button>
               </div>

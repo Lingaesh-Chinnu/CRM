@@ -3107,8 +3107,14 @@ import django_filters
 
 
 class EnrollmentFilter(django_filters.FilterSet):
+    status = django_filters.CharFilter(method='filter_status')
     enrolled_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
     enrolled_to   = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
+
+    def filter_status(self, queryset, name, value):
+        if value == Enrollment.Status.ACTIVE:
+            return queryset.filter(status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.ENROLLED])
+        return queryset.filter(status=value) if value else queryset
 
     class Meta:
         model  = Enrollment
@@ -3154,6 +3160,17 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
         enrollment = self.get_object()
+        errors = {}
+        if not enrollment.start_date:
+            errors['start_date'] = 'Course start date is required.'
+        if not str(enrollment.batch_timing or '').strip():
+            errors['batch_timing'] = 'Batch timing is required.'
+        if errors:
+            return Response(
+                {'detail': 'Course start date and batch timing are required before sending the Rules & Regulation form.', **errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
         signing.status = RulesSigningRequest.Status.SENT
         signing.sent_at = timezone.now()
@@ -3220,7 +3237,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Rules & Regulation form must be signed before enrollment can proceed.'}, status=400)
         with transaction.atomic():
             if enrollment.status not in Enrollment.FINAL_STATUSES:
-                enrollment.status = Enrollment.Status.ENROLLED
+                enrollment.status = Enrollment.Status.ACTIVE
                 enrollment.enrolled_by = enrollment.enrolled_by or request.user
                 enrollment.save(update_fields=['status', 'enrolled_by', 'student_number', 'final_fees', 'updated_at'])
             resolve_rules_signed_notifications(enrollment.id)
