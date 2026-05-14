@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
@@ -17,7 +18,7 @@ const initialForm = {
   phone: '',
   branch: '',
   course: '',
-  source: '',
+  source: 'manual',
   assigned_to: '',
   qualification: '',
   degree: '',
@@ -45,6 +46,8 @@ export default function LeadCreatePage() {
   const [staffUsers, setStaffUsers] = useState([])
   const [form, setForm] = useState(initialForm)
   const [duplicateInfo, setDuplicateInfo] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
@@ -58,7 +61,8 @@ export default function LeadCreatePage() {
   }, [isSuperAdmin])
 
   useEffect(() => {
-    api.get('/leads/staff-options/')
+    const params = isSuperAdmin && form.branch ? { branch: form.branch } : undefined
+    api.get('/leads/staff-options/', { params })
       .then(({ data }) => {
         const rows = data || []
         setStaffUsers(rows)
@@ -72,10 +76,13 @@ export default function LeadCreatePage() {
         })
       })
       .catch(() => setStaffUsers([]))
-  }, [isSuperAdmin, user?.id])
+  }, [isSuperAdmin, user?.id, form.branch])
 
   const submit = async (e) => {
     e.preventDefault()
+    if (saving) return
+    setSaving(true)
+    setError('')
 
     const remarks = [
       form.remarks.trim(),
@@ -86,17 +93,24 @@ export default function LeadCreatePage() {
       phone: form.phone,
       course: form.course ? Number(form.course) : null,
       status: 'new',
-      source: form.source,
+      lead_status: 'new',
+      source: form.source || 'manual',
       follow_up_by: form.assigned_to ? Number(form.assigned_to) : null,
       qualification: form.qualification.trim(),
       degree: form.degree.trim(),
-      branch: isSuperAdmin ? Number(form.branch) || null : user?.branch || null,
+      branch: isSuperAdmin ? Number(form.branch) || null : null,
       next_follow_up_date: form.next_follow_up_date || null,
       remarks,
     }
 
-    const { data } = await api.post('/leads/', payload)
-    navigate(`/leads/${data.id}`)
+    try {
+      const { data } = await api.post('/leads/', payload)
+      navigate(`/leads/${data.id}`)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to create lead.'))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const checkDuplicate = async () => {
@@ -181,9 +195,8 @@ export default function LeadCreatePage() {
               value={form.source}
               onChange={(e) => setForm({ ...form, source: e.target.value })}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-              required
             >
-              <option value="" disabled>Select source</option>
+              <option value="manual">Manual</option>
               <option value="google">Google</option>
               <option value="instagram">Instagram</option>
               <option value="facebook">Facebook</option>
@@ -271,8 +284,17 @@ export default function LeadCreatePage() {
           </div>
         )}
 
-        <button className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
-          Save Lead
+        {error && (
+          <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">
+            {error}
+          </div>
+        )}
+
+        <button
+          disabled={saving}
+          className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? 'Saving...' : 'Save Lead'}
         </button>
       </form>
     </div>

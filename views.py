@@ -1357,8 +1357,8 @@ class LeadFilter(django_filters.FilterSet):
     assigned_user = django_filters.NumberFilter(field_name='assigned_to')
     walkin_date_from = django_filters.DateFilter(field_name='walkin_date', lookup_expr='gte')
     walkin_date_to   = django_filters.DateFilter(field_name='walkin_date', lookup_expr='lte')
-    next_follow_up_date_from = django_filters.DateFilter(field_name='next_follow_up_date', lookup_expr='gte')
-    next_follow_up_date_to   = django_filters.DateFilter(field_name='next_follow_up_date', lookup_expr='lte')
+    next_follow_up_date_from = django_filters.DateFilter(method='filter_next_follow_up_date_from')
+    next_follow_up_date_to   = django_filters.DateFilter(method='filter_next_follow_up_date_to')
     created_from     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_to       = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
 
@@ -1387,6 +1387,16 @@ class LeadFilter(django_filters.FilterSet):
             return queryset.filter(source=value)
         return queryset.none()
 
+    def filter_next_follow_up_date_from(self, queryset, name, value):
+        if not value or 'next_follow_up_date' in missing_model_columns(Lead, ['next_follow_up_date']):
+            return queryset
+        return queryset.filter(next_follow_up_date__gte=value)
+
+    def filter_next_follow_up_date_to(self, queryset, name, value):
+        if not value or 'next_follow_up_date' in missing_model_columns(Lead, ['next_follow_up_date']):
+            return queryset
+        return queryset.filter(next_follow_up_date__lte=value)
+
     class Meta:
         model  = Lead
         fields = ['status', 'source', 'branch', 'assigned_to', 'course']
@@ -1408,10 +1418,6 @@ class LeadViewSet(viewsets.ModelViewSet):
     ordering           = ['-created_at']
 
     def get_queryset(self):
-        if self.action == 'list':
-            qs = Lead.objects.select_related('course', 'branch', 'assigned_to')
-        else:
-            qs = Lead.objects.select_related('course','branch','assigned_to','created_by')
         missing_columns = missing_model_columns(Lead, [
             'qualification', 'degree', 'willing_to_join',
             'external_course_interested', 'external_message',
@@ -1419,6 +1425,13 @@ class LeadViewSet(viewsets.ModelViewSet):
             'next_follow_up_date', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by',
         ])
+        if self.action == 'list':
+            qs = Lead.objects.select_related('course', 'branch', 'assigned_to')
+        else:
+            related = ['course', 'branch', 'assigned_to', 'created_by']
+            if 'converted_by' not in missing_columns:
+                related.append('converted_by')
+            qs = Lead.objects.select_related(*related)
         if missing_columns:
             qs = qs.defer(*missing_columns)
         if self.action != 'list':
@@ -1432,7 +1445,10 @@ class LeadViewSet(viewsets.ModelViewSet):
         # Staff can only see their branch's leads
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
-        if self.request.query_params.get('focus') == 'today-follow-up':
+        if (
+            self.request.query_params.get('focus') == 'today-follow-up'
+            and 'next_follow_up_date' not in missing_columns
+        ):
             qs = active_lead_follow_up_queryset(
                 qs,
                 'next_follow_up_date',

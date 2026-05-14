@@ -323,23 +323,44 @@ class FollowUpSerializer(serializers.ModelSerializer):
 class LeadListSerializer(serializers.ModelSerializer):
     """Compact serializer for list endpoints."""
     course_name  = serializers.CharField(source='course.name', read_only=True)
+    status = serializers.SerializerMethodField()
+    lead_status = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
+    source_display = serializers.SerializerMethodField()
     assigned_to_name = serializers.SerializerMethodField()
     follow_up_by = serializers.IntegerField(source='assigned_to_id', read_only=True)
     assigned_user = serializers.SerializerMethodField()
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
-    source_display = serializers.CharField(source='get_source_display', read_only=True)
+    next_follow_up_date = serializers.SerializerMethodField()
     imported_via_csv = serializers.SerializerMethodField()
 
     class Meta:
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name','remarks',
-                  'status','source','source_display','walkin_date','next_follow_up_date',
+                  'status','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
                   'branch_name','created_by','imported_via_csv','created_at']
 
+    def get_status(self, obj):
+        return safe_deferred_value(obj, 'status', Lead.Status.NEW) or Lead.Status.NEW
+
+    def get_lead_status(self, obj):
+        return self.get_status(obj)
+
+    def get_source(self, obj):
+        return safe_deferred_value(obj, 'source', Lead.Source.MANUAL) or Lead.Source.MANUAL
+
+    def get_source_display(self, obj):
+        source = self.get_source(obj)
+        return dict(Lead.Source.choices).get(source, source or 'Manual')
+
+    def get_next_follow_up_date(self, obj):
+        value = safe_deferred_value(obj, 'next_follow_up_date', None)
+        return value.isoformat() if hasattr(value, 'isoformat') else value
+
     def get_imported_via_csv(self, obj):
         try:
-            return bool(obj.imported_via_csv)
+            return bool(safe_deferred_value(obj, 'imported_via_csv', False))
         except Exception:
             return False
 
@@ -410,6 +431,17 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['lead_number', 'created_by']
 
+    def to_internal_value(self, data):
+        if hasattr(data, 'copy'):
+            data = data.copy()
+            if data.get('status') in (None, '') and data.get('lead_status') not in (None, ''):
+                data['status'] = data.get('lead_status')
+            if data.get('status') in (None, ''):
+                data['status'] = Lead.Status.NEW
+            if data.get('source') in (None, ''):
+                data['source'] = Lead.Source.MANUAL
+        return super().to_internal_value(data)
+
     def to_representation(self, instance):
         defaults = {
             'qualification': '',
@@ -476,27 +508,41 @@ class LeadDetailSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if self.instance is None:
+            attrs.setdefault('status', Lead.Status.NEW)
+            attrs.setdefault('source', Lead.Source.MANUAL)
+            if user and user.is_authenticated and not user.is_super_admin:
+                if not user.branch_id:
+                    raise serializers.ValidationError({
+                        'branch': 'Your account is not assigned to a branch.'
+                    })
+                attrs['branch'] = user.branch
+        branch = attrs.get('branch') or getattr(self.instance, 'branch', None)
+        if branch and not getattr(branch, 'is_active', True):
+            raise serializers.ValidationError({'branch': 'Select a valid active branch.'})
         assigned_to = attrs.get('assigned_to')
         if assigned_to:
-            request = self.context.get('request')
-            user = getattr(request, 'user', None)
-            branch = attrs.get('branch') or getattr(self.instance, 'branch', None)
             if not assigned_to.is_active:
                 raise serializers.ValidationError({
                     'follow_up_by': 'Select an active user.'
                 })
             if user and user.is_authenticated and not user.is_super_admin:
-                branch = user.branch
                 if assigned_to.branch_id != user.branch_id:
                     raise serializers.ValidationError({
                         'follow_up_by': 'Select an active user from your branch.'
                     })
+            elif branch and assigned_to.branch_id and assigned_to.branch_id != branch.id:
+                raise serializers.ValidationError({
+                    'follow_up_by': 'Select a user from the selected branch.'
+                })
         year = attrs.get('year_of_passing')
         if year not in (None, '') and (year < 1900 or year > 2100):
             raise serializers.ValidationError({'year_of_passing': 'Enter a valid passed out year.'})
         if self.instance is None:
             data = {**getattr(self, 'initial_data', {}), **attrs}
-            required_fields = ['name', 'phone', 'course', 'source']
+            required_fields = ['name', 'phone', 'course']
             missing = [
                 field for field in required_fields
                 if data.get(field) in (None, '')

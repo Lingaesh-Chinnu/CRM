@@ -309,6 +309,7 @@ class Lead(TimeStampedModel):
         LOST                             = 'lost',                             'Lost'
 
     class Source(models.TextChoices):
+        MANUAL            = 'manual',            'Manual'
         GOOGLE            = 'google',            'Google'
         WEBSITE           = 'website',           'Website'
         INSTAGRAM         = 'instagram',         'Instagram'
@@ -364,7 +365,7 @@ class Lead(TimeStampedModel):
     is_duplicate = models.BooleanField(default=False, db_index=True)
     imported_via_csv = models.BooleanField(default=False, db_index=True)
     status      = models.CharField(max_length=40, choices=Status.choices, default=Status.NEW, db_index=True)
-    source      = models.CharField(max_length=20, choices=Source.choices, default=Source.GOOGLE)
+    source      = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
     converted_to_type = models.CharField(max_length=20, blank=True)
     converted_record_id = models.PositiveIntegerField(null=True, blank=True)
     converted_at = models.DateTimeField(null=True, blank=True)
