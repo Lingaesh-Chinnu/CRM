@@ -171,58 +171,58 @@ export default function DiscountsPage() {
         </p>
       </section>
 
-      <form onSubmit={submit} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+      <form onSubmit={submit} className="max-w-full overflow-visible rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
         <h2 className="text-xl font-black tracking-tight text-slate-950">Add discount</h2>
-        <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Discount name" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="Discount Amount" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="date" value={form.valid_to} onChange={(e) => setForm({ ...form, valid_to: e.target.value })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+        <div className="mt-5 grid max-w-full grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Discount name" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <input type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="Discount Amount" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <input type="date" value={form.valid_to} onChange={(e) => setForm({ ...form, valid_to: e.target.value })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+          <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap gap-3">
-              <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: true, courses: [] })} className={`rounded-full px-4 py-2 text-sm font-semibold ${form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>All Courses</button>
-              <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: false })} className={`rounded-full px-4 py-2 text-sm font-semibold ${!form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>Specific Courses</button>
+        <div className="mt-5 grid max-w-full grid-cols-1 gap-4 xl:grid-cols-2">
+          <div className="max-w-full overflow-visible rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: true, courses: [] })} className={`w-full max-w-full rounded-full px-4 py-2.5 text-sm font-semibold ${form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>All Courses</button>
+              <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: false })} className={`w-full max-w-full rounded-full px-4 py-2.5 text-sm font-semibold ${!form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>Specific Courses</button>
             </div>
             {!form.apply_to_all_courses && (
-              <div className="mt-4 grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
+              <div className="mt-4 grid max-w-full grid-cols-1 gap-2 overflow-visible md:grid-cols-2">
                 {courses.map((course) => (
-                  <label key={course.id} className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                    <input type="checkbox" checked={form.courses.includes(course.id)} onChange={() => toggleFormCourse(course.id)} className="h-4 w-4 accent-slate-950" />
-                    {course.name}
+                  <label key={course.id} className="flex min-w-0 items-start gap-2 rounded-xl bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 ring-1 ring-slate-200">
+                    <input type="checkbox" checked={form.courses.includes(course.id)} onChange={() => toggleFormCourse(course.id)} className="mt-0.5 h-4 w-4 flex-none accent-slate-950" />
+                    <span className="min-w-0 break-words">{course.name}</span>
                   </label>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex flex-wrap gap-3">
-              <label className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
-                <input type="checkbox" checked={form.apply_to_all_branches} onChange={(e) => setForm({ ...form, apply_to_all_branches: e.target.checked, branches: e.target.checked ? [] : form.branches })} className="h-4 w-4 accent-slate-950" />
-                All Branches
+          <div className="max-w-full overflow-visible rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="flex min-w-0 items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+                <input type="checkbox" checked={form.apply_to_all_branches} onChange={(e) => setForm({ ...form, apply_to_all_branches: e.target.checked, branches: e.target.checked ? [] : form.branches })} className="h-4 w-4 flex-none accent-slate-950" />
+                <span className="min-w-0 break-words">All Branches</span>
               </label>
               {branches.map((branch) => (
-                <label key={branch.id} className="flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
-                  <input type="checkbox" checked={!form.apply_to_all_branches && form.branches.includes(branch.id)} disabled={form.apply_to_all_branches} onChange={() => toggleFormBranch(branch.id)} className="h-4 w-4 accent-slate-950 disabled:opacity-50" />
-                  {branch.name}
+                <label key={branch.id} className="flex min-w-0 items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+                  <input type="checkbox" checked={!form.apply_to_all_branches && form.branches.includes(branch.id)} disabled={form.apply_to_all_branches} onChange={() => toggleFormBranch(branch.id)} className="h-4 w-4 flex-none accent-slate-950 disabled:opacity-50" />
+                  <span className="min-w-0 break-words">{branch.name}</span>
                 </label>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="mt-5 flex items-center gap-4">
-          <button disabled={saving} className="rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+        <div className="mt-5 flex max-w-full flex-col gap-3 sm:items-start">
+          <button disabled={saving} className="w-full rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 sm:w-auto">
             {saving ? 'Creating...' : 'Create Discount'}
           </button>
-          {message && <p className="text-sm text-slate-600">{message}</p>}
+          {message && <p className="max-w-full break-words text-sm text-slate-600">{message}</p>}
         </div>
       </form>
 
