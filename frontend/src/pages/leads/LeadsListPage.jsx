@@ -51,9 +51,14 @@ function formatDate(value) {
   })
 }
 
+function assignedUserName(lead) {
+  return lead.assigned_user?.name || lead.assigned_to_name || 'Unassigned'
+}
+
 export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
-  const [filters, setFilters] = useState({ name: '', phone: '', status: '', followUp: '' })
+  const [staffUsers, setStaffUsers] = useState([])
+  const [filters, setFilters] = useState({ name: '', phone: '', status: '', followUp: '', followUpBy: '' })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -82,6 +87,8 @@ export default function LeadsListPage() {
       const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
       const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
       const matchesStatus = !filters.status || lead.status === filters.status
+      const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
+      const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
       let matchesFollowUp = true
       const followUpDate = lead.next_follow_up_date || ''
       if (filters.followUp === 'today') {
@@ -92,15 +99,21 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesStatus && matchesFollowUp
+      return matchesName && matchesPhone && matchesStatus && matchesFollowUp && matchesFollowUpBy
     })
   }, [filters, leads])
 
-  const hasFilters = Boolean(filters.name || filters.phone || filters.status || filters.followUp)
+  const hasFilters = Boolean(filters.name || filters.phone || filters.status || filters.followUp || filters.followUpBy)
 
   useEffect(() => {
     fetchLeads()
   }, [statusFilter, walkinDateFrom, walkinDateTo, nextFollowUpDateFrom, nextFollowUpDateTo, focus])
+
+  useEffect(() => {
+    api.get('/leads/staff-options/')
+      .then(({ data }) => setStaffUsers(data || []))
+      .catch(() => setStaffUsers([]))
+  }, [])
 
   const fetchLeads = async () => {
     setLoading(true)
@@ -131,7 +144,7 @@ export default function LeadsListPage() {
   }
 
   const clearFilters = () => {
-    setFilters({ name: '', phone: '', status: '', followUp: '' })
+    setFilters({ name: '', phone: '', status: '', followUp: '', followUpBy: '' })
   }
 
   const submitImport = async (event) => {
@@ -254,7 +267,7 @@ export default function LeadsListPage() {
       )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_auto] lg:items-end">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] lg:items-end">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
             <input
@@ -281,6 +294,19 @@ export default function LeadsListPage() {
             >
               {statusFilters.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Follow-up By</span>
+            <select
+              value={filters.followUpBy}
+              onChange={(event) => updateFilter('followUpBy', event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              <option value="">All Users</option>
+              {staffUsers.map((staff) => (
+                <option key={staff.id} value={staff.id}>{staff.name}</option>
               ))}
             </select>
           </label>
@@ -397,6 +423,9 @@ export default function LeadsListPage() {
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                         {statusLabel(lead.status)}
+                      </div>
+                      <div className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                        Follow-up: {assignedUserName(lead)}
                       </div>
                     </div>
                   </div>

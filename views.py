@@ -1353,6 +1353,8 @@ class LeadFilter(django_filters.FilterSet):
     name = django_filters.CharFilter(method='filter_name')
     phone = django_filters.CharFilter(method='filter_phone')
     source = django_filters.CharFilter(method='filter_source')
+    follow_up_by = django_filters.NumberFilter(field_name='assigned_to')
+    assigned_user = django_filters.NumberFilter(field_name='assigned_to')
     walkin_date_from = django_filters.DateFilter(field_name='walkin_date', lookup_expr='gte')
     walkin_date_to   = django_filters.DateFilter(field_name='walkin_date', lookup_expr='lte')
     next_follow_up_date_from = django_filters.DateFilter(field_name='next_follow_up_date', lookup_expr='gte')
@@ -1407,7 +1409,7 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action == 'list':
-            qs = Lead.objects.select_related('course', 'branch')
+            qs = Lead.objects.select_related('course', 'branch', 'assigned_to')
         else:
             qs = Lead.objects.select_related('course','branch','assigned_to','created_by')
         missing_columns = missing_model_columns(Lead, [
@@ -1471,29 +1473,64 @@ class LeadViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # Auto-set branch + created_by for staff
         branch = self.request.user.branch if not self.request.user.is_super_admin else None
+        assigned_to = serializer.validated_data.get('assigned_to')
         serializer.save(
             created_by=self.request.user,
             branch=branch or serializer.validated_data.get('branch'),
+            assigned_to=assigned_to or self.request.user,
         )
+
+    @action(detail=False, methods=['get'], url_path='staff-options')
+    def staff_options(self, request):
+        users = User.objects.filter(is_active=True).select_related('branch').order_by(
+            'first_name', 'last_name', 'username'
+        )
+        if not request.user.is_super_admin:
+            users = users.filter(branch=request.user.branch).exclude(role=User.Role.SUPER_ADMIN)
+        branch_id = request.query_params.get('branch')
+        if branch_id:
+            users = users.filter(Q(branch_id=branch_id) | Q(branch__isnull=True))
+        rows = []
+        seen = set()
+        for user in users:
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            rows.append({
+                'id': user.id,
+                'name': user.full_name or user.username,
+                'branch_id': user.branch_id,
+                'branch_name': user.branch.name if user.branch else '',
+            })
+        return Response(rows)
 
     def update(self, request, *args, **kwargs):
         # Staff can update candidate details and follow-up fields only.
         lead = self.get_object()
         old_next_follow_up_date = lead.next_follow_up_date
+        data = request.data.copy()
         if not request.user.is_super_admin:
             if 'branch' in request.data:
                 return Response({'detail': 'Only admin can change a lead branch.'}, status=status.HTTP_403_FORBIDDEN)
             allowed = {
                 'name', 'phone', 'dob', 'email', 'location', 'pincode',
                 'course', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
-                'next_follow_up_date', 'remarks', 'status',
+                'next_follow_up_date', 'remarks', 'status', 'assigned_to', 'follow_up_by',
             }
             if set(request.data.keys()) - allowed:
                 return Response(
-                    {'error': 'Staff can only update walkin_date, next_follow_up_date, remarks and status.'},
+                    {'error': 'Staff can only update candidate, follow-up, status, and Follow-up By fields.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
-        response = super().update(request, *args, **kwargs)
+        if request.user.is_super_admin and 'branch' in data:
+            branch = Branch.objects.filter(pk=data.get('branch'), is_active=True).first()
+            if not branch and data.get('branch') not in (None, ''):
+                return Response({'detail': 'Select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        kwargs['partial'] = kwargs.get('partial', False)
+        serializer = self.get_serializer(lead, data=data, partial=kwargs['partial'])
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        response = Response(serializer.data)
         lead.refresh_from_db()
         if (
             old_next_follow_up_date != lead.next_follow_up_date

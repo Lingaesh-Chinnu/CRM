@@ -121,6 +121,7 @@ function buildConversionForm(lead) {
     demo_class: false,
     interested_global_certification: false,
     status: lead?.status || 'new',
+    assigned_to: lead?.assigned_to || lead?.follow_up_by || lead?.assigned_user?.id || '',
   }
 }
 
@@ -576,6 +577,7 @@ export default function LeadDetailPage() {
   const [lead, setLead] = useState(null)
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
   const [conversionType, setConversionType] = useState('')
   const [converting, setConverting] = useState(false)
   const [conversionError, setConversionError] = useState('')
@@ -598,6 +600,12 @@ export default function LeadDetailPage() {
       setDetailsForm(buildConversionForm(data))
     }).catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load lead.')))
   }, [id])
+
+  useEffect(() => {
+    api.get('/leads/staff-options/')
+      .then(({ data }) => setStaffUsers(data || []))
+      .catch(() => setStaffUsers([]))
+  }, [])
 
   if (!lead) return <div className="p-6 text-slate-500">{loadError || 'Loading lead...'}</div>
 
@@ -665,6 +673,7 @@ export default function LeadDetailPage() {
 
   const detailFields = [
     { field: 'status', label: 'Lead Status', value: lead.status || 'new', displayValue: statusLabel(lead.status), displayNew: statusLabel },
+    { field: 'assigned_to', payloadField: 'follow_up_by', label: 'Follow-up By', value: lead.assigned_to || lead.follow_up_by || lead.assigned_user?.id || '', displayValue: lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned', displayNew: (value) => staffUsers.find((staff) => String(staff.id) === String(value))?.name || 'Unassigned' },
     { field: 'name', label: 'Name', value: lead.name },
     { field: 'phone', label: 'Phone Number', value: lead.phone },
     { field: 'dob', label: 'Date of Birth', value: lead.dob },
@@ -700,7 +709,8 @@ export default function LeadDetailPage() {
       setMessage('No changes to update.')
       return
     }
-    const missing = changes.filter(({ field }) => !String(detailsForm[field] || '').trim())
+    const optionalFields = new Set(['assigned_to'])
+    const missing = changes.filter(({ field }) => !optionalFields.has(field) && !String(detailsForm[field] || '').trim())
     if (missing.length > 0) {
       setDetailErrors((current) => ({
         ...current,
@@ -720,7 +730,7 @@ export default function LeadDetailPage() {
     try {
       const payload = {}
       pendingDetailChanges.forEach(({ field, payloadField }) => {
-        if (field === 'course' || field === 'branch') payload[payloadField || field] = Number(detailsForm[field])
+        if (field === 'course' || field === 'branch' || field === 'assigned_to') payload[payloadField || field] = detailsForm[field] ? Number(detailsForm[field]) : null
         else payload[payloadField || field] = detailsForm[field]
       })
       const { data } = await api.patch(`/leads/${id}/`, payload)
@@ -785,6 +795,15 @@ export default function LeadDetailPage() {
                 ))}
               </select>
               {detailErrorFor('status')}
+            </DetailField>
+            <DetailField label="Follow-up By" value={lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned'} editing={editingDetails}>
+              <select value={detailsForm.assigned_to || ''} onChange={(event) => updateDetail('assigned_to', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Unassigned</option>
+                {staffUsers.map((staff) => (
+                  <option key={staff.id} value={staff.id}>{staff.name}</option>
+                ))}
+              </select>
+              {detailErrorFor('assigned_to')}
             </DetailField>
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />

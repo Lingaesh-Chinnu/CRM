@@ -18,6 +18,7 @@ const initialForm = {
   branch: '',
   course: '',
   source: '',
+  assigned_to: '',
   qualification: '',
   degree: '',
   next_follow_up_date: '',
@@ -41,6 +42,7 @@ export default function LeadCreatePage() {
   const { user } = useSelector((state) => state.auth)
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
   const [form, setForm] = useState(initialForm)
   const [duplicateInfo, setDuplicateInfo] = useState(null)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -52,8 +54,25 @@ export default function LeadCreatePage() {
     ]).then(([coursesRes, branchesRes]) => {
       setCourses(coursesRes.data.results || coursesRes.data)
       setBranches(branchesRes.data.results || branchesRes.data)
-    })
+    }).catch(() => {})
   }, [isSuperAdmin])
+
+  useEffect(() => {
+    api.get('/leads/staff-options/')
+      .then(({ data }) => {
+        const rows = data || []
+        setStaffUsers(rows)
+        setForm((current) => {
+          const defaultUser = rows.find((staff) => String(staff.id) === String(user?.id)) ? String(user.id) : ''
+          const currentExists = rows.some((staff) => String(staff.id) === String(current.assigned_to))
+          return {
+            ...current,
+            assigned_to: current.assigned_to && currentExists ? current.assigned_to : defaultUser,
+          }
+        })
+      })
+      .catch(() => setStaffUsers([]))
+  }, [isSuperAdmin, user?.id])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -68,6 +87,7 @@ export default function LeadCreatePage() {
       course: form.course ? Number(form.course) : null,
       status: 'new',
       source: form.source,
+      follow_up_by: form.assigned_to ? Number(form.assigned_to) : null,
       qualification: form.qualification.trim(),
       degree: form.degree.trim(),
       branch: isSuperAdmin ? Number(form.branch) || null : user?.branch || null,
@@ -172,6 +192,20 @@ export default function LeadCreatePage() {
               <option value="team_reference">Team Reference</option>
               <option value="friends_reference">Friends Reference</option>
               <option value="others">Others</option>
+            </select>
+          </div>
+
+          <div>
+            <FieldLabel>Follow-up By</FieldLabel>
+            <select
+              value={form.assigned_to}
+              onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            >
+              <option value="">Unassigned</option>
+              {staffUsers.map((staff) => (
+                <option key={staff.id} value={staff.id}>{staff.name}</option>
+              ))}
             </select>
           </div>
 

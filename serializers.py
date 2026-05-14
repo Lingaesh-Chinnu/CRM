@@ -324,6 +324,8 @@ class LeadListSerializer(serializers.ModelSerializer):
     """Compact serializer for list endpoints."""
     course_name  = serializers.CharField(source='course.name', read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    follow_up_by = serializers.IntegerField(source='assigned_to_id', read_only=True)
+    assigned_user = serializers.SerializerMethodField()
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     imported_via_csv = serializers.SerializerMethodField()
@@ -332,7 +334,8 @@ class LeadListSerializer(serializers.ModelSerializer):
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name','remarks',
                   'status','source','source_display','walkin_date','next_follow_up_date',
-                  'assigned_to_name','branch_name','created_by','imported_via_csv','created_at']
+                  'assigned_to','follow_up_by','assigned_to_name','assigned_user',
+                  'branch_name','created_by','imported_via_csv','created_at']
 
     def get_imported_via_csv(self, obj):
         try:
@@ -345,6 +348,20 @@ class LeadListSerializer(serializers.ModelSerializer):
             return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
         except Exception:
             return ''
+
+    def get_assigned_user(self, obj):
+        if not getattr(obj, 'assigned_to_id', None):
+            return None
+        try:
+            user = obj.assigned_to
+            return {
+                'id': user.id,
+                'name': user.full_name or user.username,
+                'branch_id': user.branch_id,
+                'branch_name': user.branch.name if user.branch else '',
+            }
+        except Exception:
+            return None
 
 
 class LeadInboxSerializer(serializers.ModelSerializer):
@@ -373,6 +390,13 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     """Full serializer for retrieve/create/update."""
     course_name      = serializers.CharField(source='course.name',        read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    follow_up_by     = serializers.PrimaryKeyRelatedField(
+        source='assigned_to',
+        queryset=User.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
+    assigned_user    = serializers.SerializerMethodField()
     branch_name      = serializers.CharField(source='branch.name',         read_only=True)
     created_by_name  = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
@@ -414,6 +438,20 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         except Exception:
             return ''
 
+    def get_assigned_user(self, obj):
+        if not getattr(obj, 'assigned_to_id', None):
+            return None
+        try:
+            user = obj.assigned_to
+            return {
+                'id': user.id,
+                'name': user.full_name or user.username,
+                'branch_id': user.branch_id,
+                'branch_name': user.branch.name if user.branch else '',
+            }
+        except Exception:
+            return None
+
     def get_created_by_name(self, obj):
         try:
             return obj.created_by.full_name if obj.created_by_id and obj.created_by else ''
@@ -438,6 +476,21 @@ class LeadDetailSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        assigned_to = attrs.get('assigned_to')
+        if assigned_to:
+            request = self.context.get('request')
+            user = getattr(request, 'user', None)
+            branch = attrs.get('branch') or getattr(self.instance, 'branch', None)
+            if not assigned_to.is_active:
+                raise serializers.ValidationError({
+                    'follow_up_by': 'Select an active user.'
+                })
+            if user and user.is_authenticated and not user.is_super_admin:
+                branch = user.branch
+                if assigned_to.branch_id != user.branch_id:
+                    raise serializers.ValidationError({
+                        'follow_up_by': 'Select an active user from your branch.'
+                    })
         year = attrs.get('year_of_passing')
         if year not in (None, '') and (year < 1900 or year > 2100):
             raise serializers.ValidationError({'year_of_passing': 'Enter a valid passed out year.'})
