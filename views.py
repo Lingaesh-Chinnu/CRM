@@ -3297,6 +3297,42 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
             ).distinct().order_by('enrollment__name', 'id')
         return qs
 
+    def get_summary_queryset(self):
+        qs = Payment.objects.select_related('enrollment__branch').filter(
+            enrollment__status__in=Enrollment.FINAL_STATUSES,
+            status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+            paid_amount__lt=F('total_fees'),
+        )
+        if not self.request.user.is_super_admin:
+            qs = qs.filter(enrollment__branch=self.request.user.branch)
+        elif self.request.query_params.get('branch'):
+            qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
+        return qs
+
+    def pending_amount_for_month(self, queryset, month_start, month_end):
+        month_queryset = queryset.filter(
+            next_payment_date__gte=month_start,
+            next_payment_date__lte=month_end,
+        ).distinct()
+        return sum((payment.balance for payment in month_queryset), Decimal('0'))
+
+    def pending_summary(self):
+        today = timezone.localdate()
+        this_month_start = today.replace(day=1)
+        this_month_end = this_month_start.replace(day=monthrange(this_month_start.year, this_month_start.month)[1])
+        last_month_end = this_month_start - timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+        next_month_seed = this_month_end + timedelta(days=1)
+        next_month_start = next_month_seed.replace(day=1)
+        next_month_end = next_month_start.replace(day=monthrange(next_month_start.year, next_month_start.month)[1])
+        queryset = self.get_summary_queryset()
+        return {
+            'total_pending_amount': sum((payment.balance for payment in queryset), Decimal('0')),
+            'this_month_pending': self.pending_amount_for_month(queryset, this_month_start, this_month_end),
+            'last_month_pending': self.pending_amount_for_month(queryset, last_month_start, last_month_end),
+            'next_month_pending': self.pending_amount_for_month(queryset, next_month_start, next_month_end),
+        }
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         month_start, month_end = self._month_bounds()
@@ -3347,6 +3383,7 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 'completed_installments': completed_installments,
                 'upcoming_payments': upcoming,
                 'overdue_payments': overdue,
+                **self.pending_summary(),
             },
             'filters': {
                 'month': month_start.strftime('%Y-%m'),
@@ -3789,6 +3826,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           <div class="field"><div class="label">COURSE</div><div class="value">{escape(enrollment.course.name)}</div></div>
           <div class="field"><div class="label">BRANCH</div><div class="value">{escape(branch.name if branch else 'No branch')}</div></div>
           <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(installment.get_payment_mode_display())}</div></div>
+          <div class="field"><div class="label">REFERENCE NO</div><div class="value">{escape(installment.reference_number or 'Not provided')}</div></div>
           <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(receipt_date(installment.payment_date))}</div></div>
           <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment.installment_label or str(installment.installment_index))}</div></div>
           <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {installment.amount:,.2f}</div></div>

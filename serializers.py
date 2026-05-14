@@ -1,6 +1,8 @@
 # ============================================================
 # backend/apps/accounts/serializers.py
 # ============================================================
+import re
+
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
@@ -954,6 +956,42 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
             'document_type', 'receipt_number', 'bill_number', 'bill_generated_at',
             'bill_generated_by',
         ]
+
+    def _next_cash_reference(self, payment):
+        student_id = payment.enrollment.student_number or f'ENR{payment.enrollment_id}'
+        payment_count = payment.installments.count()
+        return f'{student_id}-P{payment_count + 1:02d}'
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        mode = attrs.get('payment_mode') or getattr(self.instance, 'payment_mode', PaymentInstallment.Mode.CASH)
+        payment = attrs.get('payment') or getattr(self.instance, 'payment', None)
+        reference = str(attrs.get('reference_number') or '').strip()
+
+        if mode == PaymentInstallment.Mode.CASH:
+            if self.instance:
+                attrs['reference_number'] = reference or self.instance.reference_number
+                return attrs
+            if payment:
+                attrs['reference_number'] = self._next_cash_reference(payment)
+            elif not reference:
+                raise serializers.ValidationError({'reference_number': 'Payment reference is required.'})
+            return attrs
+
+        if not reference:
+            label = {
+                PaymentInstallment.Mode.UPI: 'UPI Transaction ID',
+                PaymentInstallment.Mode.CHEQUE: 'Cheque Number',
+                PaymentInstallment.Mode.BANK: 'Transfer ID / Reference ID',
+                PaymentInstallment.Mode.CARD: 'Card Last 4 Digits',
+            }.get(mode, 'Reference Number')
+            raise serializers.ValidationError({'reference_number': f'{label} is required.'})
+
+        if mode == PaymentInstallment.Mode.CARD and not re.fullmatch(r'\d{4}', reference):
+            raise serializers.ValidationError({'reference_number': 'Card Last 4 Digits must be exactly 4 digits.'})
+
+        attrs['reference_number'] = reference
+        return attrs
 
     def get_bill_is_generated(self, obj):
         return bool(obj.bill_number and obj.bill_generated_at)

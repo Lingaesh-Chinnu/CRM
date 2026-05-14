@@ -29,6 +29,43 @@ function formatDate(value) {
   })
 }
 
+function referenceConfig(mode) {
+  const config = {
+    cash: {
+      label: 'Payment Reference',
+      placeholder: 'Auto-generated cash reference',
+    },
+    upi: {
+      label: 'UPI Transaction ID',
+      placeholder: 'Enter UPI transaction ID',
+    },
+    cheque: {
+      label: 'Cheque Number',
+      placeholder: 'Enter cheque number',
+    },
+    bank_transfer: {
+      label: 'Transfer ID / Reference ID',
+      placeholder: 'Enter transfer reference ID',
+    },
+    card: {
+      label: 'Card Last 4 Digits',
+      placeholder: 'Enter 4 digits',
+    },
+    other: {
+      label: 'Reference Number',
+      placeholder: 'Enter reference number',
+    },
+  }
+  return config[mode] || config.other
+}
+
+function nextCashReference(payment) {
+  if (!payment) return ''
+  const studentId = payment.student_number || `ENR${payment.enrollment || payment.id || ''}`
+  const paymentCount = Array.isArray(payment.installments) ? payment.installments.length : 0
+  return `${studentId}-P${String(paymentCount + 1).padStart(2, '0')}`
+}
+
 export default function PaymentDetailPage() {
   const { id } = useParams()
   const [payment, setPayment] = useState(null)
@@ -62,6 +99,21 @@ export default function PaymentDetailPage() {
     event.preventDefault()
     if (!payment) return
 
+    const refConfig = referenceConfig(form.payment_mode)
+    const referenceNumber = form.payment_mode === 'cash'
+      ? nextCashReference(payment)
+      : String(form.reference_number || '').trim()
+
+    if (!referenceNumber) {
+      setMessage(`${refConfig.label} is required.`)
+      return
+    }
+
+    if (form.payment_mode === 'card' && !/^\d{4}$/.test(referenceNumber)) {
+      setMessage('Card Last 4 Digits must be exactly 4 digits.')
+      return
+    }
+
     setSaving(true)
     setMessage('')
     try {
@@ -71,7 +123,7 @@ export default function PaymentDetailPage() {
         amount: Number(form.amount),
         payment_mode: form.payment_mode,
         payment_date: form.payment_date,
-        reference_number: form.reference_number,
+        reference_number: referenceNumber,
         notes: form.notes,
       })
       setForm(initialInstallment)
@@ -161,6 +213,8 @@ export default function PaymentDetailPage() {
     const dateCompare = String(a.payment_date || '').localeCompare(String(b.payment_date || ''))
     return dateCompare || Number(a.id || 0) - Number(b.id || 0)
   })
+  const currentReferenceConfig = referenceConfig(form.payment_mode)
+  const referenceValue = form.payment_mode === 'cash' ? nextCashReference(payment) : form.reference_number
 
   return (
     <div className="space-y-6">
@@ -303,7 +357,7 @@ export default function PaymentDetailPage() {
                           </td>
                           <td className="px-6 py-4 text-slate-700">{installment.installment_label || `${installment.installment_index} Installment`}</td>
                           <td className="px-6 py-4 text-slate-700">{statusLabel(installment.installment_status)}</td>
-                          <td className="px-6 py-4 text-slate-500">{installment.reference_number || 'No reference'}</td>
+                          <td className="px-6 py-4 text-slate-500">{installment.reference_number || 'Not provided'}</td>
                           <td className="px-6 py-4">
                             <div className="flex justify-end gap-2">
                               {isSuperAdmin && !installment.bill_number ? (
@@ -394,7 +448,7 @@ export default function PaymentDetailPage() {
 
             <select
               value={form.payment_mode}
-              onChange={(event) => setForm({ ...form, payment_mode: event.target.value })}
+              onChange={(event) => setForm({ ...form, payment_mode: event.target.value, reference_number: '' })}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             >
               <option value="cash">Cash</option>
@@ -413,12 +467,22 @@ export default function PaymentDetailPage() {
               required
             />
 
-            <input
-              placeholder="Reference number"
-              value={form.reference_number}
-              onChange={(event) => setForm({ ...form, reference_number: event.target.value })}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
+            <label className="block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                {currentReferenceConfig.label}
+              </span>
+              <input
+                placeholder={currentReferenceConfig.placeholder}
+                value={referenceValue}
+                onChange={(event) => setForm({ ...form, reference_number: event.target.value })}
+                readOnly={form.payment_mode === 'cash'}
+                inputMode={form.payment_mode === 'card' ? 'numeric' : undefined}
+                maxLength={form.payment_mode === 'card' ? 4 : undefined}
+                pattern={form.payment_mode === 'card' ? '\\d{4}' : undefined}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 read-only:cursor-not-allowed read-only:bg-slate-100 read-only:text-slate-600"
+                required
+              />
+            </label>
 
             <textarea
               placeholder="Notes"

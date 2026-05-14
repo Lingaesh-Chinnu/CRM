@@ -143,7 +143,7 @@ export default function Header({ onMenuClick }) {
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
-              <span className="pointer-events-none absolute right-0 top-full mt-2 hidden rounded-lg bg-slate-950 px-2 py-1 text-xs font-semibold text-white shadow-lg group-hover:block">
+              <span className="pointer-events-none absolute right-0 top-full mt-2 hidden w-max whitespace-nowrap rounded-lg bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white shadow-lg group-hover:block">
                 Notifications
               </span>
               {unreadCount > 0 && (

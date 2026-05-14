@@ -54,6 +54,10 @@ function lastPaidInstallment(row) {
   return installments[installments.length - 1] || null
 }
 
+function nextPendingInstallment(row) {
+  return (row.installment_summary || []).find((item) => Number(item.pending_amount || 0) > 0) || null
+}
+
 function feeReminderMessage(row) {
   return `Hi ${row.student_name},
 
@@ -73,10 +77,10 @@ export default function PaymentsListPage() {
   const isSuperAdmin = user?.role === 'super_admin'
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState({
-    total_collection: 0,
-    pending_amount: 0,
-    partial_payments: 0,
-    completed_installments: 0,
+    total_pending_amount: 0,
+    this_month_pending: 0,
+    last_month_pending: 0,
+    next_month_pending: 0,
   })
   const [branches, setBranches] = useState([])
   const [templates, setTemplates] = useState([])
@@ -120,10 +124,10 @@ export default function PaymentsListPage() {
       .then(({ data }) => {
         setRows(data.results || data)
         setSummary(data.summary || {
-          total_collection: 0,
-          pending_amount: 0,
-          partial_payments: 0,
-          completed_installments: 0,
+          total_pending_amount: 0,
+          this_month_pending: 0,
+          last_month_pending: 0,
+          next_month_pending: 0,
         })
       })
       .catch((error) => {
@@ -211,10 +215,10 @@ export default function PaymentsListPage() {
 
       <section className="grid gap-4 md:grid-cols-4">
         {[
-          ['Total Collection', `Rs ${money(summary.total_collection)}`],
-          ['Partial Payments', summary.partial_payments || 0],
-          ['Completed Installments', summary.completed_installments || 0],
-          ['Pending Amount', `Rs ${money(summary.pending_amount)}`],
+          ['Total Pending Amount', `Rs ${money(summary.total_pending_amount)}`],
+          ['This Month Pending', `Rs ${money(summary.this_month_pending)}`],
+          ['Last Month Pending', `Rs ${money(summary.last_month_pending)}`],
+          ['Next Month Pending', `Rs ${money(summary.next_month_pending)}`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
@@ -281,36 +285,41 @@ export default function PaymentsListPage() {
               <table className="w-full table-fixed border-collapse text-left text-sm">
                 <thead className="bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500">
                   <tr>
-                    <th className="w-[18%] px-4 py-3">Name</th>
-                    <th className="w-[16%] px-4 py-3">Course</th>
-                    <th className="w-[11%] px-4 py-3 text-right">Course Fees</th>
-                    <th className="w-[11%] px-4 py-3 text-right">Balance Fees</th>
-                    <th className="w-[12%] px-4 py-3 text-right">Last Paid Amount</th>
-                    <th className="w-[12%] px-4 py-3">Last Paid Date</th>
-                    <th className="w-[10%] px-4 py-3">Payment Status</th>
-                    <th className="w-[10%] px-4 py-3">Reminder / Action</th>
+                    <th className="w-[16%] px-3 py-3">Name</th>
+                    <th className="w-[14%] px-3 py-3">Course</th>
+                    <th className="w-[10%] px-3 py-3 text-right">Course Fees</th>
+                    <th className="w-[10%] px-3 py-3 text-right">Last Paid Amount</th>
+                    <th className="w-[10%] px-3 py-3">Last Paid Date</th>
+                    <th className="w-[10%] px-3 py-3 text-right">Balance Amount</th>
+                    <th className="w-[10%] px-3 py-3 text-right">Next Payment Amount</th>
+                    <th className="w-[10%] px-3 py-3">Next Payment Date</th>
+                    <th className="w-[10%] px-3 py-3">Payment Status</th>
+                    <th className="w-[10%] px-3 py-3">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {rows.map((row) => {
                     const lastPaid = lastPaidInstallment(row)
+                    const nextPending = nextPendingInstallment(row)
                     return (
                       <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-4 align-top">
+                        <td className="px-3 py-4 align-top">
                           <Link to={`/payments/${row.id}`} className="break-words font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
                           <p className="mt-1 text-xs text-slate-500">{row.student_phone || 'No phone'}</p>
                         </td>
-                        <td className="break-words px-4 py-4 align-top text-slate-700">{row.course_name || '-'}</td>
-                        <td className="px-4 py-4 text-right align-top font-semibold text-slate-900">{money(row.total_fees)}</td>
-                        <td className="px-4 py-4 text-right align-top font-black text-slate-950">{money(row.balance)}</td>
-                        <td className="px-4 py-4 text-right align-top font-semibold text-slate-900">{lastPaid ? money(lastPaid.amount) : '-'}</td>
-                        <td className="px-4 py-4 align-top text-slate-600">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</td>
-                        <td className="px-4 py-4 align-top">
+                        <td className="break-words px-3 py-4 align-top text-slate-700">{row.course_name || '-'}</td>
+                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{money(row.total_fees)}</td>
+                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{lastPaid ? money(lastPaid.amount) : '-'}</td>
+                        <td className="px-3 py-4 align-top text-slate-600">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</td>
+                        <td className="px-3 py-4 text-right align-top font-black text-slate-950">{money(row.balance)}</td>
+                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{nextPending ? money(nextPending.pending_amount) : '-'}</td>
+                        <td className="px-3 py-4 align-top text-slate-600">{nextPending ? formatDate(nextPending.due_date) : '-'}</td>
+                        <td className="px-3 py-4 align-top">
                           <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">
                             {statusLabel(row.status)}
                           </span>
                         </td>
-                        <td className="px-4 py-4 align-top">
+                        <td className="px-3 py-4 align-top">
                           {Number(row.balance || 0) > 0 ? (
                             <button
                               type="button"
@@ -334,6 +343,7 @@ export default function PaymentsListPage() {
             <div className="divide-y divide-slate-200 lg:hidden">
               {rows.map((row) => {
                 const lastPaid = lastPaidInstallment(row)
+                const nextPending = nextPendingInstallment(row)
                 return (
                   <div key={row.id} className="p-5">
                     <div className="flex items-start justify-between gap-3">
@@ -348,9 +358,11 @@ export default function PaymentsListPage() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
                       <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course</p><p className="font-bold text-slate-950">{row.course_name || '-'}</p></div>
                       <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course Fees</p><p className="font-bold text-slate-950">Rs {money(row.total_fees)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Balance Fees</p><p className="font-bold text-slate-950">Rs {money(row.balance)}</p></div>
                       <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid</p><p className="font-bold text-slate-950">{lastPaid ? `Rs ${money(lastPaid.amount)}` : '-'}</p></div>
                       <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid Date</p><p className="font-bold text-slate-950">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Balance Amount</p><p className="font-bold text-slate-950">Rs {money(row.balance)}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Next Payment Amount</p><p className="font-bold text-slate-950">{nextPending ? `Rs ${money(nextPending.pending_amount)}` : '-'}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Next Payment Date</p><p className="font-bold text-slate-950">{nextPending ? formatDate(nextPending.due_date) : '-'}</p></div>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-3">
                       <Link to={`/payments/${row.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
