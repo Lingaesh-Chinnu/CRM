@@ -197,7 +197,7 @@ export default function PaymentsListPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Payments</p>
         <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-950">Monthly payment worksheet</h1>
+            <h1 className="text-3xl font-black tracking-tight text-slate-950">Payment Tracker</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               Track collections, dues, balances, and student installment history month by month.
             </p>
