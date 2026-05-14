@@ -2250,16 +2250,19 @@ class NotificationViewSet(viewsets.ModelViewSet):
         queryset = Notification.objects.filter(user=self.request.user).order_by('-created_at')
         scope = self.request.query_params.get('scope', 'active')
         status_filter = self.request.query_params.get('status', '').strip()
+        state_filter = self.request.query_params.get('state', '').strip()
         date_filter = parse_date(self.request.query_params.get('date', '').strip())
 
         if status_filter in dict(Notification.Status.choices):
             queryset = queryset.filter(status=status_filter)
+        if state_filter == 'active':
+            queryset = queryset.exclude(status=Notification.Status.RESOLVED)
+        elif state_filter == 'done':
+            queryset = queryset.filter(status=Notification.Status.RESOLVED)
         if date_filter:
             queryset = queryset.filter(created_at__date=date_filter)
         if scope != 'all':
-            queryset = queryset.exclude(status=Notification.Status.RESOLVED).filter(
-                Q(is_read=False) | Q(type__in=[Notification.NType.WARNING, Notification.NType.ERROR])
-            )
+            queryset = queryset.exclude(status=Notification.Status.RESOLVED).filter(is_read=False)
         return queryset
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')

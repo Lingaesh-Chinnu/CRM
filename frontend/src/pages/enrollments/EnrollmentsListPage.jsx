@@ -133,7 +133,7 @@ export default function EnrollmentsListPage() {
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
           {isSuperAdmin
             ? 'View students across every branch and narrow the list with branch, course, status, and search filters.'
-            : 'This page automatically shows students from your branch only, with course details and enrollment dates.'}
+            : 'This page automatically shows students from your branch, with course details and enrollment dates.'}
         </p>
       </section>
 

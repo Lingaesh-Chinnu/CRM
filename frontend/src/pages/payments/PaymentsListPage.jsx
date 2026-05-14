@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
@@ -49,6 +49,11 @@ function orderedInstallments(row) {
   })
 }
 
+function lastPaidInstallment(row) {
+  const installments = orderedInstallments(row).filter((installment) => Number(installment.amount || 0) > 0)
+  return installments[installments.length - 1] || null
+}
+
 function feeReminderMessage(row) {
   return `Hi ${row.student_name},
 
@@ -61,20 +66,6 @@ Balance: {{pending_amount}}
 Kindly complete the pending payment at your earliest convenience.
 
 -Team IIE`
-}
-
-function InstallmentCells({ installments, index }) {
-  const installment = installments[index]
-  return (
-    <>
-      <td className="px-3 py-3 text-right font-semibold text-slate-900">
-        {installment ? money(installment.amount) : '-'}
-      </td>
-      <td className="px-3 py-3 text-slate-600">
-        {installment ? formatDate(installment.payment_date) : '-'}
-      </td>
-    </>
-  )
 }
 
 export default function PaymentsListPage() {
@@ -90,7 +81,6 @@ export default function PaymentsListPage() {
   const [branches, setBranches] = useState([])
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
-  const [expandedRows, setExpandedRows] = useState({})
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState('')
@@ -197,10 +187,6 @@ export default function PaymentsListPage() {
     }
   }
 
-  const toggleExpanded = (id) => {
-    setExpandedRows((current) => ({ ...current, [id]: !current[id] }))
-  }
-
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -283,7 +269,6 @@ export default function PaymentsListPage() {
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-xl font-black tracking-tight text-slate-950">Payment tracking</h2>
-          <p className="mt-1 text-sm text-slate-500">{loading ? 'Loading worksheet...' : `${rows.length} records in worksheet`}</p>
         </div>
 
         {loading ? (
@@ -292,138 +277,87 @@ export default function PaymentsListPage() {
           <div className="p-6 text-slate-500">No payment records found for this month.</div>
         ) : (
           <>
-            <div className="hidden overflow-x-auto xl:block">
-              <table className="min-w-[1500px] w-full border-collapse text-left text-sm">
+            <div className="hidden lg:block">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
                 <thead className="bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500">
                   <tr>
-                    <th className="w-12 px-3 py-3"></th>
-                    <th className="px-3 py-3">Student Name</th>
-                    <th className="px-3 py-3">Student ID</th>
-                    <th className="px-3 py-3">Course</th>
-                    <th className="px-3 py-3 text-right">Total Fees</th>
-                    <th className="px-3 py-3">First Class Date</th>
-                    <th className="px-3 py-3 text-right">1st Payment Amount</th>
-                    <th className="px-3 py-3">1st Payment Date</th>
-                    <th className="px-3 py-3 text-right">2nd Payment Amount</th>
-                    <th className="px-3 py-3">2nd Payment Date</th>
-                    <th className="px-3 py-3 text-right">3rd Payment Amount</th>
-                    <th className="px-3 py-3">3rd Payment Date</th>
-                    <th className="px-3 py-3 text-right">Balance Amount</th>
-                    <th className="px-3 py-3">Payment Status</th>
-                    <th className="px-3 py-3">Action</th>
+                    <th className="w-[18%] px-4 py-3">Name</th>
+                    <th className="w-[16%] px-4 py-3">Course</th>
+                    <th className="w-[11%] px-4 py-3 text-right">Course Fees</th>
+                    <th className="w-[11%] px-4 py-3 text-right">Balance Fees</th>
+                    <th className="w-[12%] px-4 py-3 text-right">Last Paid Amount</th>
+                    <th className="w-[12%] px-4 py-3">Last Paid Date</th>
+                    <th className="w-[10%] px-4 py-3">Payment Status</th>
+                    <th className="w-[10%] px-4 py-3">Reminder / Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
                   {rows.map((row) => {
-                    const installments = orderedInstallments(row)
-                    const extraInstallments = installments.slice(3)
+                    const lastPaid = lastPaidInstallment(row)
                     return (
-                      <Fragment key={row.id}>
-                        <tr className="hover:bg-slate-50">
-                          <td className="px-3 py-3">
-                            {extraInstallments.length > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => toggleExpanded(row.id)}
-                                className="h-8 w-8 rounded-full border border-slate-200 bg-white text-base font-black text-slate-700 hover:bg-slate-100"
-                                aria-label="Show additional installments"
-                              >
-                                {expandedRows[row.id] ? '-' : '+'}
-                              </button>
-                            ) : null}
-                          </td>
-                          <td className="px-3 py-3">
-                            <Link to={`/payments/${row.id}`} className="font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
-                            <p className="mt-1 text-xs text-slate-500">{row.student_phone || 'No phone'} | {row.branch_name || 'No branch'}</p>
-                          </td>
-                          <td className="px-3 py-3 text-slate-700">{row.student_number || '-'}</td>
-                          <td className="px-3 py-3 text-slate-700">{row.course_name || '-'}</td>
-                          <td className="px-3 py-3 text-right font-semibold text-slate-900">{money(row.total_fees)}</td>
-                          <td className="px-3 py-3 text-slate-600">{formatDate(row.first_class_date)}</td>
-                          <InstallmentCells installments={installments} index={0} />
-                          <InstallmentCells installments={installments} index={1} />
-                          <InstallmentCells installments={installments} index={2} />
-                          <td className="px-3 py-3 text-right font-black text-slate-950">{money(row.balance)}</td>
-                          <td className="px-3 py-3">
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
-                              {statusLabel(row.status)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3">
-                            {Number(row.balance || 0) > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => sendReminder(row)}
-                                disabled={sendingId === row.id}
-                                className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                              >
-                                {sendingId === row.id ? 'Sending...' : 'Reminder'}
-                              </button>
-                            ) : (
-                              <Link to={`/payments/${row.id}`} className="text-xs font-semibold text-slate-600 hover:text-slate-950">Open</Link>
-                            )}
-                          </td>
-                        </tr>
-                        {expandedRows[row.id] && extraInstallments.length > 0 && (
-                          <tr key={`${row.id}-expanded`} className="bg-cyan-50/50">
-                            <td className="px-3 py-3"></td>
-                            <td colSpan={14} className="px-3 py-3">
-                              <div className="flex flex-wrap gap-3">
-                                {extraInstallments.map((installment, index) => (
-                                  <div key={installment.id} className="rounded-2xl border border-cyan-100 bg-white px-4 py-3">
-                                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-cyan-700">{index + 4}th payment</p>
-                                    <p className="mt-2 font-black text-slate-950">Rs {money(installment.amount)}</p>
-                                    <p className="mt-1 text-sm text-slate-500">{formatDate(installment.payment_date)}</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                      <tr key={row.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-4 align-top">
+                          <Link to={`/payments/${row.id}`} className="break-words font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                          <p className="mt-1 text-xs text-slate-500">{row.student_phone || 'No phone'}</p>
+                        </td>
+                        <td className="break-words px-4 py-4 align-top text-slate-700">{row.course_name || '-'}</td>
+                        <td className="px-4 py-4 text-right align-top font-semibold text-slate-900">{money(row.total_fees)}</td>
+                        <td className="px-4 py-4 text-right align-top font-black text-slate-950">{money(row.balance)}</td>
+                        <td className="px-4 py-4 text-right align-top font-semibold text-slate-900">{lastPaid ? money(lastPaid.amount) : '-'}</td>
+                        <td className="px-4 py-4 align-top text-slate-600">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</td>
+                        <td className="px-4 py-4 align-top">
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">
+                            {statusLabel(row.status)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4 align-top">
+                          {Number(row.balance || 0) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => sendReminder(row)}
+                              disabled={sendingId === row.id}
+                              className="inline-flex whitespace-nowrap rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                            >
+                              {sendingId === row.id ? 'Sending...' : 'Reminder'}
+                            </button>
+                          ) : (
+                            <Link to={`/payments/${row.id}`} className="inline-flex whitespace-nowrap text-xs font-semibold text-slate-600 hover:text-slate-950">Open</Link>
+                          )}
+                        </td>
+                      </tr>
                     )
                   })}
                 </tbody>
               </table>
             </div>
 
-            <div className="divide-y divide-slate-200 xl:hidden">
+            <div className="divide-y divide-slate-200 lg:hidden">
               {rows.map((row) => {
-                const installments = orderedInstallments(row)
+                const lastPaid = lastPaidInstallment(row)
                 return (
                   <div key={row.id} className="p-5">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <Link to={`/payments/${row.id}`} className="text-lg font-black tracking-tight text-slate-950">{row.student_name}</Link>
-                        <p className="mt-1 text-sm text-slate-500">{row.student_number || '-'} | {row.course_name || '-'}</p>
+                        <p className="mt-1 text-sm text-slate-500">{row.student_phone || 'No phone'}</p>
                       </div>
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
                         {statusLabel(row.status)}
                       </span>
                     </div>
                     <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Total Fees</p><p className="font-bold text-slate-950">Rs {money(row.total_fees)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Balance</p><p className="font-bold text-slate-950">Rs {money(row.balance)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">First Class</p><p className="font-bold text-slate-950">{formatDate(row.first_class_date)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Phone</p><p className="font-bold text-slate-950">{row.student_phone || '-'}</p></div>
-                    </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      {installments.slice(0, expandedRows[row.id] ? installments.length : 3).map((installment, index) => (
-                        <div key={installment.id} className="rounded-2xl bg-slate-50 p-3">
-                          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{index + 1} Payment</p>
-                          <p className="mt-2 font-black text-slate-950">Rs {money(installment.amount)}</p>
-                          <p className="mt-1 text-sm text-slate-500">{formatDate(installment.payment_date)}</p>
-                        </div>
-                      ))}
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course</p><p className="font-bold text-slate-950">{row.course_name || '-'}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course Fees</p><p className="font-bold text-slate-950">Rs {money(row.total_fees)}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Balance Fees</p><p className="font-bold text-slate-950">Rs {money(row.balance)}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid</p><p className="font-bold text-slate-950">{lastPaid ? `Rs ${money(lastPaid.amount)}` : '-'}</p></div>
+                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid Date</p><p className="font-bold text-slate-950">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</p></div>
                     </div>
                     <div className="mt-4 flex flex-wrap gap-3">
-                      {installments.length > 3 && (
-                        <button type="button" onClick={() => toggleExpanded(row.id)} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
-                          {expandedRows[row.id] ? 'Hide extra payments' : 'Show extra payments'}
-                        </button>
-                      )}
+                      <Link to={`/payments/${row.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
+                        Open Details
+                      </Link>
                       {Number(row.balance || 0) > 0 && (
-                        <button type="button" onClick={() => sendReminder(row)} disabled={sendingId === row.id} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                        <button type="button" onClick={() => sendReminder(row)} disabled={sendingId === row.id} className="whitespace-nowrap rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60">
                           {sendingId === row.id ? 'Sending...' : 'Send Reminder'}
                         </button>
                       )}

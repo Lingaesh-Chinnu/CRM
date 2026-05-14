@@ -4,9 +4,8 @@ import { api } from '../../services/api'
 
 const statusOptions = [
   { value: '', label: 'All' },
-  { value: 'unread', label: 'Unread' },
-  { value: 'read', label: 'Read' },
-  { value: 'resolved', label: 'Resolved' },
+  { value: 'active', label: 'Yet to do' },
+  { value: 'done', label: 'Done' },
 ]
 
 function appHref(url) {
@@ -28,10 +27,9 @@ function notificationDateTime(item) {
 }
 
 function statusLabel(item) {
-  if (item.status_display) return item.status_display
-  if (item.status === 'resolved') return 'Resolved'
+  if (item.status === 'resolved') return 'Done'
   if (item.status === 'read' || item.is_read) return 'Read'
-  return 'Unread'
+  return 'Yet to do'
 }
 
 function statusClass(status) {
@@ -42,21 +40,21 @@ function statusClass(status) {
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState([])
-  const [status, setStatus] = useState('')
+  const [state, setState] = useState('')
   const [date, setDate] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
     const params = { scope: 'all' }
-    if (status) params.status = status
+    if (state) params.state = state
     if (date) params.date = date
     api.get('/notifications/', { params }).then(({ data }) => {
       setNotifications(data.results || data)
     }).catch(() => {
       setNotifications([])
     }).finally(() => setLoading(false))
-  }, [status, date])
+  }, [state, date])
 
   return (
     <div className="space-y-6">
@@ -64,7 +62,7 @@ export default function NotificationsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Notifications</p>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Notification history</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          Review unread, read, and resolved notifications without removing completed records.
+          Review active, read, and completed notifications without removing records.
         </p>
       </section>
 
@@ -73,8 +71,8 @@ export default function NotificationsPage() {
           <div>
             <label className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Status</label>
             <select
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
+              value={state}
+              onChange={(event) => setState(event.target.value)}
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             >
               {statusOptions.map((option) => (
@@ -94,7 +92,7 @@ export default function NotificationsPage() {
           <button
             type="button"
             onClick={() => {
-              setStatus('')
+              setState('')
               setDate('')
             }}
             className="self-end rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"

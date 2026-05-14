@@ -224,7 +224,7 @@ export default function WalkInsListPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Walk-ins</p>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Candidate walk-in tracker</h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-            Use the common public walk-in form for candidates. Branch-based filtering is active, so each branch user only sees their own branch submissions.
+            Use the walk-in form to quickly capture candidate enquiries and manage follow-ups smoothly.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">

@@ -32,10 +32,9 @@ function notificationDateTime(item) {
 }
 
 function statusLabel(item) {
-  if (item.status_display) return item.status_display
-  if (item.status === 'resolved') return 'Resolved'
+  if (item.status === 'resolved') return 'Done'
   if (item.status === 'read' || item.is_read) return 'Read'
-  return 'Unread'
+  return 'Yet to do'
 }
 
 export default function Header({ onMenuClick }) {
