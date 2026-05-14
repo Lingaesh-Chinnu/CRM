@@ -99,12 +99,12 @@ function SidebarContent({ onNavigate }) {
 export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   return (
     <>
-      <aside className="hidden md:fixed md:inset-y-0 md:flex md:w-72 md:flex-col">
+      <aside className="hidden xl:fixed xl:inset-y-0 xl:flex xl:w-72 xl:flex-col">
         <SidebarContent />
       </aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div className="fixed inset-0 z-50 xl:hidden">
           <button
             type="button"
             aria-label="Close navigation menu"

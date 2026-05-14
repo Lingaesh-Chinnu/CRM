@@ -64,9 +64,9 @@ export default function MainLayout() {
   return (
     <div className="min-h-screen overflow-x-hidden bg-slate-100">
       <Sidebar mobileOpen={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
-      <div className="flex min-h-screen min-w-0 flex-col md:ml-72">
+      <div className="flex min-h-screen min-w-0 flex-col xl:ml-72">
         <Header onMenuClick={() => setMobileMenuOpen(true)} />
-        <main className="min-w-0 flex-1 px-3 py-4 sm:px-6 sm:py-6 lg:px-8">
+        <main className="min-w-0 flex-1 px-3 py-4 sm:px-5 sm:py-5 xl:px-8">
           <Outlet />
         </main>
       </div>

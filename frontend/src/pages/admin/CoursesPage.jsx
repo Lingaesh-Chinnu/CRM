@@ -39,6 +39,12 @@ export default function CoursesPage() {
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [courseSearch, setCourseSearch] = useState('')
+
+  const normalizedCourseSearch = courseSearch.trim().toLowerCase()
+  const visibleCourses = normalizedCourseSearch
+    ? courses.filter((course) => (course.name || '').toLowerCase().includes(normalizedCourseSearch))
+    : courses
 
   useEffect(() => {
     fetchCourses()
@@ -78,10 +84,12 @@ export default function CoursesPage() {
     }
   }
 
-  const updateCourseField = (index, field, value) => {
-    const next = [...courses]
-    next[index] = { ...next[index], [field]: value }
-    setCourses(next)
+  const updateCourseField = (courseId, field, value) => {
+    setCourses((currentCourses) =>
+      currentCourses.map((course) => (
+        course.id === courseId ? { ...course, [field]: value } : course
+      )),
+    )
   }
 
   const saveCourse = async (course) => {
@@ -170,9 +178,36 @@ export default function CoursesPage() {
           <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
             <h2 className="text-xl font-black tracking-tight text-slate-950">{canManageCourses ? 'Course Catalogue' : 'Course Fee Catalogue'}</h2>
             <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-              {courses.length} Courses
+              {visibleCourses.length} Courses
             </div>
           </div>
+
+          {!canManageCourses && (
+            <div className="border-b border-slate-200 px-6 py-5">
+              <label htmlFor="course-fee-search" className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                Search Course
+              </label>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                <input
+                  id="course-fee-search"
+                  type="search"
+                  value={courseSearch}
+                  onChange={(e) => setCourseSearch(e.target.value)}
+                  placeholder="Search by course name"
+                  className="min-h-[48px] flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:font-medium placeholder:text-slate-400 focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                />
+                {courseSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCourseSearch('')}
+                    className="inline-flex min-h-[48px] items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {loading ? (
             <div className="p-6 text-slate-500">Loading courses...</div>
@@ -182,8 +217,47 @@ export default function CoursesPage() {
               <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950">No courses available</h3>
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">Active courses will appear here after they are added from the Courses page.</p>
             </div>
+          ) : visibleCourses.length === 0 ? (
+            <div className="px-6 py-16 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950 text-sm font-black tracking-[0.24em] text-white">CO</div>
+              <h3 className="mt-6 text-2xl font-black tracking-tight text-slate-950">No matching courses</h3>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-500">Try another course name or clear the search.</p>
+            </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {!canManageCourses && (
+              <div className="grid gap-3 p-4 md:hidden">
+                {visibleCourses.map((course) => (
+                  <article key={course.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="text-base font-black tracking-tight text-slate-950">{course.name || 'Untitled course'}</h3>
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-700 ring-1 ring-slate-200">
+                        {course.is_active ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Duration</p>
+                        <p className="mt-1 font-bold text-slate-900">{durationLabel(course.duration_months)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Actual Fees</p>
+                        <p className="mt-1 font-bold text-slate-900">{money(course.actual_fees)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Discount</p>
+                        <p className="mt-1 font-bold text-slate-900">{money(course.discount_amount)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Final Fees</p>
+                        <p className="mt-1 font-bold text-slate-950">{money(finalFees(course.actual_fees, course.discount_amount))}</p>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            <div className={`${!canManageCourses ? 'hidden md:block' : ''} overflow-x-auto`}>
               <div className="min-w-[1120px]">
                 <div className={`grid gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500 ${canManageCourses ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
                   <div>Course</div>
@@ -196,11 +270,11 @@ export default function CoursesPage() {
                 </div>
 
                 <div className="divide-y divide-slate-200">
-                  {courses.map((course, index) => (
+                  {visibleCourses.map((course) => (
                     <div key={course.id} className={`grid gap-4 px-6 py-5 ${canManageCourses ? 'grid-cols-[1.7fr_0.9fr_1fr_1fr_1fr_0.9fr_1fr]' : 'grid-cols-[1.9fr_0.9fr_1fr_1fr_1fr_0.9fr]'}`}>
                       <div>
                         {canManageCourses ? (
-                          <input value={course.name || ''} onChange={(e) => updateCourseField(index, 'name', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950" />
+                          <input value={course.name || ''} onChange={(e) => updateCourseField(course.id, 'name', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-950" />
                         ) : (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                             <p className="text-sm font-semibold text-slate-950">{course.name || 'Untitled course'}</p>
@@ -210,7 +284,7 @@ export default function CoursesPage() {
 
                       <div>
                         {canManageCourses ? (
-                          <input value={course.duration_months ?? ''} onChange={(e) => updateCourseField(index, 'duration_months', e.target.value)} placeholder="Months" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                          <input value={course.duration_months ?? ''} onChange={(e) => updateCourseField(course.id, 'duration_months', e.target.value)} placeholder="Months" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{durationLabel(course.duration_months)}</div>
                         )}
@@ -218,7 +292,7 @@ export default function CoursesPage() {
 
                       <div>
                         {canManageCourses ? (
-                          <input value={course.actual_fees ?? ''} onChange={(e) => updateCourseField(index, 'actual_fees', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                          <input value={course.actual_fees ?? ''} onChange={(e) => updateCourseField(course.id, 'actual_fees', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{money(course.actual_fees)}</div>
                         )}
@@ -226,7 +300,7 @@ export default function CoursesPage() {
 
                       <div>
                         {canManageCourses ? (
-                          <input value={course.discount_amount ?? ''} onChange={(e) => updateCourseField(index, 'discount_amount', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                          <input value={course.discount_amount ?? ''} onChange={(e) => updateCourseField(course.id, 'discount_amount', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                         ) : (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">{money(course.discount_amount)}</div>
                         )}
@@ -236,7 +310,7 @@ export default function CoursesPage() {
 
                       <div>
                         {canManageCourses ? (
-                          <select value={course.is_active ? 'active' : 'inactive'} onChange={(e) => updateCourseField(index, 'is_active', e.target.value === 'active')} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+                          <select value={course.is_active ? 'active' : 'inactive'} onChange={(e) => updateCourseField(course.id, 'is_active', e.target.value === 'active')} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
                             <option value="active">Active</option>
                             <option value="inactive">Inactive</option>
                           </select>
@@ -264,6 +338,7 @@ export default function CoursesPage() {
                 </div>
               </div>
             </div>
+            </>
           )}
         </section>
       </section>

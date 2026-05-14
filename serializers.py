@@ -5,6 +5,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.utils import timezone
 from django.core.files.storage import default_storage
 from django.db.utils import OperationalError, ProgrammingError
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog
@@ -1076,8 +1077,13 @@ class WhatsAppTemplateSerializer(serializers.ModelSerializer):
 
 class NotificationSerializer(serializers.ModelSerializer):
     type_display = serializers.CharField(source='get_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = Notification
         fields = '__all__'
-        read_only_fields = ['created_at']
+        read_only_fields = ['created_at', 'resolved_at']
+
+    def get_created_display(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')

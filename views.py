@@ -454,6 +454,8 @@ def create_user_notification(user, title, message, notification_type=Notificatio
         title=title,
         message=message,
         type=notification_type,
+        status=Notification.Status.UNREAD,
+        is_read=False,
         related_url=related_url,
     )
 
@@ -466,14 +468,54 @@ def notify_branch_users(branch, title, message, notification_type=Notification.N
 def create_notification_once(user, title, message, notification_type=Notification.NType.INFO, related_url=''):
     if not user:
         return None
-    notification, _ = Notification.objects.get_or_create(
+    notification = Notification.objects.filter(
         user=user,
         title=title,
         message=message,
         related_url=related_url,
-        defaults={'type': notification_type},
+    ).exclude(status=Notification.Status.RESOLVED).first()
+    if notification:
+        return notification
+    notification = Notification.objects.create(
+        user=user,
+        title=title,
+        message=message,
+        type=notification_type,
+        status=Notification.Status.UNREAD,
+        is_read=False,
+        related_url=related_url,
     )
     return notification
+
+
+def resolve_notifications(queryset):
+    return queryset.exclude(status=Notification.Status.RESOLVED).update(
+        status=Notification.Status.RESOLVED,
+        is_read=True,
+        resolved_at=timezone.now(),
+    )
+
+
+def mark_public_walkin_notifications_read(walkin_id):
+    Notification.objects.filter(
+        title='New public walk-in submitted',
+        related_url=f'/walkins/{walkin_id}',
+        status=Notification.Status.UNREAD,
+    ).update(status=Notification.Status.READ, is_read=True)
+
+
+def resolve_public_walkin_notifications(walkin_id):
+    resolve_notifications(Notification.objects.filter(
+        title='New public walk-in submitted',
+        related_url=f'/walkins/{walkin_id}',
+    ))
+
+
+def resolve_rules_signed_notifications(enrollment_id):
+    resolve_notifications(Notification.objects.filter(
+        title='Rules & Regulations Signed',
+        related_url=f'/enrollments/{enrollment_id}',
+    ))
 
 
 def notify_rules_signed(enrollment, submitted_at=None):
@@ -505,9 +547,14 @@ def notify_rules_signed(enrollment, submitted_at=None):
 
 
 LEAD_CLOSED_FOLLOW_UP_STATUSES = [
+    Lead.Status.COUNSELING_COMPLETED,
+    Lead.Status.DEMO_ATTENDED,
+    Lead.Status.WILL_WALK_IN,
     Lead.Status.WALK_IN,
     Lead.Status.ENROLLED,
     Lead.Status.CONVERTED,
+    Lead.Status.NOT_INTERESTED,
+    Lead.Status.JOINED_OTHER_INSTITUTE,
     Lead.Status.DROPPED,
     Lead.Status.LOST,
 ]
@@ -581,7 +628,7 @@ def prune_stale_follow_up_notifications(user, lead_due_ids, lead_missed_ids, wal
         stale_notifications = Notification.objects.filter(user=user, title=title)
         if active_urls:
             stale_notifications = stale_notifications.exclude(related_url__in=active_urls)
-        stale_notifications.delete()
+        resolve_notifications(stale_notifications)
 
 
 def clear_follow_up_notifications_for_record(record_type, record_id):
@@ -591,17 +638,19 @@ def clear_follow_up_notifications_for_record(record_type, record_id):
     else:
         titles = ['Walk-in follow-up due today', 'Missed walk-in follow-up']
         related_url = f'/walkins/{record_id}'
-    Notification.objects.filter(title__in=titles, related_url=related_url).delete()
+    resolve_notifications(Notification.objects.filter(title__in=titles, related_url=related_url))
 
 
 def generate_smart_notifications(user):
-    if not user.is_authenticated or user.is_super_admin:
+    if not user.is_authenticated:
         return
     today = timezone.localdate()
-    lead_due_qs = active_lead_follow_up_queryset(Lead.objects.filter(branch=user.branch), 'next_follow_up_date', today)
-    lead_missed_qs = missed_lead_follow_up_queryset(Lead.objects.filter(branch=user.branch), 'next_follow_up_date', today)
-    walkin_due_qs = active_walkin_follow_up_queryset(WalkIn.objects.filter(branch=user.branch), 'follow_up_date', today)
-    walkin_missed_qs = missed_walkin_follow_up_queryset(WalkIn.objects.filter(branch=user.branch), 'follow_up_date', today)
+    lead_scope = Lead.objects.all() if user.is_super_admin else Lead.objects.filter(branch=user.branch)
+    walkin_scope = WalkIn.objects.all() if user.is_super_admin else WalkIn.objects.filter(branch=user.branch)
+    lead_due_qs = active_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
+    lead_missed_qs = missed_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
+    walkin_due_qs = active_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
+    walkin_missed_qs = missed_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
 
     lead_due_ids = list(lead_due_qs.values_list('id', flat=True)[:25])
     lead_missed_ids = list(lead_missed_qs.values_list('id', flat=True)[:25])
@@ -617,14 +666,19 @@ def generate_smart_notifications(user):
         create_notification_once(user, 'Walk-in follow-up due today', f'{walkin.name} needs follow-up today.', Notification.NType.WARNING, f'/walkins/{walkin.id}')
     for walkin in walkin_missed_qs.filter(id__in=walkin_missed_ids):
         create_notification_once(user, 'Missed walk-in follow-up', f'{walkin.name} has a missed follow-up.', Notification.NType.ERROR, f'/walkins/{walkin.id}')
-    for payment in Payment.objects.filter(enrollment__branch=user.branch, next_payment_date=today, status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL]).select_related('enrollment')[:25]:
+    payment_qs = Payment.objects.filter(next_payment_date=today, status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL]).select_related('enrollment')
+    if not user.is_super_admin:
+        payment_qs = payment_qs.filter(enrollment__branch=user.branch)
+    for payment in payment_qs[:25]:
         create_notification_once(user, 'Payment due today', f'{payment.enrollment.name} has a payment due today.', Notification.NType.WARNING, f'/payments/{payment.id}')
-    for enrollment in Enrollment.objects.filter(
-        branch=user.branch,
+    enrollment_qs = Enrollment.objects.filter(
         status__in=Enrollment.FINAL_STATUSES,
         dob__month=today.month,
         dob__day=today.day,
-    )[:25]:
+    )
+    if not user.is_super_admin:
+        enrollment_qs = enrollment_qs.filter(branch=user.branch)
+    for enrollment in enrollment_qs[:25]:
         create_notification_once(user, 'Birthday reminder', f'{enrollment.name} has a birthday today.', Notification.NType.WARNING, f'/students/{enrollment.id}')
 
 
@@ -816,6 +870,8 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
         'name', 'phone', 'email', 'dob', 'location', 'pincode',
         'preferred_timing', 'status', 'remarks', 'updated_at',
     ])
+    clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
+    resolve_public_walkin_notifications(walkin.id)
 
     transfer_request.enrollment = enrollment
     transfer_request.status = transfer_request.Status.APPROVED
@@ -1422,6 +1478,8 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         # Staff can update candidate details and follow-up fields only.
+        lead = self.get_object()
+        old_next_follow_up_date = lead.next_follow_up_date
         if not request.user.is_super_admin:
             if 'branch' in request.data:
                 return Response({'detail': 'Only admin can change a lead branch.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1435,7 +1493,14 @@ class LeadViewSet(viewsets.ModelViewSet):
                     {'error': 'Staff can only update walkin_date, next_follow_up_date, remarks and status.'},
                     status=status.HTTP_403_FORBIDDEN
                 )
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        lead.refresh_from_db()
+        if (
+            old_next_follow_up_date != lead.next_follow_up_date
+            or lead.status in LEAD_CLOSED_FOLLOW_UP_STATUSES
+        ):
+            clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
+        return response
 
     @action(detail=True, methods=['post'], url_path='convert-to-walkin')
     def convert_to_walkin(self, request, pk=None):
@@ -1462,6 +1527,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                     'status', 'converted_to_type', 'converted_record_id',
                     'converted_at', 'converted_by', 'updated_at',
                 ])
+            clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
             return Response(WalkInDetailSerializer(existing_walkin).data, status=200)
         if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
             return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1556,6 +1622,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
             ])
             walkin.refresh_from_db()
+        clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return Response(WalkInDetailSerializer(walkin).data, status=201)
 
     @action(detail=True, methods=['post'], url_path='convert-to-enrollment')
@@ -1583,6 +1650,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                     'status', 'converted_to_type', 'converted_record_id',
                     'converted_at', 'converted_by', 'updated_at',
                 ])
+            clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
             return Response(EnrollmentDetailSerializer(existing_enrollment).data, status=200)
         if lead.converted_to_type == 'walkin' or hasattr(lead, 'walkin'):
             return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1680,6 +1748,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'branch', 'status', 'converted_to_type', 'converted_record_id',
                 'converted_at', 'converted_by', 'updated_at',
             ])
+        clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
     @action(detail=True, methods=['post'], url_path='follow-ups')
@@ -2178,11 +2247,27 @@ class NotificationViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         generate_smart_notifications(self.request.user)
-        return Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        queryset = Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        scope = self.request.query_params.get('scope', 'active')
+        status_filter = self.request.query_params.get('status', '').strip()
+        date_filter = parse_date(self.request.query_params.get('date', '').strip())
+
+        if status_filter in dict(Notification.Status.choices):
+            queryset = queryset.filter(status=status_filter)
+        if date_filter:
+            queryset = queryset.filter(created_at__date=date_filter)
+        if scope != 'all':
+            queryset = queryset.exclude(status=Notification.Status.RESOLVED).filter(
+                Q(is_read=False) | Q(type__in=[Notification.NType.WARNING, Notification.NType.ERROR])
+            )
+        return queryset
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
     def mark_all_read(self, request):
-        self.get_queryset().update(is_read=True)
+        self.get_queryset().exclude(status=Notification.Status.RESOLVED).update(
+            is_read=True,
+            status=Notification.Status.READ,
+        )
         return Response({'detail': 'Notifications marked as read.'})
 
 
@@ -2308,6 +2393,12 @@ class WalkInViewSet(viewsets.ModelViewSet):
             return super().list(request, *args, **kwargs)
         return self._sectioned_response()
 
+    def retrieve(self, request, *args, **kwargs):
+        walkin = self.get_object()
+        mark_public_walkin_notifications_read(walkin.id)
+        serializer = self.get_serializer(walkin)
+        return Response(serializer.data)
+
     def _sectioned_response(self):
         queryset = self.filter_queryset(self.get_queryset())
         now = timezone.localtime(timezone.now())
@@ -2368,6 +2459,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         walkin = self.get_object()
+        old_follow_up_date = walkin.follow_up_date
         data = request.data.copy()
         branch_changed = False
         old_branch = walkin.branch
@@ -2408,6 +2500,13 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 changed_by=request.user,
                 reason='Updated from walk-in detail edit.',
             )
+        walkin.refresh_from_db()
+        mark_public_walkin_notifications_read(walkin.id)
+        if (
+            old_follow_up_date != walkin.follow_up_date
+            or walkin.status in WALKIN_CLOSED_FOLLOW_UP_STATUSES
+        ):
+            clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='change-branch')
@@ -2443,6 +2542,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
             walkin.assigned_to = None
             update_fields.append('assigned_to')
         walkin.save(update_fields=update_fields)
+        mark_public_walkin_notifications_read(walkin.id)
         return Response(WalkInDetailSerializer(walkin, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='follow-ups')
@@ -2536,6 +2636,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
             'branch', 'preferred_timing', 'qualification', 'degree', 'status', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
         ])
+        clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
+        resolve_public_walkin_notifications(walkin.id)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
 
@@ -3002,7 +3104,12 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         if 'branch' in request.data and not request.user.is_super_admin:
             return Response({'detail': 'Only admin can change an enrollment branch.'}, status=status.HTTP_403_FORBIDDEN)
-        return super().update(request, *args, **kwargs)
+        enrollment = self.get_object()
+        response = super().update(request, *args, **kwargs)
+        enrollment.refresh_from_db()
+        if enrollment.status in Enrollment.FINAL_STATUSES:
+            resolve_rules_signed_notifications(enrollment.id)
+        return response
 
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
@@ -3076,6 +3183,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 enrollment.status = Enrollment.Status.ENROLLED
                 enrollment.enrolled_by = enrollment.enrolled_by or request.user
                 enrollment.save(update_fields=['status', 'enrolled_by', 'student_number', 'final_fees', 'updated_at'])
+            resolve_rules_signed_notifications(enrollment.id)
             payment, created = Payment.objects.get_or_create(
                 enrollment=enrollment,
                 defaults={
@@ -4239,7 +4347,6 @@ class DashboardSummaryView(APIView):
     def get(self, request):
         user    = request.user
         today   = timezone.localdate()
-        month_start = today.replace(day=1)
         year = today.year
         month = today.month
 
@@ -4277,7 +4384,7 @@ class DashboardSummaryView(APIView):
 
         total_fee_amount = pay_qs.aggregate(total=Sum('total_fees'))['total'] or 0
         total_paid_amount = pay_qs.aggregate(total=Sum('paid_amount'))['total'] or 0
-        value_this_month = enroll_qs.filter(enrollment_date__gte=month_start).aggregate(
+        value_this_month = enroll_qs.filter(enrollment_date__year=year, enrollment_date__month=month).aggregate(
             total=Sum('final_fees')
         )['total'] or 0
         current_month_collected_amount = collection_qs.filter(
@@ -4330,8 +4437,9 @@ class DashboardSummaryView(APIView):
             paid=Sum('paid_amount'),
         )
         weekly_pending_amount = (weekly_totals['total'] or 0) - (weekly_totals['paid'] or 0)
-        leads_this_month = lead_qs.filter(created_at__gte=month_start).count()
-        enroll_this_month = enroll_qs.filter(enrollment_date__gte=month_start).count()
+        leads_this_month = lead_qs.filter(created_at__year=year, created_at__month=month).count()
+        walkins_this_month = walkin_qs.filter(visit_date__year=year, visit_date__month=month).count()
+        enroll_this_month = enroll_qs.filter(enrollment_date__year=year, enrollment_date__month=month).count()
         conversion_rate = round((enroll_this_month / leads_this_month) * 100, 2) if leads_this_month else 0
 
         return Response({
@@ -4343,7 +4451,7 @@ class DashboardSummaryView(APIView):
                 today,
             ).count(),
             'total_walkins':      walkin_qs.count(),
-            'walkins_this_month': walkin_qs.filter(visit_date__gte=month_start).count(),
+            'walkins_this_month': walkins_this_month,
             'walkins_followup_today': active_walkin_follow_up_queryset(
                 walkin_qs,
                 'follow_up_date',

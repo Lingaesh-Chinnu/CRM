@@ -1,6 +1,6 @@
 import { useDispatch, useSelector } from 'react-redux'
 import { logout } from '../../store/slices/authSlice'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
 
@@ -16,6 +16,26 @@ function appHref(url) {
 function starDisplay(stars) {
   const count = Number(stars || 1)
   return '⭐'.repeat(count) + '☆'.repeat(Math.max(0, 5 - count))
+}
+
+function notificationDateTime(item) {
+  if (item.created_display) return item.created_display
+  if (!item.created_at) return ''
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(item.created_at))
+}
+
+function statusLabel(item) {
+  if (item.status_display) return item.status_display
+  if (item.status === 'resolved') return 'Resolved'
+  if (item.status === 'read' || item.is_read) return 'Read'
+  return 'Unread'
 }
 
 export default function Header({ onMenuClick }) {
@@ -39,11 +59,15 @@ export default function Header({ onMenuClick }) {
     })
   }, [user])
 
-  useEffect(() => {
+  const fetchNotifications = () => {
     if (!user) return
-    api.get('/notifications/').then(({ data }) => {
+    return api.get('/notifications/').then(({ data }) => {
       setNotifications(data.results || data)
     }).catch(() => setNotifications([]))
+  }
+
+  useEffect(() => {
+    fetchNotifications()
   }, [user])
 
   const handleLogout = () => {
@@ -51,7 +75,7 @@ export default function Header({ onMenuClick }) {
     navigate('/login')
   }
 
-  const unreadCount = notifications.filter((item) => !item.is_read).length
+  const unreadCount = notifications.filter((item) => item.status !== 'resolved' && !item.is_read).length
   const toneClass = (type) => {
     if (type === 'error') return 'border-rose-200 bg-rose-50 text-rose-800'
     if (type === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'
@@ -67,7 +91,7 @@ export default function Header({ onMenuClick }) {
             type="button"
             onClick={onMenuClick}
             aria-label="Open navigation menu"
-            className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-sm md:hidden"
+            className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-sm xl:hidden"
           >
             <svg aria-hidden="true" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="M4 7h16" />
@@ -135,7 +159,7 @@ export default function Header({ onMenuClick }) {
                   <p className="text-sm font-bold text-slate-950">Notifications</p>
                   <button
                     type="button"
-                    onClick={() => api.post('/notifications/mark-all-read/').then(() => setNotifications((items) => items.map((item) => ({ ...item, is_read: true }))))}
+                    onClick={() => api.post('/notifications/mark-all-read/').then(() => fetchNotifications())}
                     className="text-xs font-semibold text-slate-500 hover:text-slate-950"
                   >
                     Mark read
@@ -146,10 +170,25 @@ export default function Header({ onMenuClick }) {
                     <p className="p-3 text-sm text-slate-500">No notifications.</p>
                   ) : notifications.slice(0, 12).map((item) => (
                     <a key={item.id} href={appHref(item.related_url)} className={`mb-2 block rounded-xl border px-3 py-2 text-sm ${toneClass(item.type)}`}>
-                      <span className="block font-semibold">{item.title}</span>
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="font-semibold">{item.title}</span>
+                        <span className="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em]">
+                          {statusLabel(item)}
+                        </span>
+                      </span>
                       <span className="mt-1 block text-xs opacity-80">{item.message}</span>
+                      <span className="mt-2 block text-[11px] font-semibold opacity-75">{notificationDateTime(item)}</span>
                     </a>
                   ))}
+                </div>
+                <div className="border-t border-slate-100 px-4 py-3">
+                  <Link
+                    to="/notifications"
+                    onClick={() => setNotificationsOpen(false)}
+                    className="text-xs font-semibold text-slate-600 hover:text-slate-950"
+                  >
+                    View all notifications
+                  </Link>
                 </div>
               </div>
             )}

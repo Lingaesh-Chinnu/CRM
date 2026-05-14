@@ -1092,13 +1092,20 @@ class Notification(models.Model):
         WARNING = 'warning', 'Warning'
         ERROR   = 'error',   'Error'
 
+    class Status(models.TextChoices):
+        UNREAD = 'unread', 'Unread'
+        READ = 'read', 'Read'
+        RESOLVED = 'resolved', 'Resolved / Completed'
+
     user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     title       = models.CharField(max_length=200)
     message     = models.TextField()
     type        = models.CharField(max_length=10, choices=NType.choices, default=NType.INFO)
+    status      = models.CharField(max_length=20, choices=Status.choices, default=Status.UNREAD, db_index=True)
     is_read     = models.BooleanField(default=False, db_index=True)
     related_url = models.CharField(max_length=300, blank=True)
     created_at  = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = 'notifications'

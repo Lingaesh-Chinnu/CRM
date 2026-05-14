@@ -350,7 +350,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchActionBoardStats()
-  }, [isSuperAdmin])
+  }, [historicalBranch, isSuperAdmin])
 
   useEffect(() => {
     fetchHistoricalAnalytics()
@@ -387,7 +387,8 @@ export default function DashboardPage() {
 
   const fetchActionBoardStats = async () => {
     try {
-      const { data } = await api.get('/dashboard/summary/')
+      const params = isSuperAdmin && historicalBranch !== 'all' ? { branch: historicalBranch } : undefined
+      const { data } = await api.get('/dashboard/summary/', { params })
       setActionBoardStats(data)
     } catch (error) {
       console.error('Failed to fetch action board stats:', error)
@@ -437,7 +438,7 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <section className="relative isolate overflow-hidden rounded-[30px] bg-slate-950 text-white shadow-[0_36px_90px_-42px_rgba(15,23,42,0.92)]">
         <LoginAnimatedBackground className="opacity-80" />
-        <div className="relative z-10 grid gap-8 px-6 py-8 sm:px-8 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:px-10">
+        <div className="relative z-10 grid gap-6 px-5 py-7 sm:px-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] xl:gap-8 xl:px-9 2xl:px-10">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300">
               Dashboard
@@ -526,7 +527,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_360px]">
+      <section className="grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_360px]">
         <article className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -585,17 +586,23 @@ export default function DashboardPage() {
                 <HistoricalAnalyticsChart rows={historicalData} />
               )}
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-2xl bg-slate-50 p-5">
+                <p className="text-sm font-semibold text-slate-500">Total leads</p>
+                <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+                  {actionBoardStats?.leads_this_month || 0}
+                </p>
+              </div>
               <div className="rounded-2xl bg-slate-50 p-5">
                 <p className="text-sm font-semibold text-slate-500">Total walk-ins</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                  {actionBoardStats?.total_walkins || 0}
+                  {actionBoardStats?.walkins_this_month || 0}
                 </p>
               </div>
               <div className="rounded-2xl bg-slate-50 p-5">
                 <p className="text-sm font-semibold text-slate-500">Total enrollments</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
-                  {actionBoardStats?.total_enrollments || 0}
+                  {actionBoardStats?.enroll_this_month || 0}
                 </p>
               </div>
             </div>

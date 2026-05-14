@@ -229,7 +229,69 @@ export default function EnrollmentsListPage() {
         ) : rows.length === 0 ? (
           <div className="p-6 text-slate-500">No students match the current filters.</div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          <div className="divide-y divide-slate-200 md:hidden">
+            {rows.map((row) => (
+              <article key={row.id} className="space-y-4 px-4 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="break-words text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
+                    <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
+                    <div className="mt-2 text-sm text-slate-700">
+                      <PhoneNumberEditor recordType="enrollment" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentField(row.id, 'phone', phone)} />
+                    </div>
+                  </div>
+                  <Link
+                    to={`/enrollments/${row.id}`}
+                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50"
+                  >
+                    View
+                  </Link>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Course</p>
+                    <p className="mt-1 font-bold text-slate-900">{row.course_name || 'Course pending'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Enrollment</p>
+                    <p className="mt-1 font-bold text-slate-900">{formatDate(row.enrollment_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Branch</p>
+                    <p className="mt-1 font-bold text-slate-900">{row.branch_name || 'No branch'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Payment</p>
+                    <p className="mt-1 font-bold text-slate-900">{getPaymentLabel(row.payment_status)}</p>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status</p>
+                  <select
+                    value={row.status || 'enrolled'}
+                    disabled={updatingStudentId === row.id}
+                    onChange={async (event) => {
+                      const nextStatus = event.target.value
+                      updateStudentField(row.id, 'status', nextStatus)
+                      await saveStudentStatus(row.id, nextStatus)
+                    }}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
+                  >
+                    <option value="enrolled">Enrolled</option>
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                    <option value="dropped">Inactive</option>
+                    <option value="on_hold">On Hold</option>
+                  </select>
+                  <p className="mt-2 text-xs text-slate-500">{getStatusLabel(row.status)}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto md:block">
             <div className="min-w-[1120px]">
               <div className="grid grid-cols-[1.25fr_1.05fr_1fr_1fr_1fr_0.95fr_0.75fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <div>Student</div>
@@ -301,6 +363,7 @@ export default function EnrollmentsListPage() {
               </div>
             </div>
           </div>
+          </>
         )}
       </section>
     </div>

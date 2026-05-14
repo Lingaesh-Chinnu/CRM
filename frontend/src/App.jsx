@@ -35,6 +35,7 @@ import StudentDetailPage from './pages/students/StudentDetailPage'
 // Payments
 import PaymentsListPage from './pages/payments/PaymentsListPage'
 import PaymentDetailPage from './pages/payments/PaymentDetailPage'
+import NotificationsPage from './pages/notifications/NotificationsPage'
 
 // Admin-only pages
 import CoursesPage   from './pages/admin/CoursesPage'
@@ -114,6 +115,9 @@ export default function App() {
         {/* Payments */}
         <Route path="payments"        element={<PaymentsListPage />} />
         <Route path="payments/:id"    element={<PaymentDetailPage />} />
+
+        {/* Notifications */}
+        <Route path="notifications"   element={<NotificationsPage />} />
 
         {/* Viewable by all logged-in users */}
         <Route path="courses"         element={<CoursesPage />} />
