@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from crm.models import Branch, Course, Enrollment, Lead, WalkIn
@@ -7,6 +8,10 @@ from crm.models import Branch, Course, Enrollment, Lead, WalkIn
 User = get_user_model()
 
 
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
 class PublicWalkInFormTests(APITestCase):
     def setUp(self):
         self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
@@ -151,3 +156,76 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.course, self.final_course)
         self.assertEqual(enrollment.original_walkin_course, self.course)
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
+
+    def test_staff_can_create_lead_with_empty_optional_fields_and_defaults(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'New Lead',
+            'phone': '9000000003',
+            'course': self.course.id,
+            'branch': None,
+            'follow_up_by': '',
+            'lead_status': '',
+            'status': '',
+            'source': '',
+            'qualification': '',
+            'degree': '',
+            'next_follow_up_date': '',
+            'remarks': '',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead = Lead.objects.get(phone='9000000003')
+        self.assertEqual(lead.branch, self.branch)
+        self.assertEqual(lead.assigned_to, self.staff)
+        self.assertEqual(lead.status, Lead.Status.NEW)
+        self.assertEqual(lead.source, Lead.Source.MANUAL)
+        self.assertEqual(lead.qualification, '')
+        self.assertEqual(lead.degree, '')
+        self.assertIsNone(lead.next_follow_up_date)
+
+    def test_staff_create_lead_saves_selected_follow_up_user(self):
+        selected_user = User.objects.create_user(
+            username='selected-staff',
+            email='selected@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'Assigned Lead',
+            'phone': '9000000004',
+            'course': self.course.id,
+            'follow_up_by': selected_user.id,
+            'source': 'manual',
+            'next_follow_up_date': '2026-05-14',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead = Lead.objects.get(phone='9000000004')
+        self.assertEqual(lead.branch, self.branch)
+        self.assertEqual(lead.assigned_to, selected_user)
+        self.assertEqual(str(lead.next_follow_up_date), '2026-05-14')
+
+    def test_staff_create_lead_returns_validation_json_for_other_branch_follow_up_user(self):
+        selected_user = User.objects.create_user(
+            username='other-staff',
+            email='other@example.com',
+            password='pass12345',
+            branch=self.other_branch,
+            role=User.Role.STAFF,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'Invalid Assigned Lead',
+            'phone': '9000000005',
+            'course': self.course.id,
+            'follow_up_by': selected_user.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('follow_up_by', response.data)

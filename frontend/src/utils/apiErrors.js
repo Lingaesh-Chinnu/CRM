@@ -1,3 +1,20 @@
+function messageFromValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(messageFromValue).filter(Boolean).join(', ')
+  }
+  if (value && typeof value === 'object') {
+    return Object.entries(value)
+      .map(([field, nested]) => {
+        const label = field.replace(/_/g, ' ')
+        const message = messageFromValue(nested)
+        return message ? `${label}: ${message}` : ''
+      })
+      .filter(Boolean)
+      .join(' ')
+  }
+  return value == null ? '' : String(value)
+}
+
 export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
   const status = error?.response?.status
   const data = error?.response?.data
@@ -16,7 +33,7 @@ export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
     const fieldMessages = Object.entries(data)
       .map(([field, value]) => {
         const label = field.replace(/_/g, ' ')
-        const message = Array.isArray(value) ? value.join(', ') : String(value)
+        const message = messageFromValue(value)
         return `${label}: ${message}`
       })
       .join(' ')

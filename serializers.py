@@ -411,6 +411,21 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     """Full serializer for retrieve/create/update."""
     course_name      = serializers.CharField(source='course.name',        read_only=True)
     assigned_to_name = serializers.SerializerMethodField()
+    dob              = serializers.DateField(
+        required=False,
+        allow_null=True,
+        input_formats=['iso-8601', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y'],
+    )
+    walkin_date      = serializers.DateField(
+        required=False,
+        allow_null=True,
+        input_formats=['iso-8601', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y'],
+    )
+    next_follow_up_date = serializers.DateField(
+        required=False,
+        allow_null=True,
+        input_formats=['iso-8601', '%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y'],
+    )
     follow_up_by     = serializers.PrimaryKeyRelatedField(
         source='assigned_to',
         queryset=User.objects.filter(is_active=True),
@@ -434,6 +449,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         if hasattr(data, 'copy'):
             data = data.copy()
+            for field in ('follow_up_by', 'assigned_to', 'branch', 'course', 'dob', 'walkin_date', 'next_follow_up_date'):
+                if data.get(field) == '':
+                    data[field] = None
             if data.get('status') in (None, '') and data.get('lead_status') not in (None, ''):
                 data['status'] = data.get('lead_status')
             if data.get('status') in (None, ''):
