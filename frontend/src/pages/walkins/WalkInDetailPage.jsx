@@ -38,6 +38,12 @@ function discountAmount(discount, courseFee) {
   return Math.min(value, fee)
 }
 
+const SPOT_CONVERSION_DISCOUNT = 2000
+
+function sameDate(first, second) {
+  return Boolean(first && second && first === second)
+}
+
 function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.created_by_name || walkin.walk_in_by_display || 'Public Form'
 }
@@ -167,6 +173,7 @@ export default function WalkInDetailPage() {
     enrollment_date: new Date().toISOString().slice(0, 10),
     actual_fees: '',
     discount: '',
+    spot_conversion_discount_applied: false,
     start_date: '',
     assigned_to: '',
     transfer_reason: '',
@@ -181,6 +188,10 @@ export default function WalkInDetailPage() {
   const selectedDiscount = availableDiscounts.find((discount) => String(discount.id) === String(form.discount))
   const appliedDiscount = discountAmount(selectedDiscount, discountBaseFee)
   const finalFees = selectedDiscount ? Math.max(discountBaseFee - appliedDiscount, 0) : courseFee
+  const spotDiscountEnabled = sameDate(form.visit_date, form.enrollment_date)
+  const spotDiscountApplied = spotDiscountEnabled && form.spot_conversion_discount_applied
+  const spotDiscountAmount = spotDiscountApplied ? SPOT_CONVERSION_DISCOUNT : 0
+  const netPayableFees = Math.max(finalFees - spotDiscountAmount, 0)
 
   useEffect(() => {
     setLoadError('')
@@ -306,6 +317,7 @@ export default function WalkInDetailPage() {
       enrollment_date: form.enrollment_date,
       actual_fees: selectedDiscount ? discountBaseFee : courseFee,
       discount: form.discount || null,
+      spot_conversion_discount_applied: spotDiscountApplied,
       start_date: form.start_date || null,
     }
     if (walkin.course && String(walkin.course) !== String(payload.course)) {
@@ -327,7 +339,13 @@ export default function WalkInDetailPage() {
   }
 
   const updateDetail = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }))
+    setForm((current) => {
+      const next = { ...current, [field]: value }
+      if ((field === 'visit_date' || field === 'enrollment_date') && !sameDate(next.visit_date, next.enrollment_date)) {
+        next.spot_conversion_discount_applied = false
+      }
+      return next
+    })
     setFieldErrors((current) => ({ ...current, [field]: '' }))
     setDetailErrors((current) => ({ ...current, [field]: '' }))
   }
@@ -794,13 +812,39 @@ export default function WalkInDetailPage() {
               </FormField>
             </div>
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-              <p className="text-xl font-black tracking-tight text-emerald-950">
-                Final Fees: Rs {formatMoney(finalFees)}
-              </p>
+              <div className="grid gap-2 text-sm text-emerald-950">
+                <p className="font-semibold">Actual Fees: Rs {formatMoney(discountBaseFee || courseFee)}</p>
+                <p className="font-semibold">Course Discount: Rs {formatMoney(appliedDiscount)}</p>
+                <p className="font-black">Final Fees: Rs {formatMoney(finalFees)}</p>
+                <p className="font-semibold">Spot Conversion Discount: Rs {formatMoney(spotDiscountAmount)}</p>
+                <p className="text-xl font-black tracking-tight">Net Payable Fees: Rs {formatMoney(netPayableFees)}</p>
+              </div>
               <p className="hidden">
                 {selectedCourse ? `${selectedCourse.name} • ` : ''}
                 {''}
               </p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={spotDiscountApplied}
+                  disabled={!spotDiscountEnabled}
+                  onChange={(event) => setForm((current) => ({ ...current, spot_conversion_discount_applied: event.target.checked }))}
+                  className="mt-0.5 h-4 w-4 flex-none accent-slate-950 disabled:opacity-50"
+                />
+                <span>Apply Spot Conversion Discount</span>
+              </label>
+              {!spotDiscountEnabled && (
+                <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
+                  Spot conversion discount is available only when visit date and enrollment date are the same.
+                </p>
+              )}
+              {spotDiscountEnabled && (
+                <p className="mt-2 text-xs font-medium leading-5 text-emerald-700">
+                  Same-day walk-in enrollment is eligible for Rs {formatMoney(SPOT_CONVERSION_DISCOUNT)} off net payable fees.
+                </p>
+              )}
             </div>
             <div>
               <FormField label="Course Start Date">

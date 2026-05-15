@@ -176,6 +176,8 @@ export default function StudentDetailPage() {
             </div>
             <DetailCard label="Batch Timing" value={prettyValue(row.batch_timing)} />
             <DetailCard label="Final Fees" value={`Rs ${Number(row.final_fees || 0).toLocaleString('en-IN')}`} />
+            <DetailCard label="Spot Discount" value={`Rs ${Number(row.spot_conversion_discount_amount || 0).toLocaleString('en-IN')}`} />
+            <DetailCard label="Net Payable Fees" value={`Rs ${Number(row.net_payable_fee || row.final_fees || 0).toLocaleString('en-IN')}`} />
             <DetailCard
               label="Payment Status"
               value={prettyValue(row.payment_info?.status, 'Payment pending')}

@@ -4,6 +4,7 @@
 # ============================================================
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+from decimal import Decimal
 
 
 class TimeStampedModel(models.Model):
@@ -727,8 +728,12 @@ def calculate_next_payment_date(enrollment, paid_amount, total_fees):
     )
 
 
+def enrollment_payable_fee(enrollment):
+    return enrollment.net_payable_fee if enrollment.net_payable_fee is not None else enrollment.final_fees
+
+
 def get_default_installment_schedule(enrollment):
-    final_fees = int(enrollment.final_fees or 0)
+    final_fees = int(enrollment_payable_fee(enrollment) or 0)
     enrollment_date = enrollment.enrollment_date
     start_date = enrollment.start_date or enrollment.enrollment_date
     if final_fees < 5000:
@@ -821,6 +826,9 @@ class Enrollment(TimeStampedModel):
     discount_amount  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_reason  = models.CharField(max_length=300, blank=True)
     final_fees       = models.DecimalField(max_digits=10, decimal_places=2)
+    spot_conversion_discount_applied = models.BooleanField(default=False)
+    spot_conversion_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    net_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount          = models.ForeignKey(Discount, null=True, blank=True, on_delete=models.SET_NULL,
                                           related_name='enrollments')
 
@@ -841,8 +849,13 @@ class Enrollment(TimeStampedModel):
             self.final_enrollment_course_id = self.course_id
         if not self.student_number and self.status in self.FINAL_STATUSES:
             self.student_number = generate_student_number(self.branch)
-        # Auto-compute final fees
+        # Auto-compute payable fees. Course discount affects final_fees; spot discount affects only net_payable_fee.
         self.final_fees = max(self.actual_fees - self.discount_amount, 0)
+        if self.spot_conversion_discount_applied:
+            self.spot_conversion_discount_amount = Decimal('2000')
+        else:
+            self.spot_conversion_discount_amount = Decimal('0')
+        self.net_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount, 0)
         super().save(*args, **kwargs)
 
     def __str__(self):

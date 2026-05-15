@@ -72,7 +72,7 @@ from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     PhoneNumberChangeHistory,
-    PaymentInstallment, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule,
+    PaymentInstallment, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -316,6 +316,42 @@ def apply_enrollment_discount(data, course, branch_id=None):
     data['discount_amount'] = discount_amount
     data['discount_reason'] = discount.name
     return discount
+
+
+def truthy_value(value):
+    return value in (True, 'true', 'True', '1', 1, 'yes', 'on')
+
+
+def normalized_date(value):
+    if not value:
+        return None
+    if hasattr(value, 'date') and not hasattr(value, 'month'):
+        return value
+    if hasattr(value, 'isoformat') and hasattr(value, 'month'):
+        return value
+    if isinstance(value, str):
+        parsed = parse_date(value)
+        if parsed:
+            return parsed
+        for date_format in ('%d-%m-%Y', '%d/%m/%Y'):
+            try:
+                return timezone.datetime.strptime(value, date_format).date()
+            except ValueError:
+                continue
+    return value
+
+
+def apply_spot_conversion_discount(data, visit_date):
+    is_applied = truthy_value(data.get('spot_conversion_discount_applied'))
+    data['spot_conversion_discount_applied'] = is_applied
+    if not is_applied:
+        data['spot_conversion_discount_amount'] = 0
+        return
+    visit = normalized_date(visit_date)
+    enrollment = normalized_date(data.get('enrollment_date'))
+    if not visit or not enrollment or visit != enrollment:
+        raise ValueError('Spot conversion discount is available only when visit date and enrollment date are the same.')
+    data['spot_conversion_discount_amount'] = 2000
 
 
 def make_json_safe_payload(data):
@@ -803,7 +839,9 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
         f'Duration: {enrollment.course.duration_months if enrollment.course and enrollment.course.duration_months else ""}',
         f'Actual Fees: Rs {enrollment.actual_fees}',
         f'Discount: Rs {enrollment.discount_amount}',
-        f'Total Course Fee: Rs {enrollment.final_fees}',
+        f'Final Fees: Rs {enrollment.final_fees}',
+        f'Spot Conversion Discount: Rs {enrollment.spot_conversion_discount_amount}',
+        f'Net Payable Fees: Rs {enrollment_payable_fee(enrollment)}',
     ]
     for detail in details:
         write_line(detail)
@@ -1777,6 +1815,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         data['actual_fees'] = data.get('actual_fees') or course.actual_fees
         try:
             apply_enrollment_discount(data, course, data.get('branch'))
+            apply_spot_conversion_discount(data, lead.walkin_date)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1807,6 +1846,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 discount_amount=data.get('discount_amount') or 0,
                 discount_reason=data.get('discount_reason') or '',
                 discount_id=data.get('discount') or None,
+                spot_conversion_discount_applied=data.get('spot_conversion_discount_applied', False),
                 start_date=data.get('start_date') or None,
                 batch_timing=data.get('batch_timing') or '',
                 demo_class=data.get('demo_class', False),
@@ -2691,6 +2731,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data['actual_fees'] = data.get('actual_fees') or course.actual_fees
         try:
             apply_enrollment_discount(data, course, data.get('branch'))
+            apply_spot_conversion_discount(data, walkin.visit_date)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -2970,7 +3011,12 @@ class PublicRulesSigningView(APIView):
                 'batch_timing': enrollment.batch_timing or enrollment.get_preferred_timing_display() or '',
                 'batch_start_date': enrollment.start_date,
                 'duration': enrollment.course.duration_months if enrollment.course else None,
-                'total_course_fee': enrollment.final_fees,
+                'actual_fees': enrollment.actual_fees,
+                'course_discount': enrollment.discount_amount,
+                'final_fees': enrollment.final_fees,
+                'spot_conversion_discount': enrollment.spot_conversion_discount_amount,
+                'net_payable_fee': enrollment_payable_fee(enrollment),
+                'total_course_fee': enrollment_payable_fee(enrollment),
                 'payment_mode': payment_mode,
                 'enrollment_date': enrollment.enrollment_date,
             },
@@ -3248,9 +3294,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'course_name': enrollment.course.name if enrollment.course else '',
             'branch_name': enrollment.branch.name if enrollment.branch else '',
             'phone_number': enrollment.phone,
-            'total_fee': whatsapp_currency(enrollment.final_fees),
+            'total_fee': whatsapp_currency(enrollment_payable_fee(enrollment)),
             'paid_amount': whatsapp_currency(payment.paid_amount if payment else 0),
-            'pending_amount': whatsapp_currency((payment.balance if payment else enrollment.final_fees)),
+            'pending_amount': whatsapp_currency((payment.balance if payment else enrollment_payable_fee(enrollment))),
             'due_date': whatsapp_date(enrollment.start_date),
             'next_payment_date': whatsapp_date(payment.next_payment_date if payment else None),
             'rules_link': signing_link,
@@ -3289,12 +3335,12 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             if enrollment.status not in Enrollment.FINAL_STATUSES:
                 enrollment.status = Enrollment.Status.ACTIVE
                 enrollment.enrolled_by = enrollment.enrolled_by or request.user
-                enrollment.save(update_fields=['status', 'enrolled_by', 'student_number', 'final_fees', 'updated_at'])
+                enrollment.save(update_fields=['status', 'enrolled_by', 'student_number', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at'])
             resolve_rules_signed_notifications(enrollment.id)
             payment, created = Payment.objects.get_or_create(
                 enrollment=enrollment,
                 defaults={
-                    'total_fees': enrollment.final_fees,
+                    'total_fees': enrollment_payable_fee(enrollment),
                     'status': Payment.Status.UNPAID,
                     'manual_installment_schedule': [
                         {
@@ -3307,8 +3353,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             )
             if not created:
                 update_fields = []
-                if payment.total_fees != enrollment.final_fees:
-                    payment.total_fees = enrollment.final_fees
+                if payment.total_fees != enrollment_payable_fee(enrollment):
+                    payment.total_fees = enrollment_payable_fee(enrollment)
                     update_fields.append('total_fees')
                 if not payment.manual_installment_schedule:
                     payment.manual_installment_schedule = [

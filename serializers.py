@@ -1063,7 +1063,32 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Enrollment
         fields = '__all__'
-        read_only_fields = ['student_number', 'final_fees', 'enrolled_by', 'created_by']
+        read_only_fields = [
+            'student_number', 'final_fees', 'net_payable_fee',
+            'spot_conversion_discount_amount', 'enrolled_by', 'created_by',
+        ]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        spot_applied = attrs.get(
+            'spot_conversion_discount_applied',
+            getattr(self.instance, 'spot_conversion_discount_applied', False),
+        )
+        if spot_applied:
+            walkin = attrs.get('walkin') or getattr(self.instance, 'walkin', None)
+            visit_date = getattr(walkin, 'visit_date', None)
+            enrollment_date = attrs.get('enrollment_date', getattr(self.instance, 'enrollment_date', None))
+            if attrs.get('walkin') is None and self.instance is None:
+                return attrs
+            if not walkin or not visit_date:
+                raise serializers.ValidationError({
+                    'spot_conversion_discount_applied': 'Spot conversion discount is available only for walk-in enrollments.'
+                })
+            if visit_date != enrollment_date:
+                raise serializers.ValidationError({
+                    'spot_conversion_discount_applied': 'Spot conversion discount is available only when visit date and enrollment date are the same.'
+                })
+        return attrs
 
     def _rules_signing_data(self, obj):
         if hasattr(obj, '_rules_signing_data_cache'):

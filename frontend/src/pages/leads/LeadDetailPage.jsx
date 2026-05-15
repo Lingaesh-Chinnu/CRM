@@ -6,6 +6,11 @@ import FollowUpHistory from '../../components/common/FollowUpHistory'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
+const SPOT_CONVERSION_DISCOUNT = 2000
+
+function sameDate(first, second) {
+  return Boolean(first && second && first === second)
+}
 
 const requiredLabels = {
   name: 'Name',
@@ -116,6 +121,7 @@ function buildConversionForm(lead) {
     conversion_date: lead?.walkin_date || todayIso(),
     actual_fees: '',
     discount: '',
+    spot_conversion_discount_applied: false,
     start_date: '',
     batch_timing: '',
     demo_class: false,
@@ -233,7 +239,13 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
 
   const updateField = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }))
+    setForm((current) => {
+      const next = { ...current, [field]: value }
+      if (field === 'conversion_date' && !sameDate(lead?.walkin_date, value)) {
+        next.spot_conversion_discount_applied = false
+      }
+      return next
+    })
     setFieldErrors((current) => ({ ...current, [field]: '' }))
   }
 
@@ -265,6 +277,10 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   const discountBaseFee = Number(form.actual_fees || selectedCourse?.actual_fees || selectedCourse?.final_fees || 0)
   const appliedDiscount = discountAmount(selectedDiscount, discountBaseFee)
   const finalFees = selectedDiscount ? Math.max(discountBaseFee - appliedDiscount, 0) : courseFee
+  const spotDiscountEnabled = isEnrollment && sameDate(lead?.walkin_date, form.conversion_date)
+  const spotDiscountApplied = spotDiscountEnabled && form.spot_conversion_discount_applied
+  const spotDiscountAmount = spotDiscountApplied ? SPOT_CONVERSION_DISCOUNT : 0
+  const netPayableFees = Math.max(finalFees - spotDiscountAmount, 0)
   const requiredFields = isEnrollment
     ? [
         'name', 'phone', 'course',
@@ -311,6 +327,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       payload.enrollment_date = form.conversion_date
       payload.actual_fees = selectedDiscount ? discountBaseFee : courseFee
       payload.discount = form.discount || null
+      payload.spot_conversion_discount_applied = spotDiscountApplied
       payload.start_date = form.start_date || null
       payload.batch_timing = form.batch_timing || ''
       payload.qualification = form.qualification.trim()
@@ -529,9 +546,35 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
                 </FormField>
               </div>
               <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 md:col-span-2">
-                <p className="text-xl font-black tracking-tight text-emerald-950">
-                  Final Fees: Rs {formatMoney(finalFees)}
-                </p>
+                <div className="grid gap-2 text-sm text-emerald-950">
+                  <p className="font-semibold">Actual Fees: Rs {formatMoney(discountBaseFee || courseFee)}</p>
+                  <p className="font-semibold">Course Discount: Rs {formatMoney(appliedDiscount)}</p>
+                  <p className="font-black">Final Fees: Rs {formatMoney(finalFees)}</p>
+                  <p className="font-semibold">Spot Conversion Discount: Rs {formatMoney(spotDiscountAmount)}</p>
+                  <p className="text-xl font-black tracking-tight">Net Payable Fees: Rs {formatMoney(netPayableFees)}</p>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 md:col-span-2">
+                <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={spotDiscountApplied}
+                    disabled={!spotDiscountEnabled}
+                    onChange={(event) => updateField('spot_conversion_discount_applied', event.target.checked)}
+                    className="mt-0.5 h-4 w-4 flex-none accent-slate-950 disabled:opacity-50"
+                  />
+                  <span>Apply Spot Conversion Discount</span>
+                </label>
+                {!spotDiscountEnabled && (
+                  <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
+                    Spot conversion discount is available only when visit date and enrollment date are the same.
+                  </p>
+                )}
+                {spotDiscountEnabled && (
+                  <p className="mt-2 text-xs font-medium leading-5 text-emerald-700">
+                    Same-day walk-in enrollment is eligible for Rs {formatMoney(SPOT_CONVERSION_DISCOUNT)} off net payable fees.
+                  </p>
+                )}
               </div>
               <label className="block">
                 <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">

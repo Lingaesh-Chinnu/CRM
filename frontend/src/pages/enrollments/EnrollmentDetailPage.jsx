@@ -294,7 +294,7 @@ export default function EnrollmentDetailPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Actual Fees</p>
           <p className="mt-3 text-2xl font-black text-slate-950">{row.actual_fees}</p>
@@ -306,6 +306,14 @@ export default function EnrollmentDetailPage() {
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Final Fees</p>
           <p className="mt-3 text-2xl font-black text-slate-950">{row.final_fees}</p>
+        </div>
+        <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Spot Discount</p>
+          <p className="mt-3 text-2xl font-black text-slate-950">{row.spot_conversion_discount_amount || '0.00'}</p>
+        </div>
+        <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Net Payable</p>
+          <p className="mt-3 text-2xl font-black text-slate-950">{row.net_payable_fee || row.final_fees}</p>
         </div>
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Payment Status</p>

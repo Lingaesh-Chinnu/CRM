@@ -326,7 +326,9 @@ export default function RulesSigningPage() {
             ['Batch Timing', details.batch_timing],
             ['Batch Start Date', formatDate(details.batch_start_date)],
             ['Duration', details.duration],
-            ['Total Course Fee', formatCurrency(details.total_course_fee)],
+            ['Final Fees', formatCurrency(details.final_fees || details.total_course_fee)],
+            ['Spot Conversion Discount', formatCurrency(details.spot_conversion_discount || 0)],
+            ['Net Payable Fees', formatCurrency(details.net_payable_fee || details.total_course_fee)],
             ['Payment Mode', details.payment_mode || 'Not set'],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl bg-slate-50 p-4">
