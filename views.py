@@ -47,7 +47,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.http import HttpResponse
 from django.shortcuts import render
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Count, Q, F, Exists, OuterRef
 from django.utils import timezone
@@ -1495,6 +1495,19 @@ class LeadViewSet(viewsets.ModelViewSet):
             branch=branch or serializer.validated_data.get('branch'),
             assigned_to=assigned_to or self.request.user,
         )
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError as exc:
+            logger.exception('Lead create failed because of a database constraint.')
+            return Response(
+                {
+                    'detail': 'Could not create lead because one of the generated or selected values conflicts with an existing record.',
+                    'error': str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=False, methods=['get'], url_path='staff-options')
     def staff_options(self, request):

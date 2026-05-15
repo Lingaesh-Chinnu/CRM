@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from rest_framework.test import APITestCase
+from unittest import mock
 
 from crm.models import Branch, Course, Enrollment, Lead, WalkIn
 
@@ -229,3 +230,85 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('follow_up_by', response.data)
+
+    def test_staff_create_lead_accepts_display_values_and_day_month_year_date(self):
+        selected_user = User.objects.create_user(
+            username='ranganayaki',
+            email='ranganayaki@example.com',
+            password='pass12345',
+            first_name='Ranganayaki',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'Hostel Lead',
+            'phone': '9000000006',
+            'course': self.course.name,
+            'follow_up_by': 'Ranganayaki',
+            'source': 'Google',
+            'qualification': 'Graduate',
+            'degree': 'BBA',
+            'next_follow_up_date': '15-05-2026',
+            'remarks': 'Will find hostel and join',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead = Lead.objects.get(phone='9000000006')
+        self.assertEqual(lead.branch, self.branch)
+        self.assertEqual(lead.course, self.course)
+        self.assertEqual(lead.assigned_to, selected_user)
+        self.assertEqual(lead.source, Lead.Source.GOOGLE)
+        self.assertEqual(lead.qualification, Lead.Qualification.GRADUATE)
+        self.assertEqual(lead.degree, 'BBA')
+        self.assertEqual(str(lead.next_follow_up_date), '2026-05-15')
+        self.assertEqual(lead.remarks, 'Will find hostel and join')
+
+    def test_lead_number_generation_uses_highest_existing_suffix_not_count(self):
+        Lead.objects.create(
+            lead_number='LD-202605-0001',
+            branch=self.branch,
+            course=self.course,
+            name='First Lead',
+            phone='9000000007',
+        )
+        Lead.objects.create(
+            lead_number='LD-202605-0003',
+            branch=self.branch,
+            course=self.course,
+            name='Third Lead',
+            phone='9000000008',
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'Next Lead',
+            'phone': '9000000009',
+            'course': self.course.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Lead.objects.get(phone='9000000009').lead_number, 'LD-202605-0004')
+
+    def test_lead_save_retries_duplicate_generated_lead_number(self):
+        Lead.objects.create(
+            lead_number='LD-202605-0014',
+            branch=self.branch,
+            course=self.course,
+            name='Existing Lead',
+            phone='9000000014',
+        )
+
+        with mock.patch(
+            'crm.models.generate_lead_number',
+            side_effect=['LD-202605-0014', 'LD-202605-0015'],
+        ):
+            lead = Lead.objects.create(
+                branch=self.branch,
+                course=self.course,
+                name='Retried Lead',
+                phone='9000000015',
+            )
+
+        self.assertEqual(lead.lead_number, 'LD-202605-0015')

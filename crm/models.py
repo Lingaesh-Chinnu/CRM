@@ -2,7 +2,7 @@
 # backend/apps/core/models.py
 # Base abstract model — timestamps for all models
 # ============================================================
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 
@@ -277,8 +277,21 @@ from django.utils import timezone
 def generate_lead_number():
     now    = timezone.now()
     prefix = f'LD-{now.strftime("%Y%m")}'
-    last   = Lead.objects.filter(lead_number__startswith=prefix).count() + 1
-    return f'{prefix}-{last:04d}'
+    numbers = []
+    for lead_number in Lead.objects.filter(lead_number__startswith=prefix).values_list('lead_number', flat=True):
+        try:
+            numbers.append(int(str(lead_number).rsplit('-', 1)[-1]))
+        except (TypeError, ValueError):
+            continue
+    next_number = (max(numbers) if numbers else 0) + 1
+    while Lead.objects.filter(lead_number=f'{prefix}-{next_number:04d}').exists():
+        next_number += 1
+    return f'{prefix}-{next_number:04d}'
+
+
+def is_lead_number_integrity_error(exc):
+    message = str(exc)
+    return 'leads_lead_number_key' in message or 'lead_number' in message
 
 
 class Lead(TimeStampedModel):
@@ -377,9 +390,24 @@ class Lead(TimeStampedModel):
         ordering = ['-created_at']
 
     def save(self, *args, **kwargs):
-        if not self.lead_number:
+        if self.lead_number:
+            super().save(*args, **kwargs)
+            return
+
+        last_error = None
+        for _ in range(10):
             self.lead_number = generate_lead_number()
-        super().save(*args, **kwargs)
+            try:
+                with transaction.atomic():
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError as exc:
+                if not is_lead_number_integrity_error(exc):
+                    raise
+                last_error = exc
+                self.lead_number = ''
+
+        raise last_error
 
     def __str__(self):
         return f'{self.lead_number} — {self.name}'

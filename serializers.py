@@ -286,6 +286,57 @@ QUALIFICATION_LABELS = {
 }
 
 
+def normalize_choice_value(value, choices):
+    if value in (None, ''):
+        return value
+    text = str(value).strip()
+    normalized_text = text.casefold().replace('-', ' ').replace('_', ' ')
+    for choice_value, label in choices:
+        candidates = {
+            str(choice_value).casefold(),
+            str(choice_value).casefold().replace('-', ' ').replace('_', ' '),
+            str(label).casefold(),
+            str(label).casefold().replace('-', ' ').replace('_', ' '),
+        }
+        if normalized_text in candidates:
+            return choice_value
+    return value
+
+
+def normalize_related_id(value, model, field_name):
+    if value in (None, ''):
+        return value
+    if isinstance(value, model):
+        return value.pk
+    text = str(value).strip()
+    if text.isdigit():
+        return value
+    lookup = {f'{field_name}__iexact': text}
+    match = model.objects.filter(**lookup).order_by('id').first()
+    return match.pk if match else value
+
+
+def normalize_user_id(value):
+    if value in (None, ''):
+        return value
+    if isinstance(value, User):
+        return value.pk
+    text = str(value).strip()
+    if text.isdigit():
+        return value
+    matches = []
+    for user in User.objects.filter(is_active=True).select_related('branch').order_by('id'):
+        names = {
+            user.username,
+            user.full_name,
+            user.first_name,
+            f'{user.first_name} {user.last_name}'.strip(),
+        }
+        if any(name and name.casefold() == text.casefold() for name in names):
+            matches.append(user)
+    return matches[0].pk if len(matches) == 1 else value
+
+
 def qualification_display_value(value):
     value = value or ''
     return QUALIFICATION_LABELS.get(value, value)
@@ -452,6 +503,22 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             for field in ('follow_up_by', 'assigned_to', 'branch', 'course', 'dob', 'walkin_date', 'next_follow_up_date'):
                 if data.get(field) == '':
                     data[field] = None
+            if data.get('source') not in (None, ''):
+                data['source'] = normalize_choice_value(data.get('source'), Lead.Source.choices)
+            if data.get('status') not in (None, ''):
+                data['status'] = normalize_choice_value(data.get('status'), Lead.Status.choices)
+            if data.get('lead_status') not in (None, ''):
+                data['lead_status'] = normalize_choice_value(data.get('lead_status'), Lead.Status.choices)
+            if data.get('qualification') not in (None, ''):
+                data['qualification'] = normalize_choice_value(data.get('qualification'), Lead.Qualification.choices)
+            if data.get('course') not in (None, ''):
+                data['course'] = normalize_related_id(data.get('course'), Course, 'name')
+            if data.get('branch') not in (None, ''):
+                data['branch'] = normalize_related_id(data.get('branch'), Branch, 'name')
+            if data.get('follow_up_by') not in (None, ''):
+                data['follow_up_by'] = normalize_user_id(data.get('follow_up_by'))
+            if data.get('assigned_to') not in (None, ''):
+                data['assigned_to'] = normalize_user_id(data.get('assigned_to'))
             if data.get('status') in (None, '') and data.get('lead_status') not in (None, ''):
                 data['status'] = data.get('lead_status')
             if data.get('status') in (None, ''):
