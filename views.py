@@ -108,6 +108,41 @@ def missing_model_columns(model, field_names):
         return list(field_names)
 
 
+def valid_walkin_enrollment(walkin):
+    try:
+        enrollment = getattr(walkin, 'enrollment', None)
+    except Enrollment.DoesNotExist:
+        enrollment = None
+    if enrollment:
+        return enrollment
+    if walkin.converted_to_type == 'enrollment' and walkin.converted_record_id:
+        return Enrollment.objects.filter(pk=walkin.converted_record_id, walkin=walkin).first()
+    return None
+
+
+def clear_stale_walkin_conversion(walkin):
+    if not (
+        walkin.converted_to_type
+        or walkin.converted_record_id
+        or walkin.converted_at
+        or walkin.status == WalkIn.Status.CONVERTED
+    ):
+        return False
+    if valid_walkin_enrollment(walkin):
+        return False
+    walkin.converted_to_type = ''
+    walkin.converted_record_id = None
+    walkin.converted_at = None
+    walkin.converted_by = None
+    if walkin.status == WalkIn.Status.CONVERTED:
+        walkin.status = WalkIn.Status.NEW
+    walkin.save(update_fields=[
+        'status', 'converted_to_type', 'converted_record_id',
+        'converted_at', 'converted_by', 'updated_at',
+    ])
+    return True
+
+
 def app_url(path):
     """Build a URL path inside the configured application mount."""
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
@@ -2472,9 +2507,9 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action == 'list':
-            qs = WalkIn.objects.select_related('course', 'branch')
+            qs = WalkIn.objects.select_related('course', 'branch', 'enrollment')
         else:
-            qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead')
+            qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead','enrollment')
         missing_columns = missing_model_columns(WalkIn, [
             'qualification', 'degree', 'profession', 'year_of_passing',
             'college_company', 'preferred_timing', 'interested_global_certification',
@@ -2525,6 +2560,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         walkin = self.get_object()
+        if clear_stale_walkin_conversion(walkin):
+            walkin.refresh_from_db()
         mark_public_walkin_notifications_read(walkin.id)
         serializer = self.get_serializer(walkin)
         return Response(serializer.data)
@@ -2557,6 +2594,11 @@ class WalkInViewSet(viewsets.ModelViewSet):
         serializer.save(
             created_by=self.request.user,
             branch=branch or serializer.validated_data.get('branch'),
+            status=WalkIn.Status.NEW,
+            converted_to_type='',
+            converted_record_id=None,
+            converted_at=None,
+            converted_by=None,
         )
 
     @action(detail=False, methods=['get'], url_path='staff-options')
@@ -2698,8 +2740,10 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin = self.get_object()
         from serializers import EnrollmentDetailSerializer
         data = request.data.copy()
-        if walkin.converted_to_type or hasattr(walkin, 'enrollment'):
+        if valid_walkin_enrollment(walkin):
             return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
+        clear_stale_walkin_conversion(walkin)
+        walkin.refresh_from_db()
 
         data.setdefault('name',        walkin.name)
         data.setdefault('phone',       walkin.phone)
@@ -2931,6 +2975,10 @@ class PublicWalkInFormView(APIView):
             'status': WalkIn.Status.NEW,
             'branch': branch,
             'course': course,
+            'converted_to_type': '',
+            'converted_record_id': None,
+            'converted_at': None,
+            'converted_by': None,
         }
         if existing_walkin:
             walkin = serializer.update(existing_walkin, {**serializer.validated_data, **save_kwargs})

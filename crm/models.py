@@ -544,9 +544,6 @@ class WalkIn(TimeStampedModel):
     def save(self, *args, **kwargs):
         if not self.candidate_number:
             self.candidate_number = generate_walkin_number()
-        # Auto-convert if remarks contain "joined" (case-insensitive)
-        if self.remarks and 'joined' in self.remarks.lower():
-            self.status = self.Status.CONVERTED
         super().save(*args, **kwargs)
 
     def __str__(self):

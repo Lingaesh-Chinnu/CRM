@@ -63,6 +63,28 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.college_company, 'IIE College')
         self.assertTrue(walkin.interested_global_certification)
 
+    def test_manual_walkin_create_clears_conversion_fields(self):
+        self.client.force_authenticate(self.staff)
+        payload = {
+            **self.payload,
+            'phone': '9000000111',
+            'remarks': 'Candidate joined demo discussion',
+            'status': WalkIn.Status.CONVERTED,
+            'converted_to_type': 'enrollment',
+            'converted_record_id': 99999,
+            'converted_at': '2026-05-11T10:00:00Z',
+        }
+
+        response = self.client.post('/api/walkins/', payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        walkin = WalkIn.objects.get(phone='9000000111')
+        self.assertEqual(walkin.status, WalkIn.Status.NEW)
+        self.assertEqual(walkin.converted_to_type, '')
+        self.assertIsNone(walkin.converted_record_id)
+        self.assertIsNone(walkin.converted_at)
+        self.assertFalse(response.data['is_converted_to_enrollment'])
+
     def test_public_walkin_repeat_phone_updates_existing_record(self):
         first = self.client.post('/api/public/walkin/', self.payload, format='json')
         payload = {**self.payload, 'name': 'Candidate Updated', 'phone': '9876543210'}
@@ -126,6 +148,52 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.original_walkin_course, self.course)
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
         self.assertEqual(enrollment.actual_fees, self.final_course.actual_fees)
+
+    def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Stale Converted Candidate',
+            dob='2000-01-01',
+            phone='9000000112',
+            email='stale@example.com',
+            location='Coimbatore',
+            pincode='641001',
+            qualification=WalkIn.Qualification.GRADUATE,
+            year_of_passing=2025,
+            college_company='IIE College',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.DIRECT,
+            visit_date='2026-05-11',
+            status=WalkIn.Status.CONVERTED,
+            converted_to_type='enrollment',
+            converted_record_id=99999,
+        )
+        self.client.force_authenticate(self.staff)
+
+        detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['status'], WalkIn.Status.NEW)
+        self.assertEqual(detail_response.data['converted_to_type'], '')
+        self.assertIsNone(detail_response.data['converted_record_id'])
+        self.assertFalse(detail_response.data['is_converted_to_enrollment'])
+
+        convert_response = self.client.post(f'/api/walkins/{walkin.id}/convert-to-enrollment/', {
+            'branch': self.branch.id,
+            'name': walkin.name,
+            'phone': walkin.phone,
+            'course': self.course.id,
+            'preferred_timing': walkin.preferred_timing,
+            'enrollment_date': '2026-05-11',
+            'start_date': '2026-05-12',
+        }, format='json')
+
+        self.assertEqual(convert_response.status_code, 201)
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.status, WalkIn.Status.CONVERTED)
+        self.assertEqual(walkin.converted_to_type, 'enrollment')
+        self.assertEqual(walkin.converted_record_id, Enrollment.objects.get(walkin=walkin).id)
 
     def test_lead_to_enrollment_can_change_course_and_preserve_original_course(self):
         lead = Lead.objects.create(

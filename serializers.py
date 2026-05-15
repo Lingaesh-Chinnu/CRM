@@ -680,6 +680,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
     preferred_timing_display = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     walk_in_by_display = serializers.SerializerMethodField()
+    enrollment_id = serializers.SerializerMethodField()
+    is_converted_to_enrollment = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -688,7 +690,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
-                  'converted_record_id','converted_at']
+                  'converted_record_id','converted_at','enrollment_id',
+                  'is_converted_to_enrollment']
 
     def to_representation(self, instance):
         defaults = {
@@ -739,6 +742,22 @@ class WalkInListSerializer(serializers.ModelSerializer):
         except Exception:
             return ''
 
+    def get_enrollment_id(self, obj):
+        try:
+            enrollment = getattr(obj, 'enrollment', None)
+        except Enrollment.DoesNotExist:
+            enrollment = None
+        if enrollment:
+            return enrollment.id
+        if obj.converted_to_type == 'enrollment' and obj.converted_record_id:
+            exists = Enrollment.objects.filter(pk=obj.converted_record_id, walkin_id=obj.id).exists()
+            if exists:
+                return obj.converted_record_id
+        return None
+
+    def get_is_converted_to_enrollment(self, obj):
+        return self.get_enrollment_id(obj) is not None
+
 
 class WalkInDetailSerializer(serializers.ModelSerializer):
     course_name   = serializers.CharField(source='course.name',          read_only=True)
@@ -756,11 +775,16 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     college_company_name = serializers.CharField(source='college_company', read_only=True)
     follow_ups = serializers.SerializerMethodField()
     branch_change_history = serializers.SerializerMethodField()
+    enrollment_id = serializers.SerializerMethodField()
+    is_converted_to_enrollment = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
         fields = '__all__'
-        read_only_fields = ['candidate_number', 'created_by', 'walk_in_by']
+        read_only_fields = [
+            'candidate_number', 'created_by', 'walk_in_by',
+            'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by',
+        ]
 
     def to_representation(self, instance):
         defaults = {
@@ -817,6 +841,22 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             ), many=True).data
         except (OperationalError, ProgrammingError):
             return []
+
+    def get_enrollment_id(self, obj):
+        try:
+            enrollment = getattr(obj, 'enrollment', None)
+        except Enrollment.DoesNotExist:
+            enrollment = None
+        if enrollment:
+            return enrollment.id
+        if obj.converted_to_type == 'enrollment' and obj.converted_record_id:
+            exists = Enrollment.objects.filter(pk=obj.converted_record_id, walkin_id=obj.id).exists()
+            if exists:
+                return obj.converted_record_id
+        return None
+
+    def get_is_converted_to_enrollment(self, obj):
+        return self.get_enrollment_id(obj) is not None
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

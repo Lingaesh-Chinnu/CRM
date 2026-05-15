@@ -205,6 +205,7 @@ export default function WalkInCreatePage() {
               <option value="direct">Direct</option>
               <option value="instagram">Instagram</option>
               <option value="facebook">Facebook</option>
+              <option value="whatsapp">WhatsApp</option>
               <option value="friends_reference">Friends Reference</option>
             </select>
           </div>

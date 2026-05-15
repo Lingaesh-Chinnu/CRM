@@ -277,6 +277,8 @@ export default function WalkInDetailPage() {
         converted_to_type: 'enrollment',
         converted_record_id: data.id,
         converted_at: new Date().toISOString(),
+        enrollment_id: data.id,
+        is_converted_to_enrollment: true,
       }))
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to convert walk-in to enrollment.')
@@ -498,8 +500,9 @@ export default function WalkInDetailPage() {
 
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
-  const convertedType = walkin.converted_to_type || (walkin.status === 'converted' ? 'enrollment' : '')
-  const convertedLink = convertedType === 'enrollment' && walkin.converted_record_id ? `/enrollments/${walkin.converted_record_id}` : ''
+  const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id)
+  const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
+  const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
 
   return (
     <div className="space-y-6">
@@ -685,7 +688,7 @@ export default function WalkInDetailPage() {
 
         <form onSubmit={convert} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <h2 className="text-xl font-black tracking-tight text-slate-950">
-            {convertedType ? 'Conversion status' : 'Convert to enrollment'}
+            {hasValidEnrollmentConversion ? 'Conversion status' : 'Convert to enrollment'}
           </h2>
           {pendingCourseChangePayload && (
             <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
@@ -710,7 +713,7 @@ export default function WalkInDetailPage() {
               </div>
             </div>
           )}
-          {convertedType ? (
+          {hasValidEnrollmentConversion ? (
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
               <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
                 Converted to Enrollment
@@ -726,6 +729,12 @@ export default function WalkInDetailPage() {
             </div>
           ) : (
           <>
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <span className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-slate-700">
+              Ready for Enrollment
+            </span>
+            <p className="mt-3 text-sm font-semibold text-slate-700">Not Converted</p>
+          </div>
           <div className="mt-5 space-y-4">
             <div>
               {isSuperAdmin ? (
