@@ -328,7 +328,7 @@ class Lead(TimeStampedModel):
         WEBSITE           = 'website',           'Website'
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
-        WHATSAPP          = 'whatsapp',          'Whatsapp'
+        WHATSAPP          = 'whatsapp',          'WhatsApp'
         JUSTDIAL          = 'justdial',          'JustDial'
         TEAM_REFERENCE    = 'team_reference',    'Team Reference'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'
@@ -473,6 +473,7 @@ class WalkIn(TimeStampedModel):
         DIRECT            = 'direct',            'Direct'
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
+        WHATSAPP          = 'whatsapp',          'WhatsApp'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'
 
     class WalkInBy(models.TextChoices):

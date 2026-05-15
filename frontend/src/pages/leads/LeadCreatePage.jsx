@@ -200,7 +200,7 @@ export default function LeadCreatePage() {
               <option value="google">Google</option>
               <option value="instagram">Instagram</option>
               <option value="facebook">Facebook</option>
-              <option value="whatsapp">Whatsapp</option>
+              <option value="whatsapp">WhatsApp</option>
               <option value="justdial">JustDial</option>
               <option value="team_reference">Team Reference</option>
               <option value="friends_reference">Friends Reference</option>

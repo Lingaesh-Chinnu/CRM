@@ -56,9 +56,23 @@ const qualificationOptions = [
   { value: 'housewife', label: 'Housewife' },
 ]
 
+const sourceOptions = [
+  { value: 'google', label: 'Google' },
+  { value: 'justdial', label: 'JustDial' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'friends_reference', label: 'Friends Reference' },
+]
+
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
   return [{ value, label: value }, ...qualificationOptions]
+}
+
+function sourceLabel(value) {
+  return sourceOptions.find((option) => option.value === value)?.label || value
 }
 
 function uniqueStaffUsers(rows) {
@@ -165,6 +179,7 @@ export default function WalkInDetailPage() {
     pincode: '',
     course: '',
     preferred_timing: '',
+    source: '',
     qualification: '',
     degree: '',
     year_of_passing: '',
@@ -217,6 +232,7 @@ export default function WalkInDetailPage() {
         pincode: data.pincode || '',
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
+        source: data.source || '',
         qualification: data.qualification || '',
         degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
@@ -360,6 +376,7 @@ export default function WalkInDetailPage() {
     { field: 'visit_date', label: 'Visit Date', value: walkin.visit_date },
     { field: 'dob', label: 'Date of Birth', value: walkin.dob },
     { field: 'preferred_timing', label: 'Preferred Timing', value: walkin.preferred_timing, displayValue: walkin.preferred_timing_display, displayNew: (value) => value === 'weekday_morning' ? 'Weekdays (Morning)' : value === 'weekday_evening' ? 'Weekdays (Evening)' : value === 'weekends' ? 'Weekends' : value },
+    { field: 'source', label: 'Source', value: walkin.source, displayValue: walkin.source_display, displayNew: sourceLabel },
     { field: 'pincode', label: 'Pincode', value: walkin.pincode },
     { field: 'location', label: 'Address', value: walkin.location },
     { field: 'email', label: 'Email', value: walkin.email },
@@ -390,6 +407,7 @@ export default function WalkInDetailPage() {
       pincode: walkin.pincode || '',
       course: walkin.course || '',
       preferred_timing: walkin.preferred_timing || '',
+      source: walkin.source || '',
       qualification: walkin.qualification || '',
       degree: walkin.degree || '',
       year_of_passing: walkin.year_of_passing || '',
@@ -446,6 +464,7 @@ export default function WalkInDetailPage() {
         pincode: data.pincode || '',
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
+        source: data.source || '',
         qualification: data.qualification || '',
         degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
@@ -624,7 +643,13 @@ export default function WalkInDetailPage() {
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">Demo Class Required</p><p className="mt-2 font-semibold text-slate-900">{walkin.demo_class ? 'Yes' : 'No'}</p></div>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">Interested in Global Certification</p><p className="mt-2 font-semibold text-slate-900">{walkin.interested_global_certification ? 'Yes' : 'No'}</p></div>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">How they know IIE</p><p className="mt-2 font-semibold text-slate-900">{prettyValue(walkin.source_display)}</p></div>
+            <DetailField label="How they know IIE" value={prettyValue(walkin.source_display)} editing={editingDetails}>
+              <select value={form.source} onChange={(event) => updateDetail('source', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Source</option>
+                {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {detailErrorFor('source')}
+            </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
               <select

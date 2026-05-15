@@ -31,6 +31,16 @@ const qualificationOptions = [
   { value: 'housewife', label: 'Housewife' },
 ]
 
+const sourceOptions = [
+  { value: 'google', label: 'Google' },
+  { value: 'justdial', label: 'JustDial' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'friends_reference', label: 'Friends Reference' },
+]
+
 function FieldLabel({ children }) {
   return <label className="mb-2 block text-sm font-semibold text-slate-700">{children}</label>
 }
@@ -200,13 +210,7 @@ export default function WalkInCreatePage() {
             <FieldLabel>Source</FieldLabel>
             <select value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select source</option>
-              <option value="google">Google</option>
-              <option value="justdial">JustDial</option>
-              <option value="direct">Direct</option>
-              <option value="instagram">Instagram</option>
-              <option value="facebook">Facebook</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="friends_reference">Friends Reference</option>
+              {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
           <div className="md:col-span-2">

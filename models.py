@@ -173,7 +173,7 @@ class Lead(TimeStampedModel):
         GOOGLE            = 'google',            'Google'
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
-        WHATSAPP          = 'whatsapp',          'Whatsapp'
+        WHATSAPP          = 'whatsapp',          'WhatsApp'
         JUSTDIAL          = 'justdial',          'JustDial'
         TEAM_REFERENCE    = 'team_reference',    'Team Reference'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'

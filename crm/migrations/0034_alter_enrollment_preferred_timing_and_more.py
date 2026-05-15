@@ -46,7 +46,7 @@ class Migration(migrations.Migration):
                     ("google", "Google"),
                     ("instagram", "Instagram"),
                     ("facebook", "Facebook"),
-                    ("whatsapp", "Whatsapp"),
+                    ("whatsapp", "WhatsApp"),
                     ("justdial", "JustDial"),
                     ("team_reference", "Team Reference"),
                     ("friends_reference", "Friends Reference"),

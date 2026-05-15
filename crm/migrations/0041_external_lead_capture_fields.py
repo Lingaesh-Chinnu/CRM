@@ -26,6 +26,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='lead',
             name='source',
-            field=models.CharField(choices=[('google', 'Google'), ('website', 'Website'), ('instagram', 'Instagram'), ('facebook', 'Facebook'), ('whatsapp', 'Whatsapp'), ('justdial', 'JustDial'), ('team_reference', 'Team Reference'), ('friends_reference', 'Friends Reference'), ('others', 'Others')], default='google', max_length=20),
+            field=models.CharField(choices=[('google', 'Google'), ('website', 'Website'), ('instagram', 'Instagram'), ('facebook', 'Facebook'), ('whatsapp', 'WhatsApp'), ('justdial', 'JustDial'), ('team_reference', 'Team Reference'), ('friends_reference', 'Friends Reference'), ('others', 'Others')], default='google', max_length=20),
         ),
     ]

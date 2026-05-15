@@ -85,6 +85,27 @@ class PublicWalkInFormTests(APITestCase):
         self.assertIsNone(walkin.converted_at)
         self.assertFalse(response.data['is_converted_to_enrollment'])
 
+    def test_manual_walkin_create_and_update_accepts_whatsapp_source(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post('/api/walkins/', {
+            **self.payload,
+            'phone': '9000000116',
+            'source': 'whatsapp',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        walkin = WalkIn.objects.get(phone='9000000116')
+        self.assertEqual(walkin.source, WalkIn.Source.WHATSAPP)
+        self.assertEqual(response.data['source_display'], 'WhatsApp')
+
+        patch_response = self.client.patch(f'/api/walkins/{walkin.id}/', {
+            'source': 'whatsapp',
+        }, format='json')
+
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.data['source'], WalkIn.Source.WHATSAPP)
+        self.assertEqual(patch_response.data['source_display'], 'WhatsApp')
+
     def test_public_walkin_repeat_phone_updates_existing_record(self):
         first = self.client.post('/api/public/walkin/', self.payload, format='json')
         payload = {**self.payload, 'name': 'Candidate Updated', 'phone': '9876543210'}
@@ -278,6 +299,21 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(lead.branch, self.branch)
         self.assertEqual(lead.assigned_to, selected_user)
         self.assertEqual(str(lead.next_follow_up_date), '2026-05-14')
+
+    def test_staff_create_lead_accepts_whatsapp_source(self):
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/leads/', {
+            'name': 'WhatsApp Lead',
+            'phone': '9000000016',
+            'course': self.course.id,
+            'source': 'whatsapp',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead = Lead.objects.get(phone='9000000016')
+        self.assertEqual(lead.source, Lead.Source.WHATSAPP)
+        self.assertEqual(response.data['source_display'], 'WhatsApp')
 
     def test_staff_create_lead_returns_validation_json_for_other_branch_follow_up_user(self):
         selected_user = User.objects.create_user(
