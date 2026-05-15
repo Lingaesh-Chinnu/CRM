@@ -22,6 +22,7 @@ function FieldLabel({ children }) {
 
 export default function PublicLeadForm() {
   const isEmbedded = window.self !== window.top
+
   const queryDefaults = useMemo(() => {
     const params = new URLSearchParams(window.location.search)
     return {
@@ -29,6 +30,7 @@ export default function PublicLeadForm() {
       branchName: (params.get('branch') || '').trim().toLowerCase(),
     }
   }, [])
+
   const [form, setForm] = useState(initialForm)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
@@ -38,36 +40,50 @@ export default function PublicLeadForm() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
+    if (!isEmbedded) return undefined
+
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+
     return () => {
       document.body.style.overflow = previousOverflow
     }
-  }, [])
+  }, [isEmbedded])
 
   useEffect(() => {
-    api.get('/public/lead-form/').then(({ data }) => {
-      const branchOptions = data.branches || []
-      const courseOptions = data.courses || []
-      setBranches(branchOptions)
-      setCourses(courseOptions)
-      setWillingToJoinOptions(data.willing_to_join_options || [])
-      setQualificationOptions(data.qualification_options || [])
-      setForm((current) => {
-        const next = { ...current }
-        if (!next.branch && queryDefaults.branchName) {
-          const matchedBranch = branchOptions.find((branch) => branch.name.trim().toLowerCase() === queryDefaults.branchName)
-          if (matchedBranch) next.branch = matchedBranch.id
-        }
-        if (!next.course_interested && queryDefaults.courseName) {
-          const matchedCourse = courseOptions.find((course) => course.name.trim().toLowerCase() === queryDefaults.courseName)
-          if (matchedCourse) next.course_interested = matchedCourse.id
-        }
-        return next
+    api.get('/public/lead-form/')
+      .then(({ data }) => {
+        const branchOptions = data.branches || []
+        const courseOptions = data.courses || []
+
+        setBranches(branchOptions)
+        setCourses(courseOptions)
+        setWillingToJoinOptions(data.willing_to_join_options || [])
+        setQualificationOptions(data.qualification_options || [])
+
+        setForm((current) => {
+          const next = { ...current }
+
+          if (!next.branch && queryDefaults.branchName) {
+            const matchedBranch = branchOptions.find(
+              (branch) => branch.name.trim().toLowerCase() === queryDefaults.branchName
+            )
+            if (matchedBranch) next.branch = matchedBranch.id
+          }
+
+          if (!next.course_interested && queryDefaults.courseName) {
+            const matchedCourse = courseOptions.find(
+              (course) => course.name.trim().toLowerCase() === queryDefaults.courseName
+            )
+            if (matchedCourse) next.course_interested = matchedCourse.id
+          }
+
+          return next
+        })
       })
-    }).catch((error) => {
-      setMessage(apiErrorMessage(error, 'Unable to load enquiry form options.'))
-    })
+      .catch((error) => {
+        setMessage(apiErrorMessage(error, 'Unable to load enquiry form options.'))
+      })
   }, [queryDefaults])
 
   const updateField = (field, value) => {
@@ -79,6 +95,7 @@ export default function PublicLeadForm() {
       window.parent.postMessage({ type: 'iie-lead-form-close' }, '*')
       return
     }
+
     window.location.href = REDIRECT_URL
   }
 
@@ -90,6 +107,7 @@ export default function PublicLeadForm() {
       }, 2500)
       return
     }
+
     window.setTimeout(() => {
       window.location.href = REDIRECT_URL
     }, 2500)
@@ -98,16 +116,21 @@ export default function PublicLeadForm() {
   const submit = async (event) => {
     event.preventDefault()
     if (saving) return
+
     setSaving(true)
     setMessage('')
+
     try {
       await api.post('/public/lead-form/', form)
+
       setMessage('Thanks for your enquiry, our team will reach you soon.')
+
       setForm((current) => ({
         ...initialForm,
         branch: current.branch,
         course_interested: current.course_interested,
       }))
+
       handleSuccess()
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to submit your enquiry.'))
@@ -117,9 +140,9 @@ export default function PublicLeadForm() {
   }
 
   return (
-    <div className="min-h-screen bg-[rgba(15,23,42,0.58)] px-3 py-4 sm:px-6 sm:py-8">
-      <div className="flex min-h-[calc(100vh-2rem)] items-center justify-center sm:min-h-[calc(100vh-4rem)]">
-        <section className="animate-[modalIn_220ms_ease-out] relative w-full max-w-2xl rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_80px_-35px_rgba(15,23,42,0.45)] sm:p-8">
+    <div className="min-h-screen overflow-y-auto bg-[rgba(15,23,42,0.58)] px-3 py-4 sm:px-6 sm:py-8">
+      <div className="flex min-h-[calc(100vh-2rem)] items-start justify-center sm:min-h-[calc(100vh-4rem)] sm:items-center">
+        <section className="animate-[modalIn_220ms_ease-out] relative w-full max-w-2xl rounded-[22px] border border-slate-200 bg-white p-4 shadow-[0_30px_80px_-35px_rgba(15,23,42,0.45)] sm:rounded-[28px] sm:p-8">
           <style>{`
             @keyframes modalIn {
               from { opacity: 0; transform: translateY(14px) scale(0.985); }
@@ -130,27 +153,42 @@ export default function PublicLeadForm() {
           <button
             type="button"
             onClick={requestClose}
-            className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-800"
+            className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-800 sm:right-4 sm:top-4 sm:h-10 sm:w-10"
             aria-label="Close enquiry form"
           >
-            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
             </svg>
           </button>
 
-          <div className="pr-12">
-            <div className="flex items-center gap-4">
-              <div className="flex h-20 w-20 items-center justify-center rounded-[22px] border border-sky-200/30 bg-[#07142b] p-3 shadow-[0_16px_36px_-20px_rgba(14,165,233,0.55),0_10px_24px_-18px_rgba(7,20,43,0.9)]">
+          <div className="pr-10 sm:pr-12">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] border border-sky-200/30 bg-[#07142b] p-2 shadow-[0_16px_36px_-20px_rgba(14,165,233,0.55),0_10px_24px_-18px_rgba(7,20,43,0.9)] sm:h-20 sm:w-20 sm:rounded-[22px] sm:p-3">
                 <img src={brandLogo} alt="IIE Logo" className="h-full w-full object-contain" />
               </div>
+
               <div>
-                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Get a Call from our Team</h2>
+                <p className="text-xs font-bold uppercase tracking-[0.28em] text-slate-500">
+                  Public Lead Form
+                </p>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+                  Get a Call from our Team
+                </h2>
               </div>
             </div>
           </div>
 
-          <form onSubmit={submit} className="mt-8 grid gap-5 md:grid-cols-2">
+          <form onSubmit={submit} className="mt-6 grid gap-4 sm:mt-8 md:grid-cols-2 md:gap-5">
             <div className="md:col-span-2">
               <FieldLabel>Full Name</FieldLabel>
               <input
@@ -182,7 +220,9 @@ export default function PublicLeadForm() {
               >
                 <option value="">Select branch</option>
                 {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -196,7 +236,9 @@ export default function PublicLeadForm() {
               >
                 <option value="">Select course</option>
                 {courses.map((course) => (
-                  <option key={course.id} value={course.id}>{course.name}</option>
+                  <option key={course.id} value={course.id}>
+                    {course.name}
+                  </option>
                 ))}
               </select>
             </div>
@@ -211,7 +253,9 @@ export default function PublicLeadForm() {
               >
                 <option value="">Select option</option>
                 {willingToJoinOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -226,7 +270,9 @@ export default function PublicLeadForm() {
               >
                 <option value="">Select qualification</option>
                 {qualificationOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </select>
             </div>
@@ -251,14 +297,14 @@ export default function PublicLeadForm() {
             </div>
 
             {message && (
-              <div className="md:col-span-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-700">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-medium text-slate-700 md:col-span-2">
                 {message}
               </div>
             )}
 
             <button
               disabled={saving}
-              className="md:col-span-2 rounded-2xl bg-slate-950 px-4 py-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-2xl bg-slate-950 px-4 py-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 md:col-span-2"
             >
               {saving ? 'Submitting...' : 'Submit Enquiry'}
             </button>
