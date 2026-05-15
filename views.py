@@ -37,6 +37,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
@@ -1321,6 +1322,27 @@ class DiscountViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError as exc:
+            logger.exception('Discount create failed because of a database constraint.')
+            return Response(
+                {
+                    'detail': 'Could not create discount because the submitted values conflict with the database schema or an existing record.',
+                    'error': str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DRFValidationError:
+            raise
+        except Exception as exc:
+            logger.exception('Discount create failed unexpectedly.')
+            return Response(
+                {'detail': 'Could not create discount. Please check the submitted discount details and try again.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 # ============================================================

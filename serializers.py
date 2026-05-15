@@ -2,12 +2,15 @@
 # backend/apps/accounts/serializers.py
 # ============================================================
 import re
+from calendar import monthrange
+from datetime import date, timedelta
 
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.core.files.storage import default_storage
 from django.db.utils import OperationalError, ProgrammingError
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog
@@ -885,17 +888,60 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
 from crm.models import Discount
 
 
+DISCOUNT_VALIDITY_OPTIONS = {
+    'forever': None,
+    '7_days': {'days': 7},
+    '15_days': {'days': 15},
+    '1_month': {'months': 1},
+    '3_months': {'months': 3},
+    'custom': 'custom',
+}
+
+
+def add_months(value, months):
+    month = value.month - 1 + months
+    year = value.year + month // 12
+    month = month % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return date(year, month, day)
+
+
+class FlexibleDateField(serializers.DateField):
+    def to_internal_value(self, value):
+        if value in ('', None):
+            return None
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            parsed = parse_date(value)
+            if parsed:
+                return parsed
+            for date_format in ('%d-%m-%Y', '%d/%m/%Y'):
+                try:
+                    return timezone.datetime.strptime(value, date_format).date()
+                except ValueError:
+                    continue
+        self.fail('invalid', format='YYYY-MM-DD')
+
+
 class DiscountSerializer(serializers.ModelSerializer):
     course_names = serializers.SerializerMethodField()
     branch_names = serializers.SerializerMethodField()
     status_label = serializers.CharField(read_only=True)
+    valid_from = FlexibleDateField(required=True)
+    valid_to = FlexibleDateField(required=False, allow_null=True)
+    validity = serializers.ChoiceField(
+        choices=[(key, key) for key in DISCOUNT_VALIDITY_OPTIONS],
+        required=False,
+        write_only=True,
+    )
 
     class Meta:
         model = Discount
         fields = [
             'id', 'name', 'discount_type', 'value', 'apply_to_all_courses',
             'courses', 'course_names', 'apply_to_all_branches', 'branches', 'branch_names',
-            'branch', 'valid_from', 'valid_to', 'is_active',
+            'branch', 'valid_from', 'valid_to', 'validity', 'is_active',
             'status_label', 'created_by', 'created_at', 'updated_at',
         ]
         read_only_fields = ['created_by']
@@ -913,15 +959,42 @@ class DiscountSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         attrs['discount_type'] = Discount.DiscountType.FIXED
+        attrs['name'] = (attrs.get('name', getattr(self.instance, 'name', '')) or '').strip()
+        validity = attrs.pop('validity', None)
         valid_from = attrs.get('valid_from', getattr(self.instance, 'valid_from', None))
         valid_to = attrs.get('valid_to', getattr(self.instance, 'valid_to', None))
         apply_to_all = attrs.get('apply_to_all_courses', getattr(self.instance, 'apply_to_all_courses', False))
         courses = attrs.get('courses')
         value = attrs.get('value', getattr(self.instance, 'value', None))
+        if not attrs['name']:
+            raise serializers.ValidationError({'name': 'Discount name is required.'})
+        if value is None:
+            raise serializers.ValidationError({'value': 'Discount amount is required.'})
         if value is not None and value < 0:
             raise serializers.ValidationError({'value': 'Discount amount cannot be negative.'})
+        if valid_from is None:
+            raise serializers.ValidationError({'valid_from': 'Discount start date is required.'})
+        if validity is None and self.instance is None:
+            validity = 'custom' if valid_to else None
+        if self.instance is None and not validity:
+            raise serializers.ValidationError({'validity': 'Discount validity is required.'})
+        if validity:
+            validity_rule = DISCOUNT_VALIDITY_OPTIONS[validity]
+            if validity == 'forever':
+                valid_to = None
+                attrs['valid_to'] = None
+                attrs['is_active'] = True
+            elif validity == 'custom':
+                if not valid_to:
+                    raise serializers.ValidationError({'valid_to': 'Discount expiry date is required for custom date validity.'})
+            elif validity_rule:
+                if 'days' in validity_rule:
+                    valid_to = valid_from + timedelta(days=validity_rule['days'])
+                else:
+                    valid_to = add_months(valid_from, validity_rule['months'])
+                attrs['valid_to'] = valid_to
         if valid_from and valid_to and valid_from > valid_to:
-            raise serializers.ValidationError({'valid_to': 'Valid to date must be after valid from date.'})
+            raise serializers.ValidationError({'valid_to': 'Discount expiry date cannot be earlier than the start date.'})
         if not apply_to_all and self.instance is None and not courses:
             raise serializers.ValidationError({'courses': 'Select at least one course or apply to all courses.'})
         apply_to_all_branches = attrs.get(

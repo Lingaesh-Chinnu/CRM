@@ -70,6 +70,20 @@ function chipNames(names, allLabel) {
   return [...rows.slice(0, 3), `+${rows.length - 3} more`]
 }
 
+function formatApiError(error, fallback) {
+  const data = error.response?.data
+  if (!data) return fallback
+  if (typeof data === 'string') {
+    return data.trim().startsWith('<') ? fallback : data
+  }
+  if (data.detail) return data.detail
+  const firstKey = Object.keys(data)[0]
+  const firstValue = firstKey ? data[firstKey] : null
+  if (Array.isArray(firstValue)) return `${firstKey}: ${firstValue.join(' ')}`
+  if (firstValue) return `${firstKey}: ${firstValue}`
+  return fallback
+}
+
 export default function DiscountsPage() {
   const [discounts, setDiscounts] = useState([])
   const [courses, setCourses] = useState([])
@@ -161,6 +175,7 @@ export default function DiscountsPage() {
     branches: discount.apply_to_all_branches ? [] : discount.branches,
     valid_from: discount.valid_from,
     valid_to: discount.valid_to || null,
+    validity: discount.validity || (discount.valid_to ? 'custom' : 'forever'),
     is_active: discount.validity === 'forever' ? true : !!discount.is_active,
   })
 
@@ -214,7 +229,7 @@ export default function DiscountsPage() {
       setMessage('Discount created successfully.')
       fetchDiscounts()
     } catch (error) {
-      setMessage(error.response?.data ? JSON.stringify(error.response.data) : 'Failed to create discount.')
+      setMessage(formatApiError(error, 'Failed to create discount. Please check the form and try again.'))
     } finally {
       setSaving(false)
     }
@@ -231,7 +246,7 @@ export default function DiscountsPage() {
       setMessage(`Updated ${discount.name}.`)
       fetchDiscounts()
     } catch (error) {
-      setMessage(error.response?.data ? JSON.stringify(error.response.data) : `Failed to update ${discount.name}.`)
+      setMessage(formatApiError(error, `Failed to update ${discount.name}.`))
     }
   }
 
