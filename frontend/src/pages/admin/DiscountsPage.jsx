@@ -6,13 +6,52 @@ const branchOrder = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
 const initialForm = {
   name: '',
   value: '',
+  validity: 'forever',
   apply_to_all_courses: true,
   courses: [],
   apply_to_all_branches: true,
   branches: [],
   valid_from: new Date().toISOString().slice(0, 10),
-  valid_to: new Date().toISOString().slice(0, 10),
+  valid_to: '',
   is_active: true,
+}
+
+const validityOptions = [
+  { value: 'forever', label: 'Forever' },
+  { value: '7_days', label: '7 Days', days: 7 },
+  { value: '15_days', label: '15 Days', days: 15 },
+  { value: '1_month', label: '1 Month', months: 1 },
+  { value: '3_months', label: '3 Months', months: 3 },
+  { value: 'custom', label: 'Custom Date' },
+]
+
+function formatDate(date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function calculateExpiryDate(startDate, validity) {
+  const option = validityOptions.find((item) => item.value === validity)
+  if (!option || validity === 'forever' || validity === 'custom' || !startDate) return ''
+  const date = new Date(`${startDate}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return ''
+  if (option.days) date.setDate(date.getDate() + option.days)
+  if (option.months) date.setMonth(date.getMonth() + option.months)
+  return formatDate(date)
+}
+
+function isBeforeDate(date, comparisonDate) {
+  if (!date || !comparisonDate) return false
+  return new Date(`${date}T00:00:00`) < new Date(`${comparisonDate}T00:00:00`)
+}
+
+function FormField({ label, children, helper }) {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      {children}
+      {helper && <span className="mt-2 block text-xs leading-5 text-slate-500">{helper}</span>}
+    </label>
+  )
 }
 
 function statusClass(status) {
@@ -95,6 +134,23 @@ export default function DiscountsPage() {
     setDiscounts(next)
   }
 
+  const updateFormStartDate = (value) => {
+    setForm((current) => ({
+      ...current,
+      valid_from: value,
+      valid_to: current.validity === 'custom' ? current.valid_to : calculateExpiryDate(value, current.validity),
+    }))
+  }
+
+  const updateFormValidity = (validity) => {
+    setForm((current) => ({
+      ...current,
+      validity,
+      valid_to: calculateExpiryDate(current.valid_from, validity),
+      is_active: validity === 'forever' ? true : current.is_active,
+    }))
+  }
+
   const discountPayload = (discount) => ({
     name: discount.name,
     discount_type: 'fixed',
@@ -104,14 +160,44 @@ export default function DiscountsPage() {
     apply_to_all_branches: !!discount.apply_to_all_branches,
     branches: discount.apply_to_all_branches ? [] : discount.branches,
     valid_from: discount.valid_from,
-    valid_to: discount.valid_to,
-    is_active: !!discount.is_active,
+    valid_to: discount.valid_to || null,
+    is_active: discount.validity === 'forever' ? true : !!discount.is_active,
   })
 
   const submit = async (event) => {
     event.preventDefault()
     setSaving(true)
     setMessage('')
+    if (!form.name.trim()) {
+      setMessage('Discount name is required.')
+      setSaving(false)
+      return
+    }
+    if (form.value === '' || Number(form.value) < 0) {
+      setMessage('Discount amount is required and cannot be negative.')
+      setSaving(false)
+      return
+    }
+    if (!form.valid_from) {
+      setMessage('Discount start date is required.')
+      setSaving(false)
+      return
+    }
+    if (!form.validity) {
+      setMessage('Discount validity is required.')
+      setSaving(false)
+      return
+    }
+    if (form.validity === 'custom' && !form.valid_to) {
+      setMessage('Discount expiry date is required for custom date validity.')
+      setSaving(false)
+      return
+    }
+    if (form.valid_to && isBeforeDate(form.valid_to, form.valid_from)) {
+      setMessage('Discount expiry date cannot be earlier than the start date.')
+      setSaving(false)
+      return
+    }
     if (!form.apply_to_all_courses && form.courses.length === 0) {
       setMessage('Please select at least one course or apply to all courses.')
       setSaving(false)
@@ -174,18 +260,72 @@ export default function DiscountsPage() {
       <form onSubmit={submit} className="max-w-full overflow-visible rounded-[28px] border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
         <h2 className="text-xl font-black tracking-tight text-slate-950">Add discount</h2>
         <div className="mt-5 grid max-w-full grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Discount name" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="Discount Amount" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="date" value={form.valid_from} onChange={(e) => setForm({ ...form, valid_from: e.target.value })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <input type="date" value={form.valid_to} onChange={(e) => setForm({ ...form, valid_to: e.target.value })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
-          <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          <FormField label="Discount Name">
+            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Summer admission offer" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100" required />
+          </FormField>
+          <FormField label="Discount Amount">
+            <input type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="5000" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100" required />
+          </FormField>
+          <FormField label="Status">
+            <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100" required>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </FormField>
         </div>
 
-        <div className="mt-5 grid max-w-full grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-700">Discount Validity</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-500">Choose how long this discount should remain usable.</p>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            {validityOptions.map((option) => {
+              const selected = form.validity === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => updateFormValidity(option.value)}
+                  className={`min-h-[48px] rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+                    selected
+                      ? 'bg-slate-950 text-white shadow-[0_14px_28px_-20px_rgba(15,23,42,0.8)]'
+                      : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-4 grid max-w-full grid-cols-1 gap-4 md:grid-cols-2">
+            <FormField label="Discount Start Date">
+              <input type="date" value={form.valid_from} onChange={(e) => updateFormStartDate(e.target.value)} className="w-full max-w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100" required />
+            </FormField>
+            {form.validity !== 'forever' && (
+              <FormField label="Discount Expiry Date" helper="Leave empty for permanent discounts">
+                <input type="date" value={form.valid_to || ''} min={form.valid_from || undefined} onChange={(e) => setForm({ ...form, valid_to: e.target.value, validity: 'custom' })} readOnly={form.validity !== 'custom'} required={form.validity === 'custom'} className={`w-full max-w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100 ${form.validity === 'custom' ? 'bg-white' : 'bg-slate-100 text-slate-600'}`} />
+              </FormField>
+            )}
+            {form.validity === 'forever' && (
+              <div className="rounded-2xl border border-emerald-100 bg-white px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Discount Expiry Date</p>
+                <p className="mt-2 text-sm font-semibold text-slate-800">No expiry date. This discount stays active until an admin disables it.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 grid max-w-full grid-cols-1 gap-4 xl:grid-cols-2">
           <div className="max-w-full overflow-visible rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-4">
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-700">Course Selection</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-500">Apply this discount to every course or selected courses only.</p>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: true, courses: [] })} className={`w-full max-w-full rounded-full px-4 py-2.5 text-sm font-semibold ${form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>All Courses</button>
               <button type="button" onClick={() => setForm({ ...form, apply_to_all_courses: false })} className={`w-full max-w-full rounded-full px-4 py-2.5 text-sm font-semibold ${!form.apply_to_all_courses ? 'bg-slate-950 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200'}`}>Specific Courses</button>
@@ -203,6 +343,10 @@ export default function DiscountsPage() {
           </div>
 
           <div className="max-w-full overflow-visible rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-4">
+              <h3 className="text-sm font-black uppercase tracking-[0.18em] text-slate-700">Branch Selection</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-500">Choose whether this discount applies across all branches or specific centers.</p>
+            </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="flex min-w-0 items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
                 <input type="checkbox" checked={form.apply_to_all_branches} onChange={(e) => setForm({ ...form, apply_to_all_branches: e.target.checked, branches: e.target.checked ? [] : form.branches })} className="h-4 w-4 flex-none accent-slate-950" />
@@ -222,7 +366,7 @@ export default function DiscountsPage() {
           <button disabled={saving} className="w-full rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60 sm:w-auto">
             {saving ? 'Creating...' : 'Create Discount'}
           </button>
-          {message && <p className="max-w-full break-words text-sm text-slate-600">{message}</p>}
+          {message && <p className="max-w-full break-words rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">{message}</p>}
         </div>
       </form>
 

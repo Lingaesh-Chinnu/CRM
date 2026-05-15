@@ -609,7 +609,7 @@ class Discount(TimeStampedModel):
     apply_to_all_courses = models.BooleanField(default=False)
     courses = models.ManyToManyField(Course, blank=True, related_name='discounts')
     valid_from = models.DateField()
-    valid_to = models.DateField()
+    valid_to = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='discounts_created')
 
@@ -620,13 +620,13 @@ class Discount(TimeStampedModel):
     @property
     def status_label(self):
         today = timezone.localdate()
-        if today > self.valid_to:
+        if self.valid_to and today > self.valid_to:
             return 'Expired'
         return 'Active' if self.is_active else 'Inactive'
 
     def is_available_for_course(self, course_id, branch_id=None):
         today = timezone.localdate()
-        if not self.is_active or self.valid_from > today or self.valid_to < today:
+        if not self.is_active or self.valid_from > today or (self.valid_to and self.valid_to < today):
             return False
         if self.apply_to_all_branches:
             branch_matches = True

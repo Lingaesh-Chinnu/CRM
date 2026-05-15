@@ -1312,8 +1312,7 @@ class DiscountViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(
                 is_active=True,
                 valid_from__lte=today,
-                valid_to__gte=today,
-            )
+            ).filter(Q(valid_to__isnull=True) | Q(valid_to__gte=today))
         if course_id:
             queryset = queryset.filter(Q(apply_to_all_courses=True) | Q(courses__id=course_id)).distinct()
         if branch_id:
