@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -74,6 +74,8 @@ Kindly complete the pending payment at your earliest convenience.
 
 export default function PaymentsListPage() {
   const { user } = useSelector((state) => state.auth)
+  const location = useLocation()
+  const navigationMessage = location.state?.message || ''
   const isSuperAdmin = user?.role === 'super_admin'
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState({
@@ -87,7 +89,7 @@ export default function PaymentsListPage() {
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
-  const [message, setMessage] = useState('')
+  const [message, setMessage] = useState(navigationMessage)
   const [sendingId, setSendingId] = useState(null)
   const [searchParams] = useSearchParams()
   const options = useMemo(() => monthOptions(), [])
@@ -96,6 +98,13 @@ export default function PaymentsListPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const statusFilter = searchParams.get('status') || ''
   const dueThisWeek = searchParams.get('due_this_week') || ''
+
+  useEffect(() => {
+    if (navigationMessage) {
+      setMessage(navigationMessage)
+      window.history.replaceState({}, '')
+    }
+  }, [navigationMessage])
 
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -119,7 +128,7 @@ export default function PaymentsListPage() {
     if (search.trim()) params.search = search.trim()
 
     setLoading(true)
-    setMessage('')
+    if (!navigationMessage) setMessage('')
     api.get('/payments/', { params, signal: controller.signal })
       .then(({ data }) => {
         setRows(data.results || data)
@@ -138,7 +147,7 @@ export default function PaymentsListPage() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, search, isSuperAdmin, statusFilter, dueThisWeek])
+  }, [month, branch, search, isSuperAdmin, statusFilter, dueThisWeek, navigationMessage])
 
   const sendReminder = async (row) => {
     setSendingId(row.id)

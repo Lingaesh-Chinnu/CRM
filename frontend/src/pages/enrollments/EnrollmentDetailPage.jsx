@@ -265,9 +265,29 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const addToPayment = async () => {
+    setMessage('')
+    if (!row.start_date) {
+      setMessage('Course start date is required to create payment schedule.')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const { data } = await api.post(`/enrollments/${id}/add-to-payment/`)
+      setRow(data.enrollment || row)
+      setMessage('Payment record created. Student will appear in Payments page.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to create payment record.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const rulesStatus = row.rules_signing_status || 'pending'
   const canEnroll = rulesStatus === 'submitted'
   const isFinalEnrollment = ['enrolled', 'active', 'completed', 'dropped', 'on_hold'].includes(row.status)
+  const canAddToPayment = ['enrolled', 'active', 'completed'].includes(row.status) && !row.payment_info
   const schedule = buildSchedule(row, startDate)
 
   return (
@@ -439,6 +459,16 @@ export default function EnrollmentDetailPage() {
           >
             {isFinalEnrollment ? 'Student Enrolled' : 'Enroll Student'}
           </button>
+          {canAddToPayment && (
+            <button
+              type="button"
+              onClick={addToPayment}
+              disabled={saving}
+              className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl border border-cyan-200 bg-cyan-50 px-5 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add to Payment
+            </button>
+          )}
           {row.rules_signed_pdf_url && (
             <button
               type="button"

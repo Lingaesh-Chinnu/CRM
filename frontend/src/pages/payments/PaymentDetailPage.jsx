@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
+import { apiErrorMessage } from '../../utils/apiErrors'
 
 const initialInstallment = {
   amount: '',
@@ -68,10 +69,14 @@ function nextCashReference(payment) {
 
 export default function PaymentDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [payment, setPayment] = useState(null)
   const [form, setForm] = useState(initialInstallment)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [deleteReason, setDeleteReason] = useState('')
   const [billActionId, setBillActionId] = useState(null)
   const [message, setMessage] = useState('')
   const [schedule, setSchedule] = useState([])
@@ -193,6 +198,29 @@ export default function PaymentDetailPage() {
     }
   }
 
+  const deletePayment = async () => {
+    const reason = deleteReason.trim()
+    if (!reason) {
+      setMessage('Reason for deletion is required.')
+      return
+    }
+
+    setDeleting(true)
+    setMessage('')
+    try {
+      await api.delete(`/payments/${id}/`, { data: { reason } })
+      navigate('/payments', {
+        replace: true,
+        state: { message: 'Payment deleted. Enrollment remains active and can be added to payments again.' },
+      })
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to delete payment.'))
+      setShowDeleteModal(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-slate-500">Loading payment details...</div>
   }
@@ -226,12 +254,27 @@ export default function PaymentDetailPage() {
             {payment.student_number} | Enrollment #{payment.enrollment}
           </p>
         </div>
-        <Link
-          to="/payments"
-          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-        >
-          Back to Payments
-        </Link>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteReason('')
+                setShowDeleteModal(true)
+                setMessage('')
+              }}
+              className="inline-flex items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100"
+            >
+              Delete Payment
+            </button>
+          )}
+          <Link
+            to="/payments"
+            className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+          >
+            Back to Payments
+          </Link>
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_420px]">
@@ -585,6 +628,45 @@ export default function PaymentDetailPage() {
           </button>
         </form>
       </section>
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-black tracking-tight text-slate-950">Delete payment</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Are you sure you want to delete this payment? This action cannot be undone.
+            </p>
+            <label className="mt-5 block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Reason for deletion
+              </span>
+              <textarea
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                required
+              />
+            </label>
+            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                disabled={deleting}
+                className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deletePayment}
+                disabled={deleting || !deleteReason.trim()}
+                className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleting ? 'Deleting...' : 'Delete Payment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

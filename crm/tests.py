@@ -3,7 +3,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 from unittest import mock
 
-from crm.models import Branch, Course, Enrollment, Lead, WalkIn
+from crm.models import Branch, Course, Enrollment, Lead, Payment, PaymentInstallment, WalkIn
 
 
 User = get_user_model()
@@ -246,6 +246,193 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.course, self.final_course)
         self.assertEqual(enrollment.original_walkin_course, self.course)
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
+
+    def test_add_to_payment_creates_pending_payment_with_default_schedule(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.final_course,
+            name='Payment Missing Student',
+            phone='9000000120',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.total_fees, enrollment.net_payable_fee)
+        self.assertEqual(payment.status, Payment.Status.UNPAID)
+        self.assertEqual(payment.paid_amount, 0)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+        ])
+
+    def test_add_to_payment_requires_course_start_date(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Missing Start Date Student',
+            phone='9000000121',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Course start date is required to create payment schedule.')
+        self.assertFalse(Payment.objects.filter(enrollment=enrollment).exists())
+
+    def test_add_to_payment_rejects_duplicate_payment(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Duplicate Payment Student',
+            phone='9000000122',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        enrollment.refresh_from_db()
+        Payment.objects.create(enrollment=enrollment, total_fees=enrollment.net_payable_fee)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Payment.objects.filter(enrollment=enrollment).count(), 1)
+
+    def test_add_to_payment_respects_branch_permissions(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.other_branch,
+            course=self.course,
+            name='Other Branch Student',
+            phone='9000000123',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+
+        self.client.force_authenticate(self.staff)
+        staff_response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+        self.assertEqual(staff_response.status_code, 404)
+        self.assertFalse(Payment.objects.filter(enrollment=enrollment).exists())
+
+        self.client.force_authenticate(self.admin)
+        admin_response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+        self.assertEqual(admin_response.status_code, 201)
+        self.assertTrue(Payment.objects.filter(enrollment=enrollment).exists())
+
+    def test_admin_can_delete_payment_without_generated_documents(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Delete Payment Student',
+            phone='9000000124',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        enrollment.refresh_from_db()
+        payment = Payment.objects.create(enrollment=enrollment, total_fees=enrollment.net_payable_fee)
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=1000,
+            installment_index=1,
+            installment_label='1st Installment',
+            payment_date='2026-05-11',
+            reference_number='CASH-1',
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(f'/api/payments/{payment.id}/', {'reason': 'Created by mistake'}, format='json')
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Payment.objects.filter(id=payment.id).exists())
+        self.assertFalse(PaymentInstallment.objects.filter(payment_id=payment.id).exists())
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, Enrollment.Status.ACTIVE)
+
+    def test_payment_delete_requires_admin_and_reason(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Delete Permission Student',
+            phone='9000000125',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        enrollment.refresh_from_db()
+        payment = Payment.objects.create(enrollment=enrollment, total_fees=enrollment.net_payable_fee)
+
+        self.client.force_authenticate(self.staff)
+        staff_response = self.client.delete(f'/api/payments/{payment.id}/', {'reason': 'Staff attempt'}, format='json')
+        self.assertEqual(staff_response.status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        missing_reason_response = self.client.delete(f'/api/payments/{payment.id}/', {'reason': ''}, format='json')
+        self.assertEqual(missing_reason_response.status_code, 400)
+        self.assertEqual(missing_reason_response.data['detail'], 'Reason for deletion is required.')
+        self.assertTrue(Payment.objects.filter(id=payment.id).exists())
+
+    def test_payment_delete_blocks_generated_documents(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Generated Document Student',
+            phone='9000000126',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        enrollment.refresh_from_db()
+        payment = Payment.objects.create(enrollment=enrollment, total_fees=enrollment.net_payable_fee)
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=1000,
+            installment_index=1,
+            installment_label='1st Installment',
+            payment_date='2026-05-11',
+            reference_number='CASH-2',
+            receipt_number='RCPT-GDP-2026-0001',
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(f'/api/payments/{payment.id}/', {'reason': 'Cleanup'}, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'This payment has generated documents and cannot be deleted. Use Void/Cancel instead.')
+        self.assertTrue(Payment.objects.filter(id=payment.id).exists())
 
     def test_staff_can_create_lead_with_empty_optional_fields_and_defaults(self):
         self.client.force_authenticate(self.staff)

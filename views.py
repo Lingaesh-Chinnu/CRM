@@ -30,7 +30,7 @@ class IsSuperAdminOrReadOnly(BasePermission):
 # ============================================================
 # backend/apps/accounts/views.py
 # ============================================================
-from rest_framework import viewsets, status, generics
+from rest_framework import viewsets, status, generics, mixins
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
@@ -3418,6 +3418,50 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                     payment.save(update_fields=update_fields)
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='add-to-payment')
+    def add_to_payment(self, request, pk=None):
+        enrollment = self.get_object()
+        if enrollment.status not in {
+            Enrollment.Status.ENROLLED,
+            Enrollment.Status.ACTIVE,
+            Enrollment.Status.COMPLETED,
+        }:
+            return Response(
+                {'detail': 'Only enrolled or completed enrollments can be added to payments.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not enrollment.start_date:
+            return Response(
+                {'detail': 'Course start date is required to create payment schedule.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if Payment.objects.filter(enrollment=enrollment).exists():
+            return Response(
+                {'detail': 'Payment record already exists for this enrollment.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                enrollment=enrollment,
+                total_fees=enrollment_payable_fee(enrollment),
+                status=Payment.Status.UNPAID,
+                manual_installment_schedule=[
+                    {
+                        **item,
+                        'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
+                    }
+                    for item in get_default_installment_schedule(enrollment)
+                ],
+            )
+
+        enrollment.refresh_from_db()
+        return Response({
+            'detail': 'Payment record created.',
+            'payment': PaymentSerializer(payment, context={'request': request}).data,
+            'enrollment': EnrollmentDetailSerializer(enrollment, context={'request': request}).data,
+        }, status=status.HTTP_201_CREATED)
+
 
 # ============================================================
 # backend/apps/payments/views.py
@@ -3455,7 +3499,7 @@ class PaymentFilter(django_filters.FilterSet):
         )
 
 
-class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
+class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     """Read payment records (aggregate)."""
     permission_classes = [IsStaffOrAdmin]
     serializer_class   = PaymentSerializer
@@ -3589,6 +3633,32 @@ class PaymentViewSet(viewsets.ReadOnlyModelViewSet):
                 'month_end': month_end,
             },
         })
+
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can delete payments.'}, status=status.HTTP_403_FORBIDDEN)
+        payment = self.get_object()
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'detail': 'Reason for deletion is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        has_generated_documents = payment.installments.filter(
+            Q(receipt_number__gt='') | Q(bill_number__gt='') | Q(bill_generated_at__isnull=False)
+        ).exists()
+        if has_generated_documents:
+            return Response(
+                {'detail': 'This payment has generated documents and cannot be deleted. Use Void/Cancel instead.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        enrollment = payment.enrollment
+        logger.warning(
+            'Admin %s deleted payment %s for enrollment %s. Reason: %s',
+            request.user.id,
+            payment.id,
+            enrollment.id,
+            reason,
+        )
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
