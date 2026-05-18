@@ -810,6 +810,13 @@ def wrap_text(draw, text, font, max_width):
     return lines or ['']
 
 
+def rules_duration_label(duration_months):
+    months = int(duration_months or 0)
+    if not months:
+        return ''
+    return '1 Month' if months == 1 else f'{months} Months'
+
+
 def validate_data_image(image_data, label):
     if not image_data or ',' not in image_data:
         raise ValueError(f'{label} is required.')
@@ -871,12 +878,8 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
         f'Course Enrolled: {enrollment.course.name if enrollment.course else ""}',
         f'Batch Timing: {enrollment.batch_timing or enrollment.get_preferred_timing_display() or ""}',
         f'Batch Start Date: {enrollment.start_date or ""}',
-        f'Duration: {enrollment.course.duration_months if enrollment.course and enrollment.course.duration_months else ""}',
-        f'Actual Fees: Rs {enrollment.actual_fees}',
-        f'Discount: Rs {enrollment.discount_amount}',
-        f'Final Fees: Rs {enrollment.final_fees}',
-        f'Spot Conversion Discount: Rs {enrollment.spot_conversion_discount_amount}',
-        f'Net Payable Fees: Rs {enrollment_payable_fee(enrollment)}',
+        f'Duration: {rules_duration_label(enrollment.course.duration_months if enrollment.course else None)}',
+        f'Final Payable Fees: Rs {enrollment_payable_fee(enrollment)}',
     ]
     for detail in details:
         write_line(detail)
@@ -3045,10 +3048,6 @@ class PublicRulesSigningView(APIView):
             return Response({'detail': 'Invalid signing link.'}, status=404)
         enrollment = signing.enrollment
         installments = build_default_installment_plan(enrollment)
-        payment_mode = ''
-        first_installment = enrollment.installments.order_by('payment_date', 'id').first()
-        if first_installment:
-            payment_mode = first_installment.get_payment_mode_display()
         return Response({
             'status': signing.status,
             'candidate': {
@@ -3059,13 +3058,8 @@ class PublicRulesSigningView(APIView):
                 'batch_timing': enrollment.batch_timing or enrollment.get_preferred_timing_display() or '',
                 'batch_start_date': enrollment.start_date,
                 'duration': enrollment.course.duration_months if enrollment.course else None,
-                'actual_fees': enrollment.actual_fees,
-                'course_discount': enrollment.discount_amount,
-                'final_fees': enrollment.final_fees,
-                'spot_conversion_discount': enrollment.spot_conversion_discount_amount,
-                'net_payable_fee': enrollment_payable_fee(enrollment),
+                'final_payable_fees': enrollment_payable_fee(enrollment),
                 'total_course_fee': enrollment_payable_fee(enrollment),
-                'payment_mode': payment_mode,
                 'enrollment_date': enrollment.enrollment_date,
             },
             'installments': installments,
@@ -3481,6 +3475,13 @@ class PaymentFilter(django_filters.FilterSet):
         fields = ['status', 'enrollment__branch', 'due_this_week', 'next_payment_from', 'next_payment_to']
 
     def filter_status(self, queryset, name, value):
+        if value == 'pending_today':
+            today = timezone.localdate()
+            return queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                paid_amount__lt=F('total_fees'),
+                next_payment_date=today,
+            )
         if value == 'pending':
             return queryset.filter(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL])
         return queryset.filter(status=value)
@@ -3530,7 +3531,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
             qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
-        if self.action in ('list', 'export'):
+        if self.action in ('list', 'export') and self.request.query_params.get('status') != 'pending_today':
             month_start, month_end = self._month_bounds()
             qs = qs.filter(
                 Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)

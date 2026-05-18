@@ -6,6 +6,12 @@ function formatCurrency(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
 
+function formatDuration(value) {
+  const months = Number(value || 0)
+  if (!months) return 'Not set'
+  return months === 1 ? '1 Month' : `${months} Months`
+}
+
 function formatDate(value) {
   if (!value) return 'Not set'
   return new Date(value).toLocaleDateString('en-IN', {
@@ -261,6 +267,7 @@ export default function RulesSigningPage() {
 
   const details = data.candidate || {}
   const submitted = data.status === 'submitted'
+  const finalPayableFees = details.final_payable_fees ?? details.net_payable_fee ?? details.total_course_fee ?? details.final_fees
 
   if (submitted) {
     return (
@@ -325,11 +332,8 @@ export default function RulesSigningPage() {
             ['Course Enrolled', details.course_enrolled],
             ['Batch Timing', details.batch_timing],
             ['Batch Start Date', formatDate(details.batch_start_date)],
-            ['Duration', details.duration],
-            ['Final Fees', formatCurrency(details.final_fees || details.total_course_fee)],
-            ['Spot Conversion Discount', formatCurrency(details.spot_conversion_discount || 0)],
-            ['Net Payable Fees', formatCurrency(details.net_payable_fee || details.total_course_fee)],
-            ['Payment Mode', details.payment_mode || 'Not set'],
+            ['Duration', formatDuration(details.duration)],
+            ['Final Payable Fees', formatCurrency(finalPayableFees)],
           ].map(([label, value]) => (
             <div key={label} className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>

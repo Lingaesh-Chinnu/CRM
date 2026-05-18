@@ -63,8 +63,11 @@ function highlightRows(stats) {
   ]
 }
 
-function followUpRows(stats) {
+function followUpRows(stats, branchId) {
   const today = todayIso()
+  const pendingPaymentsUrl = branchId && branchId !== 'all'
+    ? `/payments?status=pending_today&branch=${branchId}`
+    : '/payments?status=pending_today'
 
   return [
     {
@@ -82,7 +85,7 @@ function followUpRows(stats) {
     {
       label: 'Pending Payments Today',
       value: stats?.pending_payments || 0,
-      to: '/payments?status=pending',
+      to: pendingPaymentsUrl,
       tone: 'text-rose-600',
     },
   ]
@@ -513,7 +516,7 @@ export default function DashboardPage() {
               Today's Task
             </h2>
             <div className="mt-6 space-y-4">
-              {followUpRows(dashboardStats).map((item) => (
+              {followUpRows(dashboardStats, isSuperAdmin ? dashboardBranch : '').map((item) => (
                 <Link key={item.label} to={item.to} className={`block rounded-2xl bg-white p-4 transition hover:-translate-y-0.5 hover:bg-slate-50 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
                   <div className="mt-2 flex items-end justify-between gap-3">

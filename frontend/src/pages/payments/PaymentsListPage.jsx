@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -75,6 +75,7 @@ Kindly complete the pending payment at your earliest convenience.
 export default function PaymentsListPage() {
   const { user } = useSelector((state) => state.auth)
   const location = useLocation()
+  const navigate = useNavigate()
   const navigationMessage = location.state?.message || ''
   const isSuperAdmin = user?.role === 'super_admin'
   const [rows, setRows] = useState([])
@@ -98,6 +99,7 @@ export default function PaymentsListPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const statusFilter = searchParams.get('status') || ''
   const dueThisWeek = searchParams.get('due_this_week') || ''
+  const pendingTodayFilter = statusFilter === 'pending_today'
 
   useEffect(() => {
     if (navigationMessage) {
@@ -105,6 +107,12 @@ export default function PaymentsListPage() {
       window.history.replaceState({}, '')
     }
   }, [navigationMessage])
+
+  useEffect(() => {
+    if (!location.search) {
+      setBranch('')
+    }
+  }, [location.search])
 
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -148,6 +156,11 @@ export default function PaymentsListPage() {
 
     return () => controller.abort()
   }, [month, branch, search, isSuperAdmin, statusFilter, dueThisWeek, navigationMessage])
+
+  const clearStatusFilter = () => {
+    setBranch('')
+    navigate('/payments')
+  }
 
   const sendReminder = async (row) => {
     setSendingId(row.id)
@@ -206,10 +219,28 @@ export default function PaymentsListPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Payments</p>
         <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-950">Payment Tracker</h1>
+            <h1 className="text-3xl font-black tracking-tight text-slate-950">
+              {pendingTodayFilter ? 'Pending Payments Today' : 'Payment Tracker'}
+            </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              Track collections, dues, balances, and student installment history month by month.
+              {pendingTodayFilter
+                ? 'Students with a pending payment due today.'
+                : 'Track collections, dues, balances, and student installment history month by month.'}
             </p>
+            {pendingTodayFilter && (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="inline-flex rounded-full bg-rose-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-rose-700 ring-1 ring-rose-100">
+                  Pending Payments Today
+                </span>
+                <button
+                  type="button"
+                  onClick={clearStatusFilter}
+                  className="rounded-full border border-slate-200 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600 transition hover:bg-slate-100 hover:text-slate-950"
+                >
+                  Clear Filter
+                </button>
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -281,13 +312,17 @@ export default function PaymentsListPage() {
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-slate-200 px-5 py-4">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">Payment tracking</h2>
+          <h2 className="text-xl font-black tracking-tight text-slate-950">
+            {pendingTodayFilter ? 'Pending Payments Today' : 'Payment tracking'}
+          </h2>
         </div>
 
         {loading ? (
           <div className="p-6 text-slate-500">Loading payments...</div>
         ) : rows.length === 0 ? (
-          <div className="p-6 text-slate-500">No payment records found for this month.</div>
+          <div className="p-6 text-slate-500">
+            {pendingTodayFilter ? 'No pending payments due today.' : 'No payment records found for this month.'}
+          </div>
         ) : (
           <>
             <div className="hidden lg:block">
