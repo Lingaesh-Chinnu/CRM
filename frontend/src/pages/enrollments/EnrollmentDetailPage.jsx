@@ -26,17 +26,25 @@ function addOneMonth(value) {
 }
 
 function buildSchedule(row, startDate) {
-  const finalFees = Math.floor(Number(row?.final_fees || 0))
+  const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
-  const courseStartDate = startDate || row?.start_date || enrollmentDate
-  if (finalFees < 5000) {
+  const courseStartDate = startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
+  const durationMonths = Number(row?.course_duration_months || row?.duration_months || row?.course_duration || row?.course?.duration_months || 0)
+  const enrollmentAmount = Math.min(5000, finalFees)
+  if (finalFees <= 6000) {
     return [{ label: '1st Installment', amount: finalFees, due_date: enrollmentDate }]
   }
-  const remaining = finalFees - 5000
+  const remaining = finalFees - enrollmentAmount
+  if (durationMonths <= 2) {
+    return [
+      { label: '1st Installment', amount: enrollmentAmount, due_date: enrollmentDate },
+      { label: '2nd Installment', amount: remaining, due_date: courseStartDate },
+    ]
+  }
   const second = Math.floor(remaining / 2)
   const third = remaining - second
   return [
-    { label: '1st Installment', amount: 5000, due_date: enrollmentDate },
+    { label: '1st Installment', amount: enrollmentAmount, due_date: enrollmentDate },
     { label: '2nd Installment', amount: second, due_date: courseStartDate },
     { label: '3rd Installment', amount: third, due_date: addOneMonth(courseStartDate) },
   ]

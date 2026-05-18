@@ -19,7 +19,7 @@ const emptyFilters = {
   name: '',
   phone: '',
   branch: '',
-  created_by: '',
+  assigned_to: '',
   course: '',
   status: '',
 }
@@ -34,7 +34,7 @@ function readFilters(searchParams, canFilterByBranch) {
     name: searchParams.get('name') || '',
     phone: searchParams.get('phone') || '',
     branch: canFilterByBranch ? searchParams.get('branch') || '' : '',
-    created_by: canFilterByBranch ? searchParams.get('created_by') || '' : '',
+    assigned_to: searchParams.get('assigned_to') || searchParams.get('created_by') || '',
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
   }
@@ -50,6 +50,9 @@ function uniqueStaffUsers(rows) {
 }
 
 function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
+  const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
+  const walkInByLabel = (walkin) => walkin.status === 'follow_up' ? 'Follow-up' : 'Walk-in by'
+
   return (
     <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
       <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
@@ -79,8 +82,13 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
                       <span>{walkin.preferred_timing_display || 'Timing pending'}</span>
                     </p>
                   </div>
-                  <div className="w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-                    {statusLabel(walkin.status)}
+                  <div className="flex w-fit flex-col items-start gap-2 sm:items-end">
+                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                      {statusLabel(walkin.status)}
+                    </div>
+                    <p className="text-xs font-semibold text-slate-500">
+                      {walkInByLabel(walkin)}: <span className="text-slate-800">{walkInByText(walkin)}</span>
+                    </p>
                   </div>
                 </div>
               </div>
@@ -144,23 +152,17 @@ export default function WalkInsListPage() {
   }, [canFilterByBranch])
 
   useEffect(() => {
-    if (!canFilterByBranch || !filters.branch) {
-      setStaffUsers([])
-      if (filters.created_by) {
-        setFilters((current) => ({ ...current, created_by: '' }))
-      }
-      return
-    }
-    api.get('/walkins/staff-options/', { params: { branch: filters.branch } })
+    const params = canFilterByBranch && filters.branch ? { branch: filters.branch } : undefined
+    api.get('/walkins/staff-options/', { params })
       .then(({ data }) => {
         const rows = uniqueStaffUsers(data || [])
         setStaffUsers(rows)
-        if (filters.created_by && !rows.some((staff) => String(staff.id) === String(filters.created_by))) {
-          setFilters((current) => ({ ...current, created_by: '' }))
+        if (filters.assigned_to && !rows.some((staff) => String(staff.id) === String(filters.assigned_to))) {
+          setFilters((current) => ({ ...current, assigned_to: '' }))
         }
       })
       .catch(() => setStaffUsers([]))
-  }, [canFilterByBranch, filters.branch, filters.created_by])
+  }, [canFilterByBranch, filters.branch, filters.assigned_to])
 
   useEffect(() => {
     const fetchWalkins = async () => {
@@ -209,7 +211,7 @@ export default function WalkInsListPage() {
     event.preventDefault()
     const nextParams = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
-      if ((key === 'branch' || key === 'created_by') && !canFilterByBranch) return
+      if (key === 'branch' && !canFilterByBranch) return
       if (value.trim()) nextParams.set(key, value.trim())
     })
     setSearchParams(nextParams)
@@ -246,7 +248,7 @@ export default function WalkInsListPage() {
             {loadMessage}
           </div>
         )}
-        <div className={`grid gap-3 md:grid-cols-2 ${canFilterByBranch ? 'xl:grid-cols-6' : 'xl:grid-cols-4'}`}>
+        <div className={`grid gap-3 md:grid-cols-2 ${canFilterByBranch ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
           <input value={filters.name} onChange={(event) => updateFilter('name', event.target.value)} name="name" placeholder="Candidate name" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
           <input value={filters.phone} onChange={(event) => updateFilter('phone', event.target.value)} name="phone" placeholder="Phone number" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
           {canFilterByBranch && (
@@ -255,12 +257,10 @@ export default function WalkInsListPage() {
               {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
           )}
-          {canFilterByBranch && (
-            <select value={filters.created_by} onChange={(event) => updateFilter('created_by', event.target.value)} name="created_by" disabled={!filters.branch} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60">
-              <option value="">{filters.branch ? 'Walk-in By' : 'Select branch first'}</option>
+          <select value={filters.assigned_to} onChange={(event) => updateFilter('assigned_to', event.target.value)} name="assigned_to" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All Users</option>
               {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
-            </select>
-          )}
+          </select>
           <select value={filters.course} onChange={(event) => updateFilter('course', event.target.value)} name="course" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
             <option value="">All courses</option>
             {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}

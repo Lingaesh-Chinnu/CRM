@@ -51,7 +51,7 @@ function sameDate(first, second) {
 }
 
 function walkInByLabel(walkin) {
-  return walkin.assigned_name || walkin.created_by_name || walkin.walk_in_by_display || 'Public Form'
+  return walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
 }
 
 const qualificationOptions = [

@@ -2551,6 +2551,8 @@ class WalkInFilter(django_filters.FilterSet):
     source = django_filters.CharFilter(method='filter_source')
     branch = django_filters.ModelChoiceFilter(queryset=Branch.objects.all(), method='filter_branch')
     created_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_created_by')
+    assigned_to = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
+    follow_up_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
     visit_date_from = django_filters.DateFilter(field_name='visit_date', lookup_expr='gte')
     visit_date_to   = django_filters.DateFilter(field_name='visit_date', lookup_expr='lte')
     follow_up_date_from = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='gte')
@@ -2565,6 +2567,14 @@ class WalkInFilter(django_filters.FilterSet):
         if not self.request or not self.request.user.is_super_admin:
             return queryset
         return queryset.filter(created_by=value)
+
+    def filter_assigned_to(self, queryset, name, value):
+        if not value:
+            return queryset
+        if not self.request or not self.request.user.is_super_admin:
+            if value.branch_id != self.request.user.branch_id:
+                return queryset.none()
+        return queryset.filter(assigned_to=value)
 
     def filter_source(self, queryset, name, value):
         value = (value or '').strip()
@@ -2592,7 +2602,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action == 'list':
-            qs = WalkIn.objects.select_related('course', 'branch', 'enrollment')
+            qs = WalkIn.objects.select_related('course', 'branch', 'assigned_to', 'created_by', 'enrollment')
         else:
             qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead','enrollment')
         missing_columns = missing_model_columns(WalkIn, [
@@ -2676,9 +2686,13 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         branch = self.request.user.branch if not self.request.user.is_super_admin else None
+        assigned_to = serializer.validated_data.get('assigned_to')
+        if not assigned_to and not self.request.user.is_super_admin:
+            assigned_to = self.request.user
         serializer.save(
             created_by=self.request.user,
             branch=branch or serializer.validated_data.get('branch'),
+            assigned_to=assigned_to,
             status=WalkIn.Status.NEW,
             converted_to_type='',
             converted_record_id=None,
@@ -2694,9 +2708,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         ).select_related('branch').order_by('first_name', 'last_name', 'username')
         if request.user.is_super_admin:
             branch_id = request.query_params.get('branch')
-            if not branch_id:
-                return Response([])
-            users = users.filter(branch_id=branch_id)
+            if branch_id:
+                users = users.filter(branch_id=branch_id)
         else:
             users = users.filter(branch=request.user.branch)
         seen = set()

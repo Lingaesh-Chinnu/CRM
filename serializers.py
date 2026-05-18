@@ -687,7 +687,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
         model  = WalkIn
         fields = ['id','candidate_number','name','phone','email','course_name',
                   'branch_name','status','visit_date','demo_class','assigned_name',
-                  'created_by','created_by_name','converted_by_name',
+                  'assigned_to','created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
@@ -1086,6 +1086,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
 
 class EnrollmentDetailSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name', read_only=True)
+    course_duration_months = serializers.IntegerField(source='course.duration_months', read_only=True)
     original_walkin_course_name = serializers.CharField(source='original_walkin_course.name', read_only=True)
     final_enrollment_course_name = serializers.CharField(source='final_enrollment_course.name', read_only=True)
     branch_name  = serializers.CharField(source='branch.name', read_only=True)

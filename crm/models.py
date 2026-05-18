@@ -731,22 +731,32 @@ def enrollment_payable_fee(enrollment):
 
 
 def get_default_installment_schedule(enrollment):
-    final_fees = int(enrollment_payable_fee(enrollment) or 0)
+    final_fees = int(round(float(enrollment_payable_fee(enrollment) or 0)))
     enrollment_date = enrollment.enrollment_date
-    start_date = enrollment.start_date or enrollment.enrollment_date
-    if final_fees < 5000:
+    second_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
+    duration_months = int(getattr(getattr(enrollment, 'course', None), 'duration_months', 0) or 0)
+    enrollment_amount = min(5000, final_fees)
+
+    if final_fees <= 6000:
         return [{
             'label': '1st Installment',
             'amount': final_fees,
             'due_date': enrollment_date,
         }]
-    remaining = final_fees - 5000
+
+    remaining = final_fees - enrollment_amount
+    if duration_months <= 2:
+        return [
+            {'label': '1st Installment', 'amount': enrollment_amount, 'due_date': enrollment_date},
+            {'label': '2nd Installment', 'amount': remaining, 'due_date': second_due_date},
+        ]
+
     second = remaining // 2
     third = remaining - second
     return [
-        {'label': '1st Installment', 'amount': 5000, 'due_date': enrollment_date},
-        {'label': '2nd Installment', 'amount': second, 'due_date': start_date},
-        {'label': '3rd Installment', 'amount': third, 'due_date': add_month_to_date(start_date)},
+        {'label': '1st Installment', 'amount': enrollment_amount, 'due_date': enrollment_date},
+        {'label': '2nd Installment', 'amount': second, 'due_date': second_due_date},
+        {'label': '3rd Installment', 'amount': third, 'due_date': add_month_to_date(second_due_date)},
     ]
 
 

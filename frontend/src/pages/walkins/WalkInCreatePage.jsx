@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
@@ -19,6 +20,7 @@ const initialForm = {
   preferred_timing: '',
   visit_date: new Date().toISOString().slice(0, 10),
   follow_up_date: '',
+  assigned_to: '',
   source: '',
   remarks: '',
 }
@@ -47,8 +49,11 @@ function FieldLabel({ children }) {
 
 export default function WalkInCreatePage() {
   const navigate = useNavigate()
+  const { user } = useSelector((state) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
   const [form, setForm] = useState(initialForm)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -60,6 +65,21 @@ export default function WalkInCreatePage() {
     })
   }, [])
 
+  useEffect(() => {
+    setForm((current) => ({
+      ...current,
+      branch: !isSuperAdmin && user?.branch_id ? String(user.branch_id) : current.branch,
+      assigned_to: !isSuperAdmin && user?.id ? String(user.id) : current.assigned_to,
+    }))
+  }, [isSuperAdmin, user?.branch_id, user?.id])
+
+  useEffect(() => {
+    const params = isSuperAdmin && form.branch ? { branch: form.branch } : undefined
+    api.get('/walkins/staff-options/', { params })
+      .then(({ data }) => setStaffUsers(data || []))
+      .catch(() => setStaffUsers([]))
+  }, [isSuperAdmin, form.branch])
+
   const submit = async (event) => {
     event.preventDefault()
     if (saving) return
@@ -70,6 +90,7 @@ export default function WalkInCreatePage() {
         ...form,
         branch: form.branch ? Number(form.branch) : null,
         course: form.course ? Number(form.course) : null,
+        assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
         dob: form.dob || null,
         visit_date: form.visit_date,
         follow_up_date: form.follow_up_date || null,
@@ -91,7 +112,7 @@ export default function WalkInCreatePage() {
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <FieldLabel>Branch</FieldLabel>
-            <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value, assigned_to: isSuperAdmin ? '' : form.assigned_to })} disabled={!isSuperAdmin} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 disabled:cursor-not-allowed disabled:bg-slate-100" required>
               <option value="">Select branch</option>
               {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
@@ -205,6 +226,17 @@ export default function WalkInCreatePage() {
               aria-label="Next Follow-up Date"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel>Walk-in By</FieldLabel>
+            <select
+              value={form.assigned_to}
+              onChange={(event) => setForm({ ...form, assigned_to: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            >
+              <option value="">Unassigned</option>
+              {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
+            </select>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Source</FieldLabel>
