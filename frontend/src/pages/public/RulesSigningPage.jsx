@@ -21,6 +21,11 @@ function formatDate(value) {
   })
 }
 
+const documentCardClass = 'rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_14px_36px_-28px_rgba(15,23,42,0.35)] sm:p-7'
+const sectionHeadingClass = 'text-[17px] font-bold leading-snug text-slate-950'
+const labelClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500'
+const valueClass = 'mt-2 text-[14px] font-semibold leading-snug text-slate-950'
+
 export default function RulesSigningPage() {
   const { token } = useParams()
   const canvasRef = useRef(null)
@@ -271,13 +276,13 @@ export default function RulesSigningPage() {
 
   if (submitted) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-6 sm:px-6">
-        <section className="mx-auto max-w-4xl rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-700">Submitted</p>
-          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+      <main className="min-h-screen bg-slate-100 px-4 py-6 font-['Libertinus_Serif','Linux_Libertine','Times_New_Roman',serif] sm:px-6">
+        <section className={`mx-auto max-w-4xl ${documentCardClass}`}>
+          <p className={labelClass}>Submitted</p>
+          <h1 className="mt-3 text-[24px] font-bold leading-tight text-slate-950">
             IIE Rules & Regulations
           </h1>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-4 text-[14px] leading-[1.6] text-slate-600">
             This form has already been submitted and is locked.
           </p>
           {data.submitted_at && (
@@ -314,19 +319,19 @@ export default function RulesSigningPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-5 sm:px-6">
+    <main className="min-h-screen bg-slate-100 px-4 py-5 font-['Libertinus_Serif','Linux_Libertine','Times_New_Roman',serif] sm:px-6">
       <div className="mx-auto max-w-4xl space-y-5">
-        <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-700">IIE Rules & Regulation</p>
-          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">
+        <section className={documentCardClass}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-cyan-700">IIE Rules & Regulation</p>
+          <h1 className="mt-3 text-[24px] font-bold leading-tight text-slate-950">
             Review and Sign
           </h1>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-4 text-[14px] leading-[1.6] text-slate-600">
             Please review the form details and sign in the signature box.
           </p>
         </section>
 
-        <section className="grid gap-4 rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:grid-cols-2 sm:p-8">
+        <section className={`grid gap-4 sm:grid-cols-2 ${documentCardClass}`}>
           {[
             ['Name', details.name],
             ['Course Enrolled', details.course_enrolled],
@@ -335,37 +340,37 @@ export default function RulesSigningPage() {
             ['Duration', formatDuration(details.duration)],
             ['Final Payable Fees', formatCurrency(finalPayableFees)],
           ].map(([label, value]) => (
-            <div key={label} className="rounded-2xl bg-slate-50 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-              <p className="mt-2 font-semibold text-slate-950">{value || 'Not set'}</p>
+            <div key={label} className="rounded-xl bg-slate-50 p-4">
+              <p className={labelClass}>{label}</p>
+              <p className={valueClass}>{value || 'Not set'}</p>
             </div>
           ))}
         </section>
 
-        <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <h2 className="text-lg font-black text-slate-950">Installment Plan</h2>
+        <section className={documentCardClass}>
+          <h2 className={sectionHeadingClass}>Installment Plan</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {(data.installments || []).map((item) => (
-              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{item.label}</p>
-                <p className="mt-2 text-xl font-black text-slate-950">{formatCurrency(item.amount)}</p>
-                <p className="mt-1 text-sm text-slate-600">{formatDate(item.due_date)}</p>
+              <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className={labelClass}>{item.label}</p>
+                <p className="mt-2 text-[14px] font-semibold leading-snug text-slate-950">{formatCurrency(item.amount)}</p>
+                <p className="mt-2 text-[14px] leading-[1.55] text-slate-600">Due Date: {formatDate(item.due_date)}</p>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <h2 className="text-lg font-black text-slate-950">Rules and Regulations</h2>
-          <div className="mt-4 max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-700">
+        <section className={documentCardClass}>
+          <h2 className={sectionHeadingClass}>Rules and Regulations</h2>
+          <div className="mt-4 max-h-[55vh] space-y-4 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-5 text-[14px] leading-[1.6] text-slate-700">
             {(data.rules_content || []).map((paragraph, index) => (
               <p key={`${paragraph.slice(0, 20)}-${index}`}>{paragraph}</p>
             ))}
           </div>
         </section>
 
-        <section className="rounded-[28px] bg-white p-5 shadow-[0_18px_50px_-35px_rgba(15,23,42,0.45)] sm:p-8">
-          <h2 className="text-lg font-black text-slate-950">Identity Photo</h2>
+        <section className={documentCardClass}>
+          <h2 className={sectionHeadingClass}>Identity Photo</h2>
           <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
             {selfie ? (
               <img src={selfie} alt="Identity photo preview" className="mx-auto max-h-80 w-full object-contain" />

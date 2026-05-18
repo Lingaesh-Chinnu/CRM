@@ -817,6 +817,16 @@ def rules_duration_label(duration_months):
     return '1 Month' if months == 1 else f'{months} Months'
 
 
+def rules_pdf_date(value):
+    if not value:
+        return 'Not set'
+    if isinstance(value, str):
+        value = parse_date(value) or value
+    if hasattr(value, 'strftime'):
+        return value.strftime('%d %b %Y')
+    return str(value)
+
+
 def validate_data_image(image_data, label):
     if not image_data or ',' not in image_data:
         raise ValueError(f'{label} is required.')
@@ -841,12 +851,39 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
 
     width, height = 1240, 1754
     margin = 80
-    font = ImageFont.load_default()
-    title_font = ImageFont.load_default()
+    content_width = width - margin * 2
+
+    def load_font(weight, size):
+        font_candidates = [
+            Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'fonts' / f'libertinus-serif-{weight}.woff2',
+            Path(settings.BASE_DIR) / 'staticfiles' / 'assets' / f'libertinus-serif-{weight}.woff2',
+            Path('/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'),
+            Path('/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf'),
+            Path('C:/Windows/Fonts/georgia.ttf'),
+            Path('C:/Windows/Fonts/times.ttf'),
+        ]
+        for font_path in font_candidates:
+            try:
+                if font_path.exists():
+                    return ImageFont.truetype(str(font_path), size=size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    font = load_font(400, 21)
+    value_font = load_font(600, 21)
+    label_font = load_font(600, 17)
+    section_font = load_font(700, 26)
+    title_font = load_font(700, 36)
+    small_font = load_font(400, 19)
     pages = []
     page = Image.new('RGB', (width, height), 'white')
     draw = ImageDraw.Draw(page)
     y = margin
+    ink = '#111827'
+    muted = '#64748b'
+    border = '#cbd5e1'
+    soft = '#f8fafc'
 
     def add_page():
         nonlocal page, draw, y
@@ -855,50 +892,95 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
         draw = ImageDraw.Draw(page)
         y = margin
 
-    def write_line(text, spacing=26):
+    def ensure_space(required):
+        if y + required > height - margin - 250:
+            add_page()
+
+    def write_wrapped(text, current_font=font, fill=ink, spacing=34, max_width=content_width, x=margin):
         nonlocal y
-        for line in wrap_text(draw, text, font, width - margin * 2):
-            if y > height - margin - 220:
+        for line in wrap_text(draw, text, current_font, max_width):
+            if y > height - margin - 250:
                 add_page()
-            draw.text((margin, y), line, fill='black', font=font)
+            draw.text((x, y), line, fill=fill, font=current_font)
             y += spacing
 
-    draw.text((margin, y), 'IIE Rules & Regulations Form', fill='black', font=title_font)
-    y += 45
+    def write_section(title):
+        nonlocal y
+        ensure_space(70)
+        if y > margin:
+            y += 18
+        draw.text((margin, y), title, fill=ink, font=section_font)
+        y += 42
+
+    def write_detail_grid(items):
+        nonlocal y
+        column_gap = 24
+        row_gap = 18
+        box_width = (content_width - column_gap) // 2
+        box_height = 92
+        for index in range(0, len(items), 2):
+            ensure_space(box_height + row_gap)
+            row_items = items[index:index + 2]
+            for column, (label, value) in enumerate(row_items):
+                x = margin + column * (box_width + column_gap)
+                draw.rounded_rectangle((x, y, x + box_width, y + box_height), radius=10, fill=soft, outline=border, width=1)
+                draw.text((x + 18, y + 16), str(label).upper(), fill=muted, font=label_font)
+                value_lines = wrap_text(draw, value or 'Not set', value_font, box_width - 36)
+                draw.text((x + 18, y + 46), value_lines[0], fill=ink, font=value_font)
+                if len(value_lines) > 1:
+                    draw.text((x + 18, y + 70), value_lines[1], fill=ink, font=small_font)
+            y += box_height + row_gap
+
+    def write_installment(item):
+        nonlocal y
+        ensure_space(112)
+        draw.rounded_rectangle((margin, y, margin + content_width, y + 96), radius=10, fill=soft, outline=border, width=1)
+        draw.text((margin + 18, y + 16), str(item.get('label') or 'Installment'), fill=ink, font=value_font)
+        draw.text((margin + 18, y + 52), f'Due Date: {rules_pdf_date(item.get("date") or item.get("due_date"))}', fill=muted, font=small_font)
+        amount_text = f'Rs {Decimal(str(item.get("amount") or 0)):,.0f}'
+        amount_width = draw.textbbox((0, 0), amount_text, font=value_font)[2]
+        draw.text((margin + content_width - amount_width - 18, y + 30), amount_text, fill=ink, font=value_font)
+        y += 114
+
+    draw.text((margin, y), 'IIE Rules & Regulations Form', fill=ink, font=title_font)
+    y += 58
     if selfie_bytes:
         selfie = Image.open(io.BytesIO(selfie_bytes)).convert('RGB')
         selfie.thumbnail((180, 220))
         selfie_x = width - margin - 180
-        draw.rectangle((selfie_x - 8, margin - 8, selfie_x + 188, margin + 228), outline='black')
+        draw.rounded_rectangle((selfie_x - 10, margin - 10, selfie_x + 190, margin + 232), radius=8, outline=border, width=1)
         page.paste(selfie, (selfie_x, margin))
-        draw.text((selfie_x, margin + 205), 'Student Identity Photo', fill='black', font=font)
+        draw.text((selfie_x, margin + 206), 'Student Identity Photo', fill=muted, font=label_font)
     details = [
-        f'Name: {enrollment.name}',
-        f'Phone: {enrollment.phone}',
-        f'Course Enrolled: {enrollment.course.name if enrollment.course else ""}',
-        f'Batch Timing: {enrollment.batch_timing or enrollment.get_preferred_timing_display() or ""}',
-        f'Batch Start Date: {enrollment.start_date or ""}',
-        f'Duration: {rules_duration_label(enrollment.course.duration_months if enrollment.course else None)}',
-        f'Final Payable Fees: Rs {enrollment_payable_fee(enrollment)}',
+        ('Name', enrollment.name),
+        ('Phone', enrollment.phone),
+        ('Course Enrolled', enrollment.course.name if enrollment.course else ''),
+        ('Batch Timing', enrollment.batch_timing or enrollment.get_preferred_timing_display() or ''),
+        ('Batch Start Date', rules_pdf_date(enrollment.start_date)),
+        ('Duration', rules_duration_label(enrollment.course.duration_months if enrollment.course else None)),
+        ('Final Payable Fees', f'Rs {Decimal(str(enrollment_payable_fee(enrollment) or 0)):,.0f}'),
     ]
-    for detail in details:
-        write_line(detail)
-    write_line('Payment Schedule:')
+    write_section('Candidate Details')
+    write_detail_grid(details)
+
+    write_section('Payment Schedule')
     for item in build_default_installment_plan(enrollment):
-        write_line(f'{item["label"]}: Rs {item["amount"]} on {item["date"]}')
-    y += 20
+        write_installment(item)
+
+    write_section('Rules and Regulations')
     for paragraph in extract_rules_template_text():
-        write_line(paragraph, spacing=24)
-        y += 10
+        write_wrapped(paragraph, current_font=font, fill=ink, spacing=34)
+        y += 16
 
     if y > height - margin - 260:
         add_page()
-    draw.text((margin, y + 20), 'Student Signature:', fill='black', font=font)
+    y += 18
+    draw.text((margin, y), 'Student Signature', fill=ink, font=section_font)
     signature = Image.open(io.BytesIO(signature_bytes)).convert('RGBA')
     signature.thumbnail((420, 180))
-    page.paste(signature, (margin, y + 55), signature)
+    page.paste(signature, (margin, y + 46), signature)
     submitted_value = submitted_at or timezone.now()
-    draw.text((margin, y + 245), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill='black', font=font)
+    draw.text((margin, y + 225), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill=muted, font=small_font)
     pages.append(page)
 
     output = io.BytesIO()
