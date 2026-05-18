@@ -3475,12 +3475,13 @@ class PaymentFilter(django_filters.FilterSet):
         fields = ['status', 'enrollment__branch', 'due_this_week', 'next_payment_from', 'next_payment_to']
 
     def filter_status(self, queryset, name, value):
-        if value == 'pending_today':
+        if value in ('due', 'pending_today'):
             today = timezone.localdate()
             return queryset.filter(
                 status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
                 paid_amount__lt=F('total_fees'),
-                next_payment_date=today,
+                next_payment_date__isnull=False,
+                next_payment_date__lte=today,
             )
         if value == 'pending':
             return queryset.filter(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL])
@@ -3531,7 +3532,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
             qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
-        if self.action in ('list', 'export') and self.request.query_params.get('status') != 'pending_today':
+        if self.action in ('list', 'export') and self.request.query_params.get('status') not in ('due', 'pending_today'):
             month_start, month_end = self._month_bounds()
             qs = qs.filter(
                 Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)

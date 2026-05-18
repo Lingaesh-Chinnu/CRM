@@ -31,6 +31,12 @@ function formatDateTime(value) {
   })
 }
 
+function todayInputValue() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset()
+  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10)
+}
+
 function discountAmount(discount, courseFee) {
   if (!discount) return 0
   const fee = Number(courseFee || 0)
@@ -185,7 +191,7 @@ export default function WalkInDetailPage() {
     year_of_passing: '',
     college_company: '',
     visit_date: '',
-    enrollment_date: new Date().toISOString().slice(0, 10),
+    enrollment_date: todayInputValue(),
     actual_fees: '',
     discount: '',
     spot_conversion_discount_applied: false,
@@ -239,7 +245,7 @@ export default function WalkInDetailPage() {
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
         assigned_to: data.assigned_to || '',
-        enrollment_date: data.visit_date || prev.enrollment_date,
+        enrollment_date: todayInputValue(),
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
       }))
       setBranchCorrection({ branch: data.branch || '', reason: '' })

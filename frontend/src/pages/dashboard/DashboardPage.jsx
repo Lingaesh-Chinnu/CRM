@@ -66,8 +66,8 @@ function highlightRows(stats) {
 function followUpRows(stats, branchId) {
   const today = todayIso()
   const pendingPaymentsUrl = branchId && branchId !== 'all'
-    ? `/payments?status=pending_today&branch=${branchId}`
-    : '/payments?status=pending_today'
+    ? `/payments?status=due&branch=${branchId}`
+    : '/payments?status=due'
 
   return [
     {
@@ -83,7 +83,7 @@ function followUpRows(stats, branchId) {
       tone: 'text-emerald-600',
     },
     {
-      label: 'Pending Payments Today',
+      label: 'Due & Overdue Payments',
       value: stats?.pending_payments || 0,
       to: pendingPaymentsUrl,
       tone: 'text-rose-600',

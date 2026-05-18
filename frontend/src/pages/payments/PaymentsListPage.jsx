@@ -99,7 +99,7 @@ export default function PaymentsListPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '')
   const statusFilter = searchParams.get('status') || ''
   const dueThisWeek = searchParams.get('due_this_week') || ''
-  const pendingTodayFilter = statusFilter === 'pending_today'
+  const duePaymentsFilter = statusFilter === 'due' || statusFilter === 'pending_today'
 
   useEffect(() => {
     if (navigationMessage) {
@@ -220,17 +220,17 @@ export default function PaymentsListPage() {
         <div className="mt-3 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h1 className="text-3xl font-black tracking-tight text-slate-950">
-              {pendingTodayFilter ? 'Pending Payments Today' : 'Payment Tracker'}
+              {duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment Tracker'}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              {pendingTodayFilter
-                ? 'Students with a pending payment due today.'
+              {duePaymentsFilter
+                ? 'Students with pending payments due today or earlier.'
                 : 'Track collections, dues, balances, and student installment history month by month.'}
             </p>
-            {pendingTodayFilter && (
+            {duePaymentsFilter && (
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <span className="inline-flex rounded-full bg-rose-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-rose-700 ring-1 ring-rose-100">
-                  Pending Payments Today
+                  Due & Overdue Payments
                 </span>
                 <button
                   type="button"
@@ -313,7 +313,7 @@ export default function PaymentsListPage() {
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-slate-200 px-5 py-4">
           <h2 className="text-xl font-black tracking-tight text-slate-950">
-            {pendingTodayFilter ? 'Pending Payments Today' : 'Payment tracking'}
+            {duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment tracking'}
           </h2>
         </div>
 
@@ -321,7 +321,7 @@ export default function PaymentsListPage() {
           <div className="p-6 text-slate-500">Loading payments...</div>
         ) : rows.length === 0 ? (
           <div className="p-6 text-slate-500">
-            {pendingTodayFilter ? 'No pending payments due today.' : 'No payment records found for this month.'}
+            {duePaymentsFilter ? 'No due or overdue pending payments found.' : 'No payment records found for this month.'}
           </div>
         ) : (
           <>
