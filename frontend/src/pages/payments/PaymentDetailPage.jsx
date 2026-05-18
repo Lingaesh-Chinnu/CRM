@@ -67,6 +67,24 @@ function nextCashReference(payment) {
   return `${studentId}-P${String(paymentCount + 1).padStart(2, '0')}`
 }
 
+function allocationPreview(installments, amount) {
+  let remaining = Number(amount || 0)
+  const rows = []
+  for (const item of installments || []) {
+    if (remaining <= 0) break
+    const pending = Number(item.pending_amount || 0)
+    if (pending <= 0) continue
+    const allocated = Math.min(remaining, pending)
+    rows.push({
+      index: item.index,
+      label: item.label,
+      amount: allocated,
+    })
+    remaining -= allocated
+  }
+  return rows
+}
+
 export default function PaymentDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -103,6 +121,16 @@ export default function PaymentDetailPage() {
   const addInstallment = async (event) => {
     event.preventDefault()
     if (!payment) return
+    if (allInstallmentsCompleted) {
+      setMessage('All installments are already completed.')
+      return
+    }
+
+    const amount = Number(form.amount || 0)
+    if (amount > Number(payment.balance || 0)) {
+      setMessage('Payment amount cannot exceed the pending total fee balance.')
+      return
+    }
 
     const refConfig = referenceConfig(form.payment_mode)
     const referenceNumber = form.payment_mode === 'cash'
@@ -125,7 +153,7 @@ export default function PaymentDetailPage() {
       const { data } = await api.post('/installments/', {
         payment: payment.id,
         enrollment: payment.enrollment,
-        amount: Number(form.amount),
+        amount,
         payment_mode: form.payment_mode,
         payment_date: form.payment_date,
         reference_number: referenceNumber,
@@ -230,12 +258,18 @@ export default function PaymentDetailPage() {
   }
 
   const installmentSummary = payment.installment_summary || []
-  const activeInstallment = installmentSummary.find((item) => item.status !== 'paid') || installmentSummary[installmentSummary.length - 1]
+  const activeInstallment = installmentSummary.find((item) => item.status !== 'paid')
+  const allInstallmentsCompleted = installmentSummary.length > 0 && !activeInstallment
   const enteredAmount = Number(form.amount || 0)
-  const paymentNotice = activeInstallment && enteredAmount > 0
-    ? enteredAmount + Number(activeInstallment.paid_amount || 0) >= Number(activeInstallment.required_amount || 0)
-      ? 'Installment will be completed. Admin can generate the official bill after saving.'
-      : 'Partial payment will be saved as Pending Approval. Admin can generate the receipt.'
+  const previewRows = allocationPreview(installmentSummary, enteredAmount)
+  const paymentNotice = allInstallmentsCompleted
+    ? 'All installments are already completed.'
+    : activeInstallment && enteredAmount > 0
+      ? previewRows.length > 1
+        ? 'Payment will be carried forward across installments and saved as one payment entry.'
+        : enteredAmount + Number(activeInstallment.paid_amount || 0) >= Number(activeInstallment.required_amount || 0)
+          ? 'Installment will be completed. Admin can generate the official bill after saving.'
+          : 'Partial payment will be saved as Pending Approval. Admin can generate the receipt.'
     : ''
   const paymentHistory = [...(payment.installments || [])].sort((a, b) => {
     const dateCompare = String(a.payment_date || '').localeCompare(String(b.payment_date || ''))
@@ -557,7 +591,11 @@ export default function PaymentDetailPage() {
                 Required Rs {money(activeInstallment.required_amount)} | Paid Rs {money(activeInstallment.paid_amount)} | Pending Rs {money(activeInstallment.pending_amount)}
               </p>
             </div>
-          ) : null}
+          ) : (
+            <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+              All installments are already completed.
+            </div>
+          )}
           <div className="mt-5 space-y-4">
             <input
               type="number"
@@ -616,12 +654,26 @@ export default function PaymentDetailPage() {
             />
           </div>
 
+          {previewRows.length > 0 && (
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-black text-slate-950">Payment will be allocated as:</p>
+              <div className="mt-3 space-y-2">
+                {previewRows.map((row) => (
+                  <div key={`${row.index}-${row.label}`} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="font-semibold text-slate-700">{row.label}</span>
+                    <span className="font-black text-slate-950">Rs {money(row.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {paymentNotice && <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">{paymentNotice}</p>}
           {message && <p className="mt-4 text-sm text-slate-600">{message}</p>}
 
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || allInstallmentsCompleted}
             className="mt-6 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
             {saving ? 'Saving...' : 'Add Installment'}

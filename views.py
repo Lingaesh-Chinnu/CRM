@@ -3883,11 +3883,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if amount <= 0:
             return Response({'detail': 'Payment amount must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        allow_overpayment = request.user.is_super_admin and str(request.data.get('allow_overpayment', '')).lower() in {'1', 'true', 'yes'}
-        if amount > payment.balance and not allow_overpayment:
+        if amount > payment.balance:
             return Response({'detail': 'Payment amount cannot exceed the pending total fee balance.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        active = self._active_installment(payment)
+        allocation = self._payment_allocation(payment, amount)
+        if not allocation:
+            return Response({'detail': 'All installments are already completed.'}, status=status.HTTP_400_BAD_REQUEST)
+        active = allocation[0]
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         save_kwargs = {
@@ -3895,14 +3897,22 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'enrollment': payment.enrollment,
             'collected_by': request.user,
             'installment_index': active['index'],
-            'installment_label': active['label'],
+            'installment_label': self._allocation_label(allocation),
             'document_type': PaymentInstallment.DocumentType.RECEIPT,
         }
         self.perform_create(serializer, save_kwargs)
         headers = self.get_success_headers(serializer.data)
         message = 'Payment entry saved and marked Pending Approval.'
         self._notify_admins_payment_added(serializer.instance)
-        return Response({'detail': message, 'installment': serializer.data}, status=status.HTTP_201_CREATED, headers=headers)
+        return Response(
+            {
+                'detail': message,
+                'installment': serializer.data,
+                'allocation': allocation,
+            },
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
 
     def perform_create(self, serializer, save_kwargs=None):
         serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
@@ -3957,6 +3967,32 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             if item['status'] != 'paid':
                 return item
         return summary[-1]
+
+    def _payment_allocation(self, payment, amount):
+        remaining = Decimal(str(amount or 0))
+        allocation = []
+        for item in payment_installment_summary(payment):
+            if remaining <= 0:
+                break
+            pending_amount = Decimal(str(item.get('pending_amount') or 0))
+            if pending_amount <= 0:
+                continue
+            allocated_amount = min(remaining, pending_amount)
+            allocation.append({
+                'index': item['index'],
+                'label': item['label'],
+                'amount': allocated_amount,
+            })
+            remaining -= allocated_amount
+        return allocation
+
+    def _allocation_label(self, allocation):
+        labels = [str(item.get('label') or '').strip() for item in allocation if item.get('label')]
+        if not labels:
+            return ''
+        if len(labels) == 1:
+            return labels[0]
+        return ' + '.join(labels)
 
     def _document_number(self, installment):
         if installment.bill_number:

@@ -1230,15 +1230,13 @@ from crm.models import Payment, PaymentInstallment, AdminReceipt, get_payment_in
 
 def payment_installment_summary(payment):
     schedule = get_payment_installment_schedule(payment)
-    paid_by_index = {}
-    for installment in payment.installments.all():
-        index = installment.installment_index or 1
-        paid_by_index[index] = paid_by_index.get(index, Decimal('0')) + (installment.amount or Decimal('0'))
+    remaining_paid = Decimal(str(payment.paid_amount or 0))
 
     summary = []
     for index, item in enumerate(schedule, start=1):
         required_amount = Decimal(str(item.get('amount') or 0))
-        paid_amount = paid_by_index.get(index, Decimal('0'))
+        paid_amount = min(remaining_paid, required_amount)
+        remaining_paid = max(remaining_paid - paid_amount, Decimal('0'))
         pending_amount = max(required_amount - paid_amount, Decimal('0'))
         if paid_amount >= required_amount and required_amount > 0:
             status = 'paid'
