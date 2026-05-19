@@ -17,7 +17,7 @@ from views import (
     BranchViewSet, UserViewSet, UserTargetViewSet, BranchTargetViewSet,
     HistoricalAnalyticsEntryViewSet,
     CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
-    PaymentViewSet, PaymentInstallmentViewSet, DiscountViewSet,
+    PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportHistoryViewSet,
     ExternalLeadCaptureView, NotificationViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
@@ -44,6 +44,7 @@ router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'installments', PaymentInstallmentViewSet, basename='installment')
+router.register(r'payment-reason-requests', PaymentReasonRequestViewSet, basename='payment-reason-request')
 router.register(r'admin-receipts', AdminReceiptViewSet, basename='admin-receipt')
 
 api_urlpatterns = [

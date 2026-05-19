@@ -1029,6 +1029,42 @@ class PaymentInstallment(models.Model):
         return f'₹{self.amount} on {self.payment_date}'
 
 
+class PaymentReasonRequest(models.Model):
+    """Internal admin/staff workflow for pending payment reasons."""
+
+    class Status(models.TextChoices):
+        PENDING_RESPONSE = 'pending_response', 'Pending Response'
+        PENDING_ADMIN_APPROVAL = 'pending_admin_approval', 'Pending Admin Approval'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name='reason_requests')
+    installment_index = models.PositiveSmallIntegerField(db_index=True)
+    installment_label = models.CharField(max_length=80, blank=True)
+    installment_due_date = models.DateField(null=True, blank=True)
+    admin_user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payment_reason_requests_created')
+    branch_staff = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payment_reason_requests_assigned')
+    question = models.TextField(default='Why is this payment still pending?')
+    staff_response = models.TextField(blank=True)
+    promised_payment_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.PENDING_RESPONSE, db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'payment_reason_requests'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['payment', 'installment_index', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.payment_id} installment {self.installment_index} - {self.status}'
+
+
 class AdminReceipt(TimeStampedModel):
     """Standalone receipt for payments not tied to course installments."""
 
@@ -1148,6 +1184,8 @@ class Notification(models.Model):
         UNREAD = 'unread', 'Unread'
         READ = 'read', 'Read'
         RESOLVED = 'resolved', 'Resolved / Completed'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
 
     user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     title       = models.CharField(max_length=200)

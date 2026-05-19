@@ -295,10 +295,14 @@ Enjoy your special day, {{student_name}}!
   )
 }
 
-function WeeklyPendingPaymentCard({ amount }) {
+function WeeklyPendingPaymentCard({ amount, branchId }) {
+  const weeklyPaymentsUrl = branchId && branchId !== 'all'
+    ? `/payments?status=weekly_pending&branch=${branchId}`
+    : '/payments?status=weekly_pending'
+
   return (
     <Link
-      to="/payments?status=pending&due_this_week=1"
+      to={weeklyPaymentsUrl}
       className="block rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:bg-slate-50"
     >
       <p className="text-sm font-semibold text-slate-500">Weekly Pending Payment Reminder</p>
@@ -657,7 +661,10 @@ export default function DashboardPage() {
               </p>
             </div>
             <div className="mt-4 grid gap-4">
-              <WeeklyPendingPaymentCard amount={summaryStats?.this_week_pending_payments || 0} />
+              <WeeklyPendingPaymentCard
+                amount={summaryStats?.this_week_pending_payments || 0}
+                branchId={isSuperAdmin ? summaryBranch : ''}
+              />
               {!isSuperAdmin && <BirthdayReminderCardV2 birthdays={summaryStats?.today_birthdays || []} />}
             </div>
           </div>

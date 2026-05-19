@@ -1226,7 +1226,7 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 from decimal import Decimal
 
-from crm.models import Payment, PaymentInstallment, AdminReceipt, get_payment_installment_schedule
+from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, AdminReceipt, get_payment_installment_schedule
 
 
 def payment_installment_summary(payment):
@@ -1353,6 +1353,50 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
         return 'pending'
 
 
+class PaymentReasonRequestSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='payment.enrollment.name', read_only=True)
+    course_name = serializers.CharField(source='payment.enrollment.course.name', read_only=True)
+    branch_name = serializers.CharField(source='payment.enrollment.branch.name', read_only=True)
+    admin_name = serializers.CharField(source='admin_user.full_name', read_only=True)
+    branch_staff_name = serializers.CharField(source='branch_staff.full_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    submitted_by = serializers.CharField(source='branch_staff.full_name', read_only=True)
+    submitted_display = serializers.SerializerMethodField()
+    created_display = serializers.SerializerMethodField()
+    current_installment_due_date = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PaymentReasonRequest
+        fields = [
+            'id', 'payment', 'installment_index', 'installment_label',
+            'installment_due_date', 'current_installment_due_date',
+            'admin_user', 'admin_name', 'branch_staff', 'branch_staff_name',
+            'question', 'staff_response', 'promised_payment_date', 'status',
+            'status_display', 'student_name', 'course_name', 'branch_name',
+            'submitted_by', 'submitted_display', 'created_display',
+            'created_at', 'responded_at', 'approved_at', 'rejected_at',
+        ]
+        read_only_fields = [
+            'admin_user', 'branch_staff', 'question', 'status',
+            'created_at', 'responded_at', 'approved_at', 'rejected_at',
+        ]
+
+    def get_submitted_display(self, obj):
+        if not obj.responded_at:
+            return ''
+        return timezone.localtime(obj.responded_at).strftime('%d %b %Y, %I:%M %p')
+
+    def get_created_display(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')
+
+    def get_current_installment_due_date(self, obj):
+        summary = payment_installment_summary(obj.payment)
+        for item in summary:
+            if item['index'] == obj.installment_index:
+                return item.get('due_date')
+        return obj.installment_due_date
+
+
 class PaymentSerializer(serializers.ModelSerializer):
     balance       = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     installments  = PaymentInstallmentSerializer(many=True, read_only=True)
@@ -1365,6 +1409,7 @@ class PaymentSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
     installment_summary = serializers.SerializerMethodField()
+    active_reason_requests = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
@@ -1372,7 +1417,7 @@ class PaymentSerializer(serializers.ModelSerializer):
                   'course_name','first_class_date','branch','branch_name',
                   'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
-                  'installments','updated_at']
+                  'installments','active_reason_requests','updated_at']
         read_only_fields = ['paid_amount','balance','status']
 
     def get_branch_name(self, obj):
@@ -1390,6 +1435,15 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     def get_installment_summary(self, obj):
         return payment_installment_summary(obj)
+
+    def get_active_reason_requests(self, obj):
+        requests = obj.reason_requests.filter(
+            status__in=[
+                PaymentReasonRequest.Status.PENDING_RESPONSE,
+                PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL,
+            ],
+        ).select_related('admin_user', 'branch_staff', 'payment__enrollment__course', 'payment__enrollment__branch')
+        return PaymentReasonRequestSerializer(requests, many=True).data
 
 
 class AdminReceiptSerializer(serializers.ModelSerializer):

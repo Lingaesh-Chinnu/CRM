@@ -72,7 +72,7 @@ from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     PhoneNumberChangeHistory,
-    PaymentInstallment, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule, enrollment_payable_fee,
+    PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -80,6 +80,7 @@ from serializers import (
     CustomTokenObtainPairSerializer, UserPerformanceReportSerializer,
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
+    PaymentReasonRequestSerializer,
 )
 
 User = get_user_model()
@@ -563,6 +564,14 @@ def create_notification_once(user, title, message, notification_type=Notificatio
 def resolve_notifications(queryset):
     return queryset.exclude(status=Notification.Status.RESOLVED).update(
         status=Notification.Status.RESOLVED,
+        is_read=True,
+        resolved_at=timezone.now(),
+    )
+
+
+def mark_notifications_terminal(queryset, terminal_status):
+    return queryset.update(
+        status=terminal_status,
         is_read=True,
         resolved_at=timezone.now(),
     )
@@ -3606,6 +3615,17 @@ class PaymentFilter(django_filters.FilterSet):
         fields = ['status', 'enrollment__branch', 'due_this_week', 'next_payment_from', 'next_payment_to']
 
     def filter_status(self, queryset, name, value):
+        if value == 'weekly_pending':
+            today = timezone.localdate()
+            week_start = today - timedelta(days=(today.weekday() + 1) % 7)
+            week_end = week_start + timedelta(days=6)
+            return queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                paid_amount__lt=F('total_fees'),
+                next_payment_date__isnull=False,
+                next_payment_date__gte=week_start,
+                next_payment_date__lte=week_end,
+            )
         if value in ('due', 'pending_today'):
             today = timezone.localdate()
             return queryset.filter(
@@ -3630,6 +3650,201 @@ class PaymentFilter(django_filters.FilterSet):
             next_payment_date__gte=week_start,
             next_payment_date__lte=week_end,
         )
+
+
+class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
+    serializer_class = PaymentReasonRequestSerializer
+    permission_classes = [IsStaffOrAdmin]
+    pagination_class = None
+
+    ACTIVE_STATUSES = [
+        PaymentReasonRequest.Status.PENDING_RESPONSE,
+        PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL,
+    ]
+
+    def get_queryset(self):
+        queryset = PaymentReasonRequest.objects.select_related(
+            'payment__enrollment__branch',
+            'payment__enrollment__course',
+            'admin_user',
+            'branch_staff',
+        ).order_by('-created_at')
+        user = self.request.user
+        if user.is_super_admin:
+            return queryset
+        return queryset.filter(branch_staff=user)
+
+    def _installment_item(self, payment, installment_index):
+        for item in payment_installment_summary(payment):
+            if int(item.get('index') or 0) == int(installment_index or 0):
+                return item
+        return None
+
+    def _assigned_branch_staff(self, payment):
+        enrollment = payment.enrollment
+        candidates = [getattr(enrollment, 'enrolled_by', None), getattr(enrollment, 'created_by', None)]
+        for user in candidates:
+            if (
+                user
+                and user.is_active
+                and not user.is_super_admin
+                and user.branch_id == enrollment.branch_id
+            ):
+                return user
+        return User.objects.filter(
+            branch=enrollment.branch,
+            is_active=True,
+        ).exclude(role=User.Role.SUPER_ADMIN).order_by('first_name', 'last_name', 'username').first()
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can request a pending payment reason.'}, status=403)
+        payment = Payment.objects.select_related('enrollment__branch', 'enrollment__course').filter(
+            pk=request.data.get('payment'),
+        ).first()
+        if not payment:
+            return Response({'detail': 'Payment record not found.'}, status=404)
+        if payment.status not in [Payment.Status.UNPAID, Payment.Status.PARTIAL] or payment.balance <= 0:
+            return Response({'detail': 'Reason can be requested only for pending or partial payments.'}, status=400)
+        try:
+            installment_index = int(request.data.get('installment_index') or 0)
+        except (TypeError, ValueError):
+            installment_index = 0
+        installment = self._installment_item(payment, installment_index)
+        if not installment or Decimal(str(installment.get('pending_amount') or 0)) <= 0:
+            return Response({'detail': 'Select a pending installment for the reason request.'}, status=400)
+        existing = PaymentReasonRequest.objects.filter(
+            payment=payment,
+            installment_index=installment_index,
+            status__in=self.ACTIVE_STATUSES,
+        ).first()
+        if existing:
+            return Response(PaymentReasonRequestSerializer(existing).data, status=200)
+        branch_staff = self._assigned_branch_staff(payment)
+        if not branch_staff:
+            return Response({'detail': 'No active branch staff user found for this payment.'}, status=400)
+        reason_request = PaymentReasonRequest.objects.create(
+            payment=payment,
+            installment_index=installment_index,
+            installment_label=installment.get('label') or f'{installment_index} Installment',
+            installment_due_date=parse_date(installment.get('due_date')) if isinstance(installment.get('due_date'), str) else installment.get('due_date'),
+            admin_user=request.user,
+            branch_staff=branch_staff,
+            question='Why is this payment still pending?',
+        )
+        create_user_notification(
+            branch_staff,
+            'Payment Reason Requested',
+            'Admin requested reason for pending payment.',
+            Notification.NType.WARNING,
+            f'/payments?reason_request={reason_request.id}',
+        )
+        return Response(PaymentReasonRequestSerializer(reason_request).data, status=201)
+
+    @action(detail=True, methods=['post'], url_path='respond')
+    def respond(self, request, pk=None):
+        reason_request = self.get_object()
+        if request.user.is_super_admin or reason_request.branch_staff_id != request.user.id:
+            return Response({'detail': 'Only the assigned branch staff user can respond.'}, status=403)
+        if reason_request.status != PaymentReasonRequest.Status.PENDING_RESPONSE:
+            return Response({'detail': 'This request is not waiting for a staff response.'}, status=400)
+        response_text = str(request.data.get('staff_response') or '').strip()
+        promised_payment_date = parse_date(str(request.data.get('promised_payment_date') or '').strip())
+        if not response_text:
+            return Response({'staff_response': 'Response / Reason is required.'}, status=400)
+        if not promised_payment_date:
+            return Response({'promised_payment_date': 'Promised Payment Date is required.'}, status=400)
+        if promised_payment_date < timezone.localdate():
+            return Response({'promised_payment_date': 'Promised Payment Date cannot be in the past.'}, status=400)
+        reason_request.staff_response = response_text
+        reason_request.promised_payment_date = promised_payment_date
+        reason_request.status = PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL
+        reason_request.responded_at = timezone.now()
+        reason_request.save(update_fields=[
+            'staff_response', 'promised_payment_date', 'status', 'responded_at', 'updated_at',
+        ])
+        resolve_notifications(Notification.objects.filter(
+            user=request.user,
+            title='Payment Reason Requested',
+            related_url=f'/payments?reason_request={reason_request.id}',
+        ))
+        create_user_notification(
+            reason_request.admin_user,
+            'Payment Reason Response Submitted',
+            f'{request.user.full_name} responded to pending payment reason request.',
+            Notification.NType.INFO,
+            f'/payments?reason_request={reason_request.id}',
+        )
+        return Response(PaymentReasonRequestSerializer(reason_request).data)
+
+    def _update_requested_due_date(self, reason_request):
+        payment = reason_request.payment
+        schedule = [
+            dict(item)
+            for item in (payment.manual_installment_schedule or get_payment_installment_schedule(payment))
+        ]
+        target_index = reason_request.installment_index - 1
+        if target_index < 0 or target_index >= len(schedule):
+            raise ValueError('Requested installment is no longer available.')
+        schedule[target_index]['due_date'] = reason_request.promised_payment_date.isoformat()
+        payment.manual_installment_schedule = schedule
+        payment.save(update_fields=['manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can approve payment reason responses.'}, status=403)
+        reason_request = self.get_object()
+        if reason_request.status != PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL:
+            return Response({'detail': 'This request is not waiting for admin approval.'}, status=400)
+        try:
+            self._update_requested_due_date(reason_request)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+        reason_request.status = PaymentReasonRequest.Status.APPROVED
+        reason_request.approved_at = timezone.now()
+        reason_request.save(update_fields=['status', 'approved_at', 'updated_at'])
+        mark_notifications_terminal(
+            Notification.objects.filter(
+                user=reason_request.admin_user,
+                title='Payment Reason Response Submitted',
+                related_url=f'/payments?reason_request={reason_request.id}',
+            ),
+            Notification.Status.APPROVED,
+        )
+        return Response(PaymentReasonRequestSerializer(reason_request).data)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can reject payment reason responses.'}, status=403)
+        reason_request = self.get_object()
+        if reason_request.status != PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL:
+            return Response({'detail': 'This request is not waiting for admin approval.'}, status=400)
+        reason_request.status = PaymentReasonRequest.Status.REJECTED
+        reason_request.rejected_at = timezone.now()
+        reason_request.save(update_fields=['status', 'rejected_at', 'updated_at'])
+        mark_notifications_terminal(
+            Notification.objects.filter(
+                user=reason_request.admin_user,
+                title='Payment Reason Response Submitted',
+                related_url=f'/payments?reason_request={reason_request.id}',
+            ),
+            Notification.Status.REJECTED,
+        )
+        notification = create_user_notification(
+            reason_request.branch_staff,
+            'Payment Reason Response Rejected',
+            'Your payment reason response was rejected by Admin.',
+            Notification.NType.ERROR,
+            f'/payments?reason_request={reason_request.id}',
+        )
+        if notification:
+            notification.status = Notification.Status.REJECTED
+            notification.is_read = True
+            notification.resolved_at = timezone.now()
+            notification.save(update_fields=['status', 'is_read', 'resolved_at'])
+        return Response(PaymentReasonRequestSerializer(reason_request).data)
 
 
 class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
@@ -3663,7 +3878,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
             qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
-        if self.action in ('list', 'export') and self.request.query_params.get('status') not in ('due', 'pending_today'):
+        if self.action in ('list', 'export') and self.request.query_params.get('status') not in ('due', 'pending_today', 'weekly_pending'):
             month_start, month_end = self._month_bounds()
             qs = qs.filter(
                 Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)

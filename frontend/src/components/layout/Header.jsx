@@ -32,6 +32,8 @@ function notificationDateTime(item) {
 }
 
 function statusLabel(item) {
+  if (item.status === 'approved') return 'Approved'
+  if (item.status === 'rejected') return 'Rejected'
   if (item.status === 'resolved') return 'Done'
   if (item.status === 'read' || item.is_read) return 'Read'
   return 'Yet To Do'
