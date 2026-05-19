@@ -285,7 +285,7 @@ export default function PaymentDetailPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Payments</p>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{payment.student_name}</h1>
           <p className="mt-3 text-sm text-slate-500">
-            {payment.student_number} | Enrollment #{payment.enrollment}
+            {payment.student_number} | {payment.course_name || 'Course not set'}
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
