@@ -1286,6 +1286,18 @@ class BranchTargetViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    def update(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Target records cannot be edited. Delete the existing target and create a new one.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        return Response(
+            {'detail': 'Target records cannot be edited. Delete the existing target and create a new one.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
 
 class HistoricalAnalyticsEntryViewSet(viewsets.ModelViewSet):
     """Admin CRUD for manually entered 2023-2025 branch analytics."""

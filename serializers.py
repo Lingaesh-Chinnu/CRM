@@ -147,6 +147,17 @@ class BranchTargetSerializer(serializers.ModelSerializer):
                   'created_at', 'updated_at']
         read_only_fields = ['created_by']
 
+    def validate(self, attrs):
+        branch = attrs.get('branch') or getattr(self.instance, 'branch', None)
+        month = attrs.get('month') or getattr(self.instance, 'month', None)
+        year = attrs.get('year') or getattr(self.instance, 'year', None)
+        if self.instance is None and branch and month and year:
+            if BranchTarget.objects.filter(branch=branch, month=month, year=year).exists():
+                raise serializers.ValidationError({
+                    'detail': 'Target already exists for this branch and month. Delete the existing target to create a new one.'
+                })
+        return attrs
+
 
 class HistoricalAnalyticsEntrySerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)

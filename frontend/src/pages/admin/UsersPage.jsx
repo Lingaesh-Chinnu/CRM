@@ -349,18 +349,36 @@ export default function UsersPage() {
                         </button>
                       </div>
 
-                      <div className="flex items-start gap-3">
+                      <div className="flex items-start gap-2">
                         <button
                           onClick={() => saveUser(user)}
-                          className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                          className="h-11 flex-1 rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
                         >
                           Save
                         </button>
                         <button
+                          type="button"
                           onClick={() => deleteUser(user)}
-                          className="w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+                          title="Delete User"
+                          aria-label={`Delete user ${user.username}`}
+                          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800"
                         >
-                          Delete
+                          <svg
+                            aria-hidden="true"
+                            className="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M3 6h18" />
+                            <path d="M8 6V4h8v2" />
+                            <path d="M19 6l-1 14H6L5 6" />
+                            <path d="M10 11v5" />
+                            <path d="M14 11v5" />
+                          </svg>
                         </button>
                       </div>
                     </div>

@@ -33,12 +33,43 @@ function emptyForm() {
   }
 }
 
+function formatValue(value) {
+  return Number(value || 0).toLocaleString('en-IN')
+}
+
+function targetValue(target) {
+  return target.value_target ?? target.revenue_target ?? 0
+}
+
+function DeleteIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-4 w-4"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  )
+}
+
 export default function TargetsPage() {
   const [branches, setBranches] = useState([])
   const [targets, setTargets] = useState([])
   const [form, setForm] = useState(emptyForm())
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
+  const [targetToDelete, setTargetToDelete] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     loadPage()
@@ -83,38 +114,34 @@ export default function TargetsPage() {
       )
 
       if (existing) {
-        await api.patch(`/branch-targets/${existing.id}/`, preparePayload(form))
-        setMessage('Target updated successfully.')
-      } else {
-        await api.post('/branch-targets/', preparePayload(form))
-        setMessage('Targets saved successfully.')
+        setMessage('Target already exists for this branch and month. Delete the existing target to create a new one.')
+        return
       }
 
+      await api.post('/branch-targets/', preparePayload(form))
+      setMessage('Targets saved successfully.')
       setForm(emptyForm())
       await loadPage()
     } catch (error) {
       const details = error.response?.data
-      setMessage(typeof details === 'object' ? JSON.stringify(details) : 'Failed to save targets.')
+      setMessage(details?.detail || (typeof details === 'object' ? JSON.stringify(details) : 'Failed to save targets.'))
     }
   }
 
-  const updateTargetField = (index, field, value) => {
-    setTargets((current) => {
-      const next = [...current]
-      next[index] = { ...next[index], [field]: value }
-      return next
-    })
-  }
-
-  const updateExistingTarget = async (target) => {
+  const deleteTarget = async () => {
+    if (!targetToDelete) return
     setMessage('')
+    setDeleting(true)
     try {
-      await api.patch(`/branch-targets/${target.id}/`, preparePayload(target))
-      setMessage(`Updated target for ${target.branch_name}.`)
+      await api.delete(`/branch-targets/${targetToDelete.id}/`)
+      setMessage('Target record deleted. You can create a new target for that branch and month.')
+      setTargetToDelete(null)
       await loadPage()
     } catch (error) {
       const details = error.response?.data
-      setMessage(typeof details === 'object' ? JSON.stringify(details) : 'Failed to update target.')
+      setMessage(details?.detail || (typeof details === 'object' ? JSON.stringify(details) : 'Failed to delete target.'))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -124,7 +151,7 @@ export default function TargetsPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Targets</p>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Branch walk-in, enrollment, and value targets</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          Fix monthly targets for each branch and update them anytime from the same control room.
+          Fix monthly targets for each branch. Saved records are locked; delete an old record before creating a replacement.
         </p>
       </section>
 
@@ -191,75 +218,81 @@ export default function TargetsPage() {
           ) : targets.length === 0 ? (
             <div className="p-6 text-slate-500">No target records available yet.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <div className="min-w-[1000px]">
-                <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  <div>Branch</div>
-                  <div>Month</div>
-                  <div>Year</div>
-                  <div>Leads</div>
-                  <div>Walk-ins</div>
-                  <div>Enrollments</div>
-                  <div>Value</div>
-                  <div>Action</div>
-                </div>
-
-                <div className="divide-y divide-slate-200">
-                  {targets.map((target, index) => (
-                    <div key={target.id} className="grid grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr_1fr_0.8fr] gap-4 px-6 py-5">
-                      <div className="flex items-center text-sm font-semibold text-slate-950">
-                        {target.branch_name}
-                      </div>
-                      <select
-                        value={target.month}
-                        onChange={(event) => updateTargetField(index, 'month', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      >
-                        {monthOptions.map((month) => (
-                          <option key={month.value} value={month.value}>
-                            {month.label}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        value={target.year}
-                        onChange={(event) => updateTargetField(index, 'year', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      />
-                      <input
-                        value={target.lead_target}
-                        onChange={(event) => updateTargetField(index, 'lead_target', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      />
-                      <input
-                        value={target.walkin_target}
-                        onChange={(event) => updateTargetField(index, 'walkin_target', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      />
-                      <input
-                        value={target.enroll_target}
-                        onChange={(event) => updateTargetField(index, 'enroll_target', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      />
-                      <input
-                        value={target.value_target ?? target.revenue_target}
-                        onChange={(event) => updateTargetField(index, 'value_target', event.target.value)}
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                      />
-                      <button
-                        onClick={() => updateExistingTarget(target)}
-                        className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800"
-                      >
-                        Save
-                      </button>
+            <div className="grid gap-4 p-5 sm:p-6">
+              {targets.map((target) => (
+                <article key={target.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-black tracking-tight text-slate-950">{target.branch_name}</h3>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        {monthOptions.find((month) => Number(month.value) === Number(target.month))?.label || target.month} {target.year}
+                      </p>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <button
+                      type="button"
+                      onClick={() => setTargetToDelete(target)}
+                      title="Delete Target"
+                      aria-label={`Delete target for ${target.branch_name}`}
+                      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100 hover:text-rose-800"
+                    >
+                      <DeleteIcon />
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl bg-white px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Leads</p>
+                      <p className="mt-1 text-lg font-black text-slate-950">{formatValue(target.lead_target)}</p>
+                    </div>
+                    <div className="rounded-xl bg-white px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Walk-ins</p>
+                      <p className="mt-1 text-lg font-black text-slate-950">{formatValue(target.walkin_target)}</p>
+                    </div>
+                    <div className="rounded-xl bg-white px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Enrollments</p>
+                      <p className="mt-1 text-lg font-black text-slate-950">{formatValue(target.enroll_target)}</p>
+                    </div>
+                    <div className="rounded-xl bg-white px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Value</p>
+                      <p className="mt-1 text-lg font-black text-slate-950">₹{formatValue(targetValue(target))}</p>
+                    </div>
+                  </div>
+                </article>
+              ))}
             </div>
           )}
         </section>
       </section>
+
+      {targetToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl">
+            <h3 className="text-lg font-black tracking-tight text-slate-950">Delete target record</h3>
+            <p className="mt-3 text-sm leading-6 text-slate-600">
+              Are you sure you want to delete this target record? You can create a new target after deleting it.
+            </p>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setTargetToDelete(null)}
+                disabled={deleting}
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={deleteTarget}
+                disabled={deleting}
+                className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+              >
+                <DeleteIcon />
+                {deleting ? 'Deleting...' : 'Delete Target'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
