@@ -34,7 +34,7 @@ function notificationDateTime(item) {
 function statusLabel(item) {
   if (item.status === 'resolved') return 'Done'
   if (item.status === 'read' || item.is_read) return 'Read'
-  return 'Yet to do'
+  return 'Yet To Do'
 }
 
 export default function Header({ onMenuClick }) {
@@ -74,7 +74,7 @@ export default function Header({ onMenuClick }) {
     navigate('/login')
   }
 
-  const unreadCount = notifications.filter((item) => item.status !== 'resolved' && !item.is_read).length
+  const unreadCount = notifications.filter((item) => item.status === 'unread' && !item.is_read).length
   const toneClass = (type) => {
     if (type === 'error') return 'border-rose-200 bg-rose-50 text-rose-800'
     if (type === 'warning') return 'border-amber-200 bg-amber-50 text-amber-800'

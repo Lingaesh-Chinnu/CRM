@@ -590,6 +590,27 @@ def resolve_rules_signed_notifications(enrollment_id):
     ))
 
 
+def payment_has_active_due(payment, due_date=None):
+    due_date = due_date or timezone.localdate()
+    return (
+        payment.status in [Payment.Status.UNPAID, Payment.Status.PARTIAL]
+        and payment.balance > 0
+        and payment.next_payment_date == due_date
+    )
+
+
+def resolve_payment_due_notifications(payment_id):
+    resolve_notifications(Notification.objects.filter(
+        title='Payment due today',
+        related_url=f'/payments/{payment_id}',
+    ))
+
+
+def resolve_payment_due_notifications_if_inactive(payment):
+    if not payment_has_active_due(payment):
+        resolve_payment_due_notifications(payment.id)
+
+
 def notify_rules_signed(enrollment, submitted_at=None):
     title = 'Rules & Regulations Signed'
     submitted_value = submitted_at or timezone.now()
@@ -703,6 +724,14 @@ def prune_stale_follow_up_notifications(user, lead_due_ids, lead_missed_ids, wal
         resolve_notifications(stale_notifications)
 
 
+def prune_stale_payment_due_notifications(user, active_payment_ids):
+    active_urls = {f'/payments/{record_id}' for record_id in active_payment_ids}
+    stale_notifications = Notification.objects.filter(user=user, title='Payment due today')
+    if active_urls:
+        stale_notifications = stale_notifications.exclude(related_url__in=active_urls)
+    resolve_notifications(stale_notifications)
+
+
 def clear_follow_up_notifications_for_record(record_type, record_id):
     if record_type == FollowUp.RecordType.LEAD:
         titles = ['Lead follow-up due today', 'Missed lead follow-up']
@@ -724,23 +753,29 @@ def generate_smart_notifications(user):
     walkin_due_qs = active_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
     walkin_missed_qs = missed_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
 
-    lead_due_ids = list(lead_due_qs.values_list('id', flat=True)[:25])
-    lead_missed_ids = list(lead_missed_qs.values_list('id', flat=True)[:25])
-    walkin_due_ids = list(walkin_due_qs.values_list('id', flat=True)[:25])
-    walkin_missed_ids = list(walkin_missed_qs.values_list('id', flat=True)[:25])
+    lead_due_ids = list(lead_due_qs.values_list('id', flat=True))
+    lead_missed_ids = list(lead_missed_qs.values_list('id', flat=True))
+    walkin_due_ids = list(walkin_due_qs.values_list('id', flat=True))
+    walkin_missed_ids = list(walkin_missed_qs.values_list('id', flat=True))
     prune_stale_follow_up_notifications(user, lead_due_ids, lead_missed_ids, walkin_due_ids, walkin_missed_ids)
 
-    for lead in lead_due_qs.filter(id__in=lead_due_ids):
+    for lead in lead_due_qs[:25]:
         create_notification_once(user, 'Lead follow-up due today', f'{lead.name} needs follow-up today.', Notification.NType.WARNING, f'/leads/{lead.id}')
-    for lead in lead_missed_qs.filter(id__in=lead_missed_ids):
+    for lead in lead_missed_qs[:25]:
         create_notification_once(user, 'Missed lead follow-up', f'{lead.name} has a missed follow-up.', Notification.NType.ERROR, f'/leads/{lead.id}')
-    for walkin in walkin_due_qs.filter(id__in=walkin_due_ids):
+    for walkin in walkin_due_qs[:25]:
         create_notification_once(user, 'Walk-in follow-up due today', f'{walkin.name} needs follow-up today.', Notification.NType.WARNING, f'/walkins/{walkin.id}')
-    for walkin in walkin_missed_qs.filter(id__in=walkin_missed_ids):
+    for walkin in walkin_missed_qs[:25]:
         create_notification_once(user, 'Missed walk-in follow-up', f'{walkin.name} has a missed follow-up.', Notification.NType.ERROR, f'/walkins/{walkin.id}')
-    payment_qs = Payment.objects.filter(next_payment_date=today, status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL]).select_related('enrollment')
+    payment_qs = Payment.objects.filter(
+        next_payment_date=today,
+        status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+        paid_amount__lt=F('total_fees'),
+    ).select_related('enrollment')
     if not user.is_super_admin:
         payment_qs = payment_qs.filter(enrollment__branch=user.branch)
+    payment_due_ids = list(payment_qs.values_list('id', flat=True))
+    prune_stale_payment_due_notifications(user, payment_due_ids)
     for payment in payment_qs[:25]:
         create_notification_once(user, 'Payment due today', f'{payment.enrollment.name} has a payment due today.', Notification.NType.WARNING, f'/payments/{payment.id}')
     enrollment_qs = Enrollment.objects.filter(
@@ -2503,13 +2538,13 @@ class NotificationViewSet(viewsets.ModelViewSet):
         if status_filter in dict(Notification.Status.choices):
             queryset = queryset.filter(status=status_filter)
         if state_filter == 'active':
-            queryset = queryset.exclude(status=Notification.Status.RESOLVED)
+            queryset = queryset.filter(status=Notification.Status.UNREAD, is_read=False)
         elif state_filter == 'done':
             queryset = queryset.filter(status=Notification.Status.RESOLVED)
         if date_filter:
             queryset = queryset.filter(created_at__date=date_filter)
         if scope != 'all':
-            queryset = queryset.exclude(status=Notification.Status.RESOLVED).filter(is_read=False)
+            queryset = queryset.filter(status=Notification.Status.UNREAD, is_read=False)
         return queryset
 
     @action(detail=False, methods=['post'], url_path='mark-all-read')
@@ -3277,6 +3312,7 @@ class RulesSignedPdfView(APIView):
         pdf_bytes = binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
         if not pdf_bytes:
             return proof_unavailable_response()
+        resolve_rules_signed_notifications(enrollment.id)
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
         return response
@@ -3932,6 +3968,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         payment.manual_installment_schedule = cleaned
         payment.update_status()
         payment.save(update_fields=['manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
+        resolve_payment_due_notifications_if_inactive(payment)
         return Response(PaymentSerializer(payment, context={'request': request}).data)
 
 
@@ -3996,6 +4033,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'document_type': PaymentInstallment.DocumentType.RECEIPT,
         }
         self.perform_create(serializer, save_kwargs)
+        payment.refresh_from_db()
+        resolve_payment_due_notifications_if_inactive(payment)
         headers = self.get_success_headers(serializer.data)
         message = 'Payment entry saved and marked Pending Approval.'
         self._notify_admins_payment_added(serializer.instance)
@@ -4039,7 +4078,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment = self.get_object()
         if self._document_number(installment) or installment.bill_generated_at:
             return Response({'detail': 'Generated payment documents cannot be edited.'}, status=400)
-        return super().update(request, *args, **kwargs)
+        response = super().update(request, *args, **kwargs)
+        installment.payment.refresh_from_db()
+        resolve_payment_due_notifications_if_inactive(installment.payment)
+        return response
 
     def destroy(self, request, *args, **kwargs):
         installment = self.get_object()

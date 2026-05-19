@@ -4,7 +4,7 @@ import { api } from '../../services/api'
 
 const statusOptions = [
   { value: '', label: 'All' },
-  { value: 'active', label: 'Yet to do' },
+  { value: 'active', label: 'Yet To Do' },
   { value: 'done', label: 'Done' },
 ]
 
@@ -29,7 +29,7 @@ function notificationDateTime(item) {
 function statusLabel(item) {
   if (item.status === 'resolved') return 'Done'
   if (item.status === 'read' || item.is_read) return 'Read'
-  return 'Yet to do'
+  return 'Yet To Do'
 }
 
 function statusClass(status) {
