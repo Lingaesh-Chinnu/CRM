@@ -5,13 +5,6 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const branchOrder = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
-const statusFilters = [
-  { value: '', label: 'All' },
-  { value: 'active', label: 'Active' },
-  { value: 'closed', label: 'Closed' },
-  { value: 'my_branch', label: 'My Branch' },
-  { value: 'all_branches', label: 'All Branches' },
-]
 
 function statusClass(status) {
   if (status === 'closed') return 'bg-slate-100 text-slate-700 border-slate-200'
@@ -31,7 +24,7 @@ export default function TeamBoardPage() {
   const [notices, setNotices] = useState([])
   const [branches, setBranches] = useState([])
   const [selectedId, setSelectedId] = useState(searchParams.get('notice') || '')
-  const [filter, setFilter] = useState(searchParams.get('scope') || '')
+  const [branchFilter, setBranchFilter] = useState(searchParams.get('branch') || '')
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [reply, setReply] = useState('')
@@ -64,7 +57,7 @@ export default function TeamBoardPage() {
 
   useEffect(() => {
     fetchNotices()
-  }, [filter])
+  }, [branchFilter, isSuperAdmin])
 
   useEffect(() => {
     const noticeId = searchParams.get('notice') || ''
@@ -75,7 +68,7 @@ export default function TeamBoardPage() {
     setLoading(true)
     try {
       const params = {}
-      if (filter) params.scope = filter
+      if (isSuperAdmin && branchFilter) params.branch = branchFilter
       const { data } = await api.get('/team-notices/', { params })
       const rows = data.results || data || []
       setNotices(rows)
@@ -91,7 +84,7 @@ export default function TeamBoardPage() {
 
   const openNotice = async (notice) => {
     setSelectedId(String(notice.id))
-    setSearchParams({ notice: String(notice.id), ...(filter ? { scope: filter } : {}) })
+    setSearchParams({ notice: String(notice.id), ...(isSuperAdmin && branchFilter ? { branch: branchFilter } : {}) })
     try {
       const { data } = await api.get(`/team-notices/${notice.id}/`)
       setNotices((current) => current.map((item) => item.id === data.id ? data : item))
@@ -205,23 +198,26 @@ export default function TeamBoardPage() {
       )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-4">
-          {statusFilters.map((item) => (
-            <button
-              key={item.value || 'all'}
-              type="button"
-              onClick={() => {
-                setFilter(item.value)
-                setSearchParams(item.value ? { scope: item.value } : {})
-              }}
-              className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] ${
-                filter === item.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-600'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        {isSuperAdmin && (
+          <div className="flex flex-wrap gap-2 border-b border-slate-200 px-5 py-4">
+            {[{ id: '', name: 'All Branches' }, ...branches].map((branch) => (
+              <button
+                key={branch.id || 'all-branches'}
+                type="button"
+                onClick={() => {
+                  const value = branch.id ? String(branch.id) : ''
+                  setBranchFilter(value)
+                  setSearchParams(value ? { branch: value } : {})
+                }}
+                className={`rounded-full px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] ${
+                  branchFilter === String(branch.id || '') ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-600'
+                }`}
+              >
+                {branch.name}
+              </button>
+            ))}
+          </div>
+        )}
         {message && <div className="border-b border-slate-200 bg-slate-50 px-5 py-3 text-sm font-semibold text-slate-700">{message}</div>}
         <div className="grid min-h-[520px] lg:grid-cols-[360px_minmax(0,1fr)]">
           <div className="border-b border-slate-200 lg:border-b-0 lg:border-r">

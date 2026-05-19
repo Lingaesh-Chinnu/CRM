@@ -2609,21 +2609,12 @@ class TeamNoticeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = self.visible_queryset().order_by('-created_at')
         status_filter = self.request.query_params.get('status', '').strip()
-        scope = self.request.query_params.get('scope', '').strip()
+        branch_id = self.request.query_params.get('branch', '').strip()
+
+        if branch_id and self.request.user.is_super_admin:
+            queryset = queryset.filter(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch_id=branch_id)
         if status_filter in dict(TeamNotice.Status.choices):
             queryset = queryset.filter(status=status_filter)
-        if scope == 'active':
-            queryset = queryset.filter(status=TeamNotice.Status.ACTIVE)
-        elif scope == 'closed':
-            queryset = queryset.filter(status=TeamNotice.Status.CLOSED)
-        elif scope == 'my_branch' and not self.request.user.is_super_admin:
-            queryset = queryset.filter(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch=self.request.user.branch)
-        elif scope == 'my_branch' and self.request.user.is_super_admin:
-            branch_id = self.request.query_params.get('branch')
-            if branch_id:
-                queryset = queryset.filter(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch_id=branch_id)
-        elif scope == 'all_branches':
-            queryset = queryset.filter(audience_type=TeamNotice.AudienceType.ALL_BRANCHES)
         return queryset
 
     def perform_create(self, serializer):
