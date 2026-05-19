@@ -55,10 +55,26 @@ function assignedUserName(lead) {
   return lead.assigned_user?.name || lead.assigned_to_name || 'Unassigned'
 }
 
+const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
+
+function statusCount(rows, status) {
+  return rows.filter((row) => row.status === status).length
+}
+
 export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
-  const [filters, setFilters] = useState({ name: '', phone: '', status: '', followUp: '', followUpBy: '' })
+  const [branches, setBranches] = useState([])
+  const [filters, setFilters] = useState({
+    name: '',
+    phone: '',
+    status: '',
+    followUp: '',
+    followUpBy: '',
+    branch: '',
+    createdFrom: '',
+    createdTo: '',
+  })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -68,6 +84,7 @@ export default function LeadsListPage() {
   const [importError, setImportError] = useState('')
   const { user } = useSelector((state) => state.auth)
   const canImportLeads = user?.role && user.role !== 'super_admin'
+  const isSuperAdmin = user?.role === 'super_admin'
   const [searchParams] = useSearchParams()
   const statusFilter = searchParams.get('status') || ''
   const walkinDateFrom = searchParams.get('walkin_date_from') || ''
@@ -103,17 +120,58 @@ export default function LeadsListPage() {
     })
   }, [filters, leads])
 
-  const hasFilters = Boolean(filters.name || filters.phone || filters.status || filters.followUp || filters.followUpBy)
+  const hasFilters = Boolean(
+    filters.name
+    || filters.phone
+    || filters.status
+    || filters.followUp
+    || filters.followUpBy
+    || filters.branch
+    || filters.createdFrom
+    || filters.createdTo
+  )
+  const leadSummary = [
+    ['Total', filteredLeads.length],
+    ['New', statusCount(filteredLeads, 'new')],
+    ['Follow Up', statusCount(filteredLeads, 'follow_up')],
+    ['Will Walk-in', statusCount(filteredLeads, 'will_walk_in')],
+    ['Converted', statusCount(filteredLeads, 'converted')],
+  ]
 
   useEffect(() => {
     fetchLeads()
-  }, [statusFilter, walkinDateFrom, walkinDateTo, nextFollowUpDateFrom, nextFollowUpDateTo, focus])
+  }, [
+    statusFilter,
+    walkinDateFrom,
+    walkinDateTo,
+    nextFollowUpDateFrom,
+    nextFollowUpDateTo,
+    focus,
+    isSuperAdmin,
+    filters.branch,
+    filters.createdFrom,
+    filters.createdTo,
+  ])
 
   useEffect(() => {
     api.get('/leads/staff-options/')
       .then(({ data }) => setStaffUsers(data || []))
       .catch(() => setStaffUsers([]))
   }, [])
+
+  useEffect(() => {
+    if (!isSuperAdmin) return
+    api.get('/branches/')
+      .then(({ data }) => {
+        const rows = data.results || data || []
+        setBranches(
+          rows
+            .filter((branch) => adminBranchNames.includes(branch.name))
+            .sort((a, b) => adminBranchNames.indexOf(a.name) - adminBranchNames.indexOf(b.name))
+        )
+      })
+      .catch(() => setBranches([]))
+  }, [isSuperAdmin])
 
   const fetchLeads = async () => {
     setLoading(true)
@@ -124,6 +182,9 @@ export default function LeadsListPage() {
       if (walkinDateTo) params.walkin_date_to = walkinDateTo
       if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
+      if (isSuperAdmin && filters.branch) params.branch = filters.branch
+      if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
+      if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
       setLoadMessage('')
@@ -144,7 +205,16 @@ export default function LeadsListPage() {
   }
 
   const clearFilters = () => {
-    setFilters({ name: '', phone: '', status: '', followUp: '', followUpBy: '' })
+    setFilters({
+      name: '',
+      phone: '',
+      status: '',
+      followUp: '',
+      followUpBy: '',
+      branch: '',
+      createdFrom: '',
+      createdTo: '',
+    })
   }
 
   const submitImport = async (event) => {
@@ -267,7 +337,7 @@ export default function LeadsListPage() {
       )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] lg:items-end">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] 2xl:items-end">
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
             <input
@@ -297,6 +367,41 @@ export default function LeadsListPage() {
               ))}
             </select>
           </label>
+          {isSuperAdmin && (
+            <>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Branch</span>
+                <select
+                  value={filters.branch}
+                  onChange={(event) => updateFilter('branch', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                >
+                  <option value="">All Branches</option>
+                  {branches.map((branch) => (
+                    <option key={branch.id} value={branch.id}>{branch.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-600">From Date</span>
+                <input
+                  type="date"
+                  value={filters.createdFrom}
+                  onChange={(event) => updateFilter('createdFrom', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-600">To Date</span>
+                <input
+                  type="date"
+                  value={filters.createdTo}
+                  onChange={(event) => updateFilter('createdTo', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                />
+              </label>
+            </>
+          )}
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Follow-up By</span>
             <select
@@ -314,7 +419,7 @@ export default function LeadsListPage() {
             type="button"
             onClick={clearFilters}
             disabled={!hasFilters}
-            className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 md:col-span-2 xl:col-span-4 2xl:col-span-1"
           >
             Clear Filters
           </button>
@@ -342,6 +447,13 @@ export default function LeadsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 px-6 py-4 text-xs font-bold text-slate-600 sm:px-8">
+          {leadSummary.map(([label, value]) => (
+            <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+              {label} {value}
+            </span>
+          ))}
+        </div>
         {loadMessage && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
             {loadMessage}

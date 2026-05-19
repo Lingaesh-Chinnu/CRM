@@ -686,7 +686,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
     class Meta:
         model  = WalkIn
         fields = ['id','candidate_number','name','phone','email','course_name',
-                  'branch_name','status','visit_date','demo_class','assigned_name',
+                  'branch_name','status','visit_date','follow_up_date','remarks','demo_class','assigned_name',
                   'assigned_to','created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',

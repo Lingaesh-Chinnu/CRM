@@ -889,7 +889,7 @@ def validate_data_image(image_data, label):
 
 def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submitted_at=None):
     try:
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw, ImageFont, ImageOps
     except ImportError as exc:
         raise RuntimeError('Pillow is required to generate signed Rules & Regulation PDFs.') from exc
 
@@ -990,11 +990,32 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
     y += 58
     if selfie_bytes:
         selfie = Image.open(io.BytesIO(selfie_bytes)).convert('RGB')
-        selfie.thumbnail((180, 220))
-        selfie_x = width - margin - 180
-        draw.rounded_rectangle((selfie_x - 10, margin - 10, selfie_x + 190, margin + 232), radius=8, outline=border, width=1)
-        page.paste(selfie, (selfie_x, margin))
-        draw.text((selfie_x, margin + 206), 'Student Identity Photo', fill=muted, font=label_font)
+        card_width = 230
+        card_height = 290
+        image_width = 196
+        image_height = 220
+        card_x = width - margin - card_width
+        card_y = margin - 8
+        image_x = card_x + 17
+        image_y = card_y + 17
+        resample = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.LANCZOS)
+        photo = ImageOps.fit(selfie, (image_width, image_height), method=resample)
+        draw.rounded_rectangle(
+            (card_x, card_y, card_x + card_width, card_y + card_height),
+            radius=12,
+            fill='white',
+            outline=border,
+            width=1,
+        )
+        page.paste(photo, (image_x, image_y))
+        draw.rounded_rectangle(
+            (image_x, image_y, image_x + image_width, image_y + image_height),
+            radius=8,
+            outline=border,
+            width=1,
+        )
+        draw.text((image_x, image_y + image_height + 18), 'Student Identity Photo', fill=muted, font=label_font)
+        y = max(y, card_y + card_height + 34)
     details = [
         ('Name', enrollment.name),
         ('Phone', enrollment.phone),
@@ -2599,6 +2620,8 @@ class WalkInFilter(django_filters.FilterSet):
     follow_up_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
     visit_date_from = django_filters.DateFilter(field_name='visit_date', lookup_expr='gte')
     visit_date_to   = django_filters.DateFilter(field_name='visit_date', lookup_expr='lte')
+    date_from = django_filters.DateFilter(method='filter_activity_date_from')
+    date_to = django_filters.DateFilter(method='filter_activity_date_to')
     follow_up_date_from = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='gte')
     follow_up_date_to   = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='lte')
 
@@ -2628,6 +2651,16 @@ class WalkInFilter(django_filters.FilterSet):
         if value in valid_sources:
             return queryset.filter(source=value)
         return queryset.none()
+
+    def filter_activity_date_from(self, queryset, name, value):
+        if not value or not self.request or not self.request.user.is_super_admin:
+            return queryset
+        return queryset.filter(Q(visit_date__gte=value) | Q(visit_date__isnull=True, created_at__date__gte=value))
+
+    def filter_activity_date_to(self, queryset, name, value):
+        if not value or not self.request or not self.request.user.is_super_admin:
+            return queryset
+        return queryset.filter(Q(visit_date__lte=value) | Q(visit_date__isnull=True, created_at__date__lte=value))
 
     class Meta:
         model  = WalkIn

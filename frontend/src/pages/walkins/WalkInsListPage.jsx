@@ -22,6 +22,8 @@ const emptyFilters = {
   assigned_to: '',
   course: '',
   status: '',
+  date_from: '',
+  date_to: '',
 }
 
 function statusLabel(status) {
@@ -37,6 +39,8 @@ function readFilters(searchParams, canFilterByBranch) {
     assigned_to: searchParams.get('assigned_to') || searchParams.get('created_by') || '',
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
+    date_from: canFilterByBranch ? searchParams.get('date_from') || '' : '',
+    date_to: canFilterByBranch ? searchParams.get('date_to') || '' : '',
   }
 }
 
@@ -49,15 +53,37 @@ function uniqueStaffUsers(rows) {
   })
 }
 
+function formatDate(value) {
+  if (!value) return 'Not set'
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
-  const walkInByLabel = (walkin) => walkin.status === 'follow_up' ? 'Follow-up' : 'Walk-in by'
+  const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
+  const summary = [
+    ['Total', count],
+    ['Enrolled', statusCount('converted')],
+    ['Follow Up', statusCount('follow_up')],
+    ['Interested', statusCount('new')],
+    ['Not Interested', statusCount('not_interested')],
+  ]
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-      <div className="flex flex-col gap-2 border-b border-slate-200 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 xl:flex-row xl:items-center xl:justify-between sm:px-8">
         <h2 className="text-xl font-black tracking-tight text-slate-950">{title}</h2>
-        <span className="text-sm font-semibold text-slate-500">{count} total</span>
+        <div className="flex flex-wrap gap-2 text-xs font-bold text-slate-600 xl:justify-end">
+          {summary.map(([label, value]) => (
+            <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
+              {label} {value}
+            </span>
+          ))}
+        </div>
       </div>
 
       {walkins.length === 0 ? (
@@ -70,24 +96,30 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
             <li key={walkin.id}>
               <div className="px-6 py-5 transition hover:bg-slate-50 sm:px-8">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
+                  <div className="min-w-0">
                     <Link to={`/walkins/${walkin.id}`} className="text-lg font-bold tracking-tight text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
                     <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm text-slate-500">
                       <PhoneNumberEditor recordType="walkin" recordId={walkin.id} phone={walkin.phone} onSaved={(phone) => onPhoneSaved(walkin.id, phone)} />
                       <span>|</span>
-                      <span>{walkin.branch_name || 'Branch pending'}</span>
-                      <span>|</span>
                       <span>{walkin.course_name || 'Course pending'}</span>
-                      <span>|</span>
-                      <span>{walkin.preferred_timing_display || 'Timing pending'}</span>
                     </p>
+                    <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-800">Latest Remark: </span>
+                        <span className="break-words">{walkin.remarks || 'Not provided'}</span>
+                      </div>
+                      <div className="min-w-0">
+                        <span className="font-semibold text-slate-800">Next Follow-up: </span>
+                        {formatDate(walkin.follow_up_date)}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex w-fit flex-col items-start gap-2 sm:items-end">
                     <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                       {statusLabel(walkin.status)}
                     </div>
                     <p className="text-xs font-semibold text-slate-500">
-                      {walkInByLabel(walkin)}: <span className="text-slate-800">{walkInByText(walkin)}</span>
+                      Follow-up: <span className="text-slate-800">{walkInByText(walkin)}</span>
                     </p>
                   </div>
                 </div>
@@ -212,6 +244,7 @@ export default function WalkInsListPage() {
     const nextParams = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
       if (key === 'branch' && !canFilterByBranch) return
+      if ((key === 'date_from' || key === 'date_to') && !canFilterByBranch) return
       if (value.trim()) nextParams.set(key, value.trim())
     })
     setSearchParams(nextParams)
@@ -248,27 +281,57 @@ export default function WalkInsListPage() {
             {loadMessage}
           </div>
         )}
-        <div className={`grid gap-3 md:grid-cols-2 ${canFilterByBranch ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
-          <input value={filters.name} onChange={(event) => updateFilter('name', event.target.value)} name="name" placeholder="Candidate name" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
-          <input value={filters.phone} onChange={(event) => updateFilter('phone', event.target.value)} name="phone" placeholder="Phone number" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
+            <input value={filters.name} onChange={(event) => updateFilter('name', event.target.value)} name="name" placeholder="Candidate name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Phone</span>
+            <input value={filters.phone} onChange={(event) => updateFilter('phone', event.target.value)} name="phone" placeholder="Phone number" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+          </label>
           {canFilterByBranch && (
-            <select value={filters.branch} onChange={(event) => updateFilter('branch', event.target.value)} name="branch" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
-              <option value="">All branches</option>
-              {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-            </select>
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Branch</span>
+              <select value={filters.branch} onChange={(event) => updateFilter('branch', event.target.value)} name="branch" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+                <option value="">All branches</option>
+                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+            </label>
           )}
-          <select value={filters.assigned_to} onChange={(event) => updateFilter('assigned_to', event.target.value)} name="assigned_to" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Walk-in By</span>
+            <select value={filters.assigned_to} onChange={(event) => updateFilter('assigned_to', event.target.value)} name="assigned_to" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
               <option value="">All Users</option>
               {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
-          </select>
-          <select value={filters.course} onChange={(event) => updateFilter('course', event.target.value)} name="course" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
-            <option value="">All courses</option>
-            {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-          </select>
-          <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} name="status" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
-            <option value="">All statuses</option>
-            {statusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
-          </select>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Course</span>
+            <select value={filters.course} onChange={(event) => updateFilter('course', event.target.value)} name="course" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All courses</option>
+              {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Status</span>
+            <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} name="status" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All statuses</option>
+              {statusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+            </select>
+          </label>
+          {canFilterByBranch && (
+            <>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-600">From Date</span>
+                <input type="date" value={filters.date_from} onChange={(event) => updateFilter('date_from', event.target.value)} name="date_from" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-slate-600">To Date</span>
+                <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} name="date_to" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+              </label>
+            </>
+          )}
         </div>
         <div className="mt-4 flex flex-wrap gap-3 sm:justify-end">
             <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
