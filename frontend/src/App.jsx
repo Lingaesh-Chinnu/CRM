@@ -36,6 +36,7 @@ import StudentDetailPage from './pages/students/StudentDetailPage'
 import PaymentsListPage from './pages/payments/PaymentsListPage'
 import PaymentDetailPage from './pages/payments/PaymentDetailPage'
 import NotificationsPage from './pages/notifications/NotificationsPage'
+import TeamBoardPage from './pages/team/TeamBoardPage'
 
 // Admin-only pages
 import CoursesPage   from './pages/admin/CoursesPage'
@@ -118,6 +119,7 @@ export default function App() {
 
         {/* Notifications */}
         <Route path="notifications"   element={<NotificationsPage />} />
+        <Route path="team-board"      element={<TeamBoardPage />} />
 
         {/* Viewable by all logged-in users */}
         <Route path="courses"         element={<CoursesPage />} />

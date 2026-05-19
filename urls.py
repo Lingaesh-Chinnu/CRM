@@ -19,7 +19,7 @@ from views import (
     CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportHistoryViewSet,
-    ExternalLeadCaptureView, NotificationViewSet, WhatsAppTemplateViewSet,
+    ExternalLeadCaptureView, NotificationViewSet, TeamNoticeViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
     ExportLeadsExcelView, ExportEnrollmentsExcelView,
@@ -39,6 +39,7 @@ router.register(r'discounts', DiscountViewSet, basename='discount')
 router.register(r'leads', LeadViewSet, basename='lead')
 router.register(r'lead-import-history', LeadImportHistoryViewSet, basename='lead-import-history')
 router.register(r'notifications', NotificationViewSet, basename='notification')
+router.register(r'team-notices', TeamNoticeViewSet, basename='team-notice')
 router.register(r'whatsapp-templates', WhatsAppTemplateViewSet, basename='whatsapp-template')
 router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')

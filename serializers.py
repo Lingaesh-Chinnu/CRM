@@ -13,7 +13,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.core.files.storage import default_storage
 from django.db.utils import OperationalError, ProgrammingError
-from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog
+from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog, TeamNotice, TeamNoticeReply
 
 User = get_user_model()
 
@@ -227,6 +227,58 @@ class UserMonitoringSerializer(serializers.ModelSerializer):
 
     def get_branch_name(self, obj):
         return obj.user.branch.name if obj.user.branch else None
+
+
+class TeamNoticeReplySerializer(serializers.ModelSerializer):
+    replied_by_name = serializers.CharField(source='replied_by.full_name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    created_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeamNoticeReply
+        fields = [
+            'id', 'notice', 'reply_message', 'replied_by', 'replied_by_name',
+            'branch', 'branch_name', 'created_at', 'created_display',
+        ]
+        read_only_fields = ['notice', 'replied_by', 'branch', 'created_at']
+
+    def get_created_display(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')
+
+
+class TeamNoticeSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    audience_display = serializers.CharField(source='get_audience_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_display = serializers.SerializerMethodField()
+    replies = TeamNoticeReplySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = TeamNotice
+        fields = [
+            'id', 'title', 'message', 'audience_type', 'audience_display',
+            'branch', 'branch_name', 'created_by', 'created_by_name',
+            'status', 'status_display', 'created_at', 'created_display',
+            'updated_at', 'closed_at', 'archived_at', 'replies',
+        ]
+        read_only_fields = [
+            'created_by', 'created_at', 'updated_at', 'closed_at',
+            'archived_at', 'replies',
+        ]
+
+    def get_created_display(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        audience_type = attrs.get('audience_type', getattr(self.instance, 'audience_type', TeamNotice.AudienceType.ALL_BRANCHES))
+        branch = attrs.get('branch', getattr(self.instance, 'branch', None))
+        if audience_type == TeamNotice.AudienceType.SPECIFIC_BRANCH and not branch:
+            raise serializers.ValidationError({'branch': 'Select a branch for a specific branch notice.'})
+        if audience_type == TeamNotice.AudienceType.ALL_BRANCHES:
+            attrs['branch'] = None
+        return attrs
 
 
 # ============================================================

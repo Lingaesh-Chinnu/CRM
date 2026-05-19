@@ -71,6 +71,7 @@ from xml.etree import ElementTree
 from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
+    TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule, enrollment_payable_fee,
 )
@@ -80,6 +81,7 @@ from serializers import (
     CustomTokenObtainPairSerializer, UserPerformanceReportSerializer,
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
+    TeamNoticeSerializer, TeamNoticeReplySerializer,
     PaymentReasonRequestSerializer,
 )
 
@@ -2584,6 +2586,146 @@ class NotificationViewSet(viewsets.ModelViewSet):
             status=Notification.Status.READ,
         )
         return Response({'detail': 'Notifications marked as read.'})
+
+
+class TeamNoticeViewSet(viewsets.ModelViewSet):
+    serializer_class = TeamNoticeSerializer
+    permission_classes = [IsStaffOrAdmin]
+    pagination_class = None
+
+    def visible_queryset(self):
+        queryset = TeamNotice.objects.select_related('branch', 'created_by').prefetch_related(
+            'replies__replied_by',
+            'replies__branch',
+        )
+        user = self.request.user
+        if user.is_super_admin:
+            return queryset
+        return queryset.filter(
+            Q(audience_type=TeamNotice.AudienceType.ALL_BRANCHES)
+            | Q(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch=user.branch)
+        )
+
+    def get_queryset(self):
+        queryset = self.visible_queryset().order_by('-created_at')
+        status_filter = self.request.query_params.get('status', '').strip()
+        scope = self.request.query_params.get('scope', '').strip()
+        if status_filter in dict(TeamNotice.Status.choices):
+            queryset = queryset.filter(status=status_filter)
+        if scope == 'active':
+            queryset = queryset.filter(status=TeamNotice.Status.ACTIVE)
+        elif scope == 'closed':
+            queryset = queryset.filter(status=TeamNotice.Status.CLOSED)
+        elif scope == 'my_branch' and not self.request.user.is_super_admin:
+            queryset = queryset.filter(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch=self.request.user.branch)
+        elif scope == 'my_branch' and self.request.user.is_super_admin:
+            branch_id = self.request.query_params.get('branch')
+            if branch_id:
+                queryset = queryset.filter(audience_type=TeamNotice.AudienceType.SPECIFIC_BRANCH, branch_id=branch_id)
+        elif scope == 'all_branches':
+            queryset = queryset.filter(audience_type=TeamNotice.AudienceType.ALL_BRANCHES)
+        return queryset
+
+    def perform_create(self, serializer):
+        notice = serializer.save(created_by=self.request.user)
+        recipients = self.notice_recipients(notice)
+        for user in recipients:
+            create_user_notification(
+                user,
+                'Team Board Notice',
+                notice.title,
+                Notification.NType.INFO,
+                f'/team-board?notice={notice.id}',
+            )
+
+    def create(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can create Team Board notices.'}, status=403)
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can update Team Board notices.'}, status=403)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can update Team Board notices.'}, status=403)
+        return super().partial_update(request, *args, **kwargs)
+
+    def notice_recipients(self, notice):
+        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN)
+        if notice.audience_type == TeamNotice.AudienceType.SPECIFIC_BRANCH:
+            users = users.filter(branch=notice.branch)
+        return users.select_related('branch')
+
+    @action(detail=False, methods=['get'], url_path='summary')
+    def summary(self, request):
+        notices = self.visible_queryset().filter(status=TeamNotice.Status.ACTIVE).order_by('-created_at')[:3]
+        unread_count = Notification.objects.filter(
+            user=request.user,
+            status=Notification.Status.UNREAD,
+            related_url__startswith='/team-board?notice=',
+        ).count()
+        return Response({
+            'unread_count': unread_count,
+            'notices': TeamNoticeSerializer(notices, many=True).data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='reply')
+    def reply(self, request, pk=None):
+        if request.user.is_super_admin:
+            return Response({'detail': 'Admin users cannot reply to Team Board notices.'}, status=403)
+        notice = self.get_object()
+        if notice.status != TeamNotice.Status.ACTIVE:
+            return Response({'detail': 'Replies are allowed only on active notices.'}, status=400)
+        message = str(request.data.get('reply_message') or '').strip()
+        if not message:
+            return Response({'reply_message': 'Reply message is required.'}, status=400)
+        reply = TeamNoticeReply.objects.create(
+            notice=notice,
+            reply_message=message,
+            replied_by=request.user,
+            branch=request.user.branch,
+        )
+        for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+            create_user_notification(
+                admin_user,
+                'Team Board Reply',
+                f'{request.user.full_name} replied to Team Board notice.',
+                Notification.NType.INFO,
+                f'/team-board?notice={notice.id}',
+            )
+        return Response(TeamNoticeReplySerializer(reply).data, status=201)
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can close Team Board notices.'}, status=403)
+        notice = self.get_object()
+        notice.status = TeamNotice.Status.CLOSED
+        notice.closed_at = timezone.now()
+        notice.save(update_fields=['status', 'closed_at', 'updated_at'])
+        return Response(TeamNoticeSerializer(notice).data)
+
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can archive Team Board notices.'}, status=403)
+        notice = self.get_object()
+        notice.status = TeamNotice.Status.ARCHIVED
+        notice.archived_at = timezone.now()
+        notice.save(update_fields=['status', 'archived_at', 'updated_at'])
+        return Response(TeamNoticeSerializer(notice).data)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        Notification.objects.filter(
+            user=request.user,
+            related_url=f'/team-board?notice={kwargs.get("pk")}',
+            status=Notification.Status.UNREAD,
+        ).update(status=Notification.Status.READ, is_read=True)
+        return response
 
 
 class WhatsAppTemplateViewSet(viewsets.ModelViewSet):

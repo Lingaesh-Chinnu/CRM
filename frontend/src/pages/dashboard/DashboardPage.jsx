@@ -314,10 +314,50 @@ function WeeklyPendingPaymentCard({ amount, branchId }) {
   )
 }
 
+function TeamNoticeBoardCard({ summary }) {
+  const notices = summary?.notices || []
+  return (
+    <article className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Team Board</p>
+          <h3 className="mt-2 text-xl font-black tracking-tight text-slate-950">Team Notice Board</h3>
+        </div>
+        <div className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-cyan-700 ring-1 ring-cyan-100">
+          {summary?.unread_count || 0} New
+        </div>
+      </div>
+      {notices.length === 0 ? (
+        <p className="mt-4 rounded-2xl bg-slate-50 px-4 py-3 text-sm font-medium text-slate-500">
+          No active team notices.
+        </p>
+      ) : (
+        <div className="mt-4 grid gap-3">
+          {notices.slice(0, 3).map((notice) => (
+            <Link key={notice.id} to={`/team-board?notice=${notice.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 transition hover:bg-slate-50">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <p className="font-bold text-slate-950">{notice.title}</p>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase text-slate-600">
+                  {notice.audience_type === 'all_branches' ? 'All Branches' : notice.branch_name}
+                </span>
+              </div>
+              <p className="mt-1 line-clamp-1 text-sm text-slate-500">{notice.message}</p>
+            </Link>
+          ))}
+        </div>
+      )}
+      <Link to="/team-board" className="mt-4 inline-flex rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
+        View Board
+      </Link>
+    </article>
+  )
+}
+
 export default function DashboardPage() {
   const [dashboardStats, setDashboardStats] = useState(null)
   const [summaryStats, setSummaryStats] = useState(null)
   const [actionBoardStats, setActionBoardStats] = useState(null)
+  const [teamBoardSummary, setTeamBoardSummary] = useState({ unread_count: 0, notices: [] })
   const [branches, setBranches] = useState([])
   const [dashboardBranch, setDashboardBranch] = useState('all')
   const [historicalBranch, setHistoricalBranch] = useState('all')
@@ -362,6 +402,10 @@ export default function DashboardPage() {
   useEffect(() => {
     fetchHistoricalAnalytics()
   }, [historicalBranch, isSuperAdmin])
+
+  useEffect(() => {
+    fetchTeamBoardSummary()
+  }, [])
 
   const fetchDashboardData = async () => {
     const isInitialLoad = !dashboardStats
@@ -418,6 +462,16 @@ export default function DashboardPage() {
       setHistoricalMeta(null)
     } finally {
       setHistoricalLoading(false)
+    }
+  }
+
+  const fetchTeamBoardSummary = async () => {
+    try {
+      const { data } = await api.get('/team-notices/summary/')
+      setTeamBoardSummary(data)
+    } catch (error) {
+      console.error('Failed to fetch team board summary:', error)
+      setTeamBoardSummary({ unread_count: 0, notices: [] })
     }
   }
 
@@ -533,6 +587,8 @@ export default function DashboardPage() {
           </div>
         </div>
       </section>
+
+      <TeamNoticeBoardCard summary={teamBoardSummary} />
 
       <section className="grid gap-6 2xl:grid-cols-[minmax(0,1.1fr)_360px]">
         <article className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">

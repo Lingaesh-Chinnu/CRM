@@ -10,6 +10,7 @@ const navigation = [
   { name: 'Students', href: '/students', short: 'ST' },
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
   { name: 'Payments', href: '/payments', short: 'PY' },
+  { name: 'Team Board', href: '/team-board', short: 'TB' },
 ]
 
 const adminNavigation = [

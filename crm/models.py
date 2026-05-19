@@ -1065,6 +1065,52 @@ class PaymentReasonRequest(models.Model):
         return f'{self.payment_id} installment {self.installment_index} - {self.status}'
 
 
+class TeamNotice(TimeStampedModel):
+    """Internal CRM notice board message from admin to branches."""
+
+    class AudienceType(models.TextChoices):
+        ALL_BRANCHES = 'all_branches', 'All Branches'
+        SPECIFIC_BRANCH = 'specific_branch', 'Specific Branch'
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        CLOSED = 'closed', 'Closed'
+        ARCHIVED = 'archived', 'Archived'
+
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    audience_type = models.CharField(max_length=30, choices=AudienceType.choices, default=AudienceType.ALL_BRANCHES, db_index=True)
+    branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL, related_name='team_notices')
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='team_notices_created')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'team_notices'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+
+class TeamNoticeReply(models.Model):
+    """Reply thread entry for a Team Board notice."""
+
+    notice = models.ForeignKey(TeamNotice, on_delete=models.CASCADE, related_name='replies')
+    reply_message = models.TextField()
+    replied_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='team_notice_replies')
+    branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL, related_name='team_notice_replies')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'team_notice_replies'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'Reply to {self.notice_id} by {self.replied_by_id}'
+
+
 class AdminReceipt(TimeStampedModel):
     """Standalone receipt for payments not tied to course installments."""
 
