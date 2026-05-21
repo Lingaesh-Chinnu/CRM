@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
+import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -616,6 +617,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
 
 export default function LeadDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useSelector((state) => state.auth)
   const [lead, setLead] = useState(null)
   const [courses, setCourses] = useState([])
@@ -789,6 +791,11 @@ export default function LeadDetailPage() {
     }
   }
 
+  const deleteLead = async () => {
+    await api.delete(`/leads/${id}/`)
+    navigate('/leads', { replace: true })
+  }
+
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
   const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Converted to Enrollment' : ''
@@ -805,9 +812,12 @@ export default function LeadDetailPage() {
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-3xl font-black tracking-tight text-slate-950">{lead.name}</h1>
           {!editingDetails && (
-            <button type="button" onClick={() => { setDetailsForm(buildConversionForm(lead)); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => { setDetailsForm(buildConversionForm(lead)); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                Edit
+              </button>
+              {isSuperAdmin && <AdminDeleteButton label="lead" onConfirm={deleteLead} />}
+            </div>
           )}
         </div>
         <p className="mt-3 text-sm text-slate-500">

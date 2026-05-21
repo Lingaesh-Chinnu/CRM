@@ -51,6 +51,7 @@ import UserMonitoringPage from './pages/admin/UserMonitoringPage'
 import LeadImportHistoryPage from './pages/admin/LeadImportHistoryPage'
 import LeadInboxPage from './pages/admin/LeadInboxPage'
 import WhatsAppTemplatesPage from './pages/admin/WhatsAppTemplatesPage'
+import DataImportPage from './pages/admin/DataImportPage'
 
 // Public
 import PublicWalkInForm from './pages/public/PublicWalkInForm'
@@ -136,6 +137,7 @@ export default function App() {
           <Route path="admin/receipts" element={<ReceiptsPage />} />
           <Route path="admin/user-monitoring" element={<UserMonitoringPage />} />
           <Route path="admin/lead-import-history" element={<LeadImportHistoryPage />} />
+          <Route path="admin/data-import" element={<DataImportPage />} />
           <Route path="admin/lead-inbox" element={<LeadInboxPage />} />
           <Route path="admin/whatsapp-templates" element={<WhatsAppTemplatesPage />} />
         </Route>

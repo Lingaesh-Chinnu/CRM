@@ -19,6 +19,7 @@ from views import (
     CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportHistoryViewSet,
+    AdminDataImportView, AdminDataImportTemplateView,
     ExternalLeadCaptureView, NotificationViewSet, TeamNoticeViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
@@ -57,6 +58,8 @@ api_urlpatterns = [
     path('auth/heartbeat/', SessionHeartbeatView.as_view(), name='heartbeat'),
 
     path('leads/import/', LeadImportView.as_view(), name='lead-import'),
+    path('admin-data-import/', AdminDataImportView.as_view(), name='admin-data-import'),
+    path('admin-data-import/template/', AdminDataImportTemplateView.as_view(), name='admin-data-import-template'),
     path('external-leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),
     path('external/leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture-legacy'),
     path('students/', EnrollmentViewSet.as_view({'get': 'list'}), name='student-list'),
@@ -90,7 +93,7 @@ urlpatterns = [
     path('rules-signed-pdf/<int:enrollment_id>/', RulesSignedPdfView.as_view(), name='rules_signed_pdf'),
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
-    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
+    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history|data-import)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),
 ]

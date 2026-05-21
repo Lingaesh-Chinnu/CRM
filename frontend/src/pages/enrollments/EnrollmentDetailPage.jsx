@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { openWhatsApp } from '../../utils/whatsappTemplates'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
+import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -112,6 +113,7 @@ function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
 
 export default function EnrollmentDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
   const [branches, setBranches] = useState([])
@@ -292,6 +294,11 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const deleteEnrollment = async () => {
+    await api.delete(`/enrollments/${id}/`)
+    navigate('/enrollments', { replace: true })
+  }
+
   const rulesStatus = row.rules_signing_status || 'pending'
   const canEnroll = rulesStatus === 'submitted'
   const isFinalEnrollment = ['enrolled', 'active', 'completed', 'dropped', 'on_hold'].includes(row.status)
@@ -305,9 +312,12 @@ export default function EnrollmentDetailPage() {
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-3xl font-black tracking-tight text-slate-950">{row.name}</h1>
           {!editingDetails && (
-            <button type="button" onClick={() => { resetDetailsEdit(); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => { resetDetailsEdit(); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                Edit
+              </button>
+              {isSuperAdmin && <AdminDeleteButton label="enrollment" onConfirm={deleteEnrollment} />}
+            </div>
           )}
         </div>
         <p className="mt-3 text-sm text-slate-500">

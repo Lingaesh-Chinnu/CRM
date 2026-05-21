@@ -442,6 +442,38 @@ class LeadImportHistory(TimeStampedModel):
         return f'{self.file_name} - {self.get_status_display()}'
 
 
+class DataImportHistory(TimeStampedModel):
+    """Admin audit log for Excel imports across CRM modules."""
+
+    class ImportType(models.TextChoices):
+        LEADS = 'leads', 'Leads'
+        ENROLLMENTS = 'enrollments', 'Enrollments'
+        PAYMENTS = 'payments', 'Payments'
+
+    class Status(models.TextChoices):
+        PREVIEWED = 'previewed', 'Previewed'
+        SUCCESS = 'success', 'Success'
+        PARTIAL = 'partial', 'Partial'
+        FAILED = 'failed', 'Failed'
+
+    imported_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='data_imports')
+    file_name = models.CharField(max_length=255)
+    import_type = models.CharField(max_length=30, choices=ImportType.choices, db_index=True)
+    rows_imported = models.PositiveIntegerField(default=0)
+    rows_skipped = models.PositiveIntegerField(default=0)
+    rows_failed = models.PositiveIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PREVIEWED, db_index=True)
+    error_log = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        db_table = 'data_import_history'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.get_import_type_display()} import - {self.file_name}'
+
+
 def generate_walkin_number():
     now    = timezone.now()
     prefix = f'WI-{now.strftime("%Y%m")}'

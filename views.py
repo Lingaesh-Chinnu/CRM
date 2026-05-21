@@ -43,6 +43,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.conf import settings
+from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
@@ -61,8 +62,10 @@ from decimal import Decimal
 from pathlib import Path
 import base64
 import io
+import json
 import logging
 import re
+import uuid
 import zipfile
 from whatsapp_service import send_candidate_message
 from calendar import month_abbr, monthrange
@@ -70,6 +73,7 @@ from xml.etree import ElementTree
 
 from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
+    DataImportHistory,
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
@@ -81,7 +85,7 @@ from serializers import (
     CustomTokenObtainPairSerializer, UserPerformanceReportSerializer,
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
-    TeamNoticeSerializer, TeamNoticeReplySerializer,
+    TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer,
 )
 
@@ -2159,6 +2163,13 @@ class LeadViewSet(viewsets.ModelViewSet):
             })
         return Response({'duplicate': bool(records), 'warning': 'Duplicate lead found' if records else '', 'records': records})
 
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can delete leads.'}, status=status.HTTP_403_FORBIDDEN)
+        lead = self.get_object()
+        FollowUp.objects.filter(record_type=FollowUp.RecordType.LEAD, record_id=lead.id).delete()
+        return super().destroy(request, *args, **kwargs)
+
 
 REQUIRED_LEAD_IMPORT_HEADINGS = [
     'Candidate Name',
@@ -2359,6 +2370,616 @@ class LeadImportHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return LeadImportHistory.objects.select_related('uploaded_by', 'branch').order_by('-created_at')
+
+
+def import_header_key(value):
+    return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
+
+
+def import_cell(value):
+    if value is None:
+        return ''
+    if hasattr(value, 'date') and not isinstance(value, str):
+        return value.date().isoformat()
+    if hasattr(value, 'isoformat') and not isinstance(value, str):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def parse_excel_date(value):
+    value = import_cell(value)
+    if not value:
+        return None, ''
+    parsed = parse_date(value)
+    if parsed:
+        return parsed, ''
+    for fmt in ('%d-%m-%Y', '%d/%m/%Y', '%m/%d/%Y'):
+        try:
+            return timezone.datetime.strptime(value, fmt).date(), ''
+        except ValueError:
+            continue
+    return None, 'Invalid date format. Use YYYY-MM-DD or DD-MM-YYYY.'
+
+
+def parse_excel_amount(value):
+    value = import_cell(value).replace(',', '')
+    if value == '':
+        return None, ''
+    try:
+        amount = Decimal(value)
+    except Exception:
+        return None, 'Amount must be numeric.'
+    if amount < 0:
+        return None, 'Amount cannot be negative.'
+    return amount, ''
+
+
+def read_xlsx_rows(uploaded_file):
+    if not str(uploaded_file.name).lower().endswith('.xlsx'):
+        raise ValueError('Only Excel .xlsx files are supported.')
+    import openpyxl
+    workbook = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
+    sheet = workbook.active
+    raw_headers = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None) or []
+    headers = [import_cell(value) for value in raw_headers if import_cell(value)]
+    rows = []
+    for row_number, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        if not any(import_cell(value) for value in values):
+            continue
+        rows.append({
+            '_row_number': row_number,
+            **{
+                headers[index]: import_cell(values[index] if index < len(values) else '')
+                for index in range(len(headers))
+            },
+        })
+    return headers, rows
+
+
+def active_model_fields(model):
+    ignored = {'id', 'created_at', 'updated_at'}
+    return [
+        field.name
+        for field in model._meta.fields
+        if field.name not in ignored and not field.auto_created
+    ]
+
+
+ADMIN_IMPORT_SPECS = {
+    'leads': {
+        'model': Lead,
+        'required': ['name', 'phone', 'branch', 'course'],
+        'fields': [
+            {'field': 'name', 'label': 'Name', 'aliases': ['Candidate Name', 'Student Name']},
+            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
+            {'field': 'branch', 'label': 'Branch', 'aliases': ['Branch Name', 'Branch ID']},
+            {'field': 'course', 'label': 'Course', 'aliases': ['Course Interested', 'Course Name']},
+            {'field': 'assigned_to', 'label': 'Counsellor', 'aliases': ['Counsellor Id', 'Counsellor', 'Follow-up By']},
+            {'field': 'dob', 'label': 'DOB', 'aliases': ['Date of Birth']},
+            {'field': 'email', 'label': 'Email', 'aliases': []},
+            {'field': 'location', 'label': 'Location', 'aliases': ['Address']},
+            {'field': 'pincode', 'label': 'Pincode', 'aliases': []},
+            {'field': 'qualification', 'label': 'Qualification', 'aliases': []},
+            {'field': 'degree', 'label': 'Degree', 'aliases': []},
+            {'field': 'preferred_timing', 'label': 'Preferred Timing', 'aliases': []},
+            {'field': 'walkin_date', 'label': 'Walkin Date', 'aliases': ['Visit Date']},
+            {'field': 'next_follow_up_date', 'label': 'Next Follow Up Date', 'aliases': ['Follow-up Date']},
+            {'field': 'source', 'label': 'Source', 'aliases': ['How They Know IIE']},
+            {'field': 'remarks', 'label': 'Remarks', 'aliases': []},
+        ],
+    },
+    'enrollments': {
+        'model': Enrollment,
+        'required': ['name', 'phone', 'branch', 'course', 'actual_fees', 'enrollment_date'],
+        'fields': [
+            {'field': 'student_number', 'label': 'Student ID', 'aliases': ['Student Number']},
+            {'field': 'name', 'label': 'Name', 'aliases': ['Student Name']},
+            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
+            {'field': 'branch', 'label': 'Branch', 'aliases': ['Branch Name', 'Branch ID']},
+            {'field': 'course', 'label': 'Course', 'aliases': ['Course Name']},
+            {'field': 'dob', 'label': 'DOB', 'aliases': ['Date of Birth']},
+            {'field': 'email', 'label': 'Email', 'aliases': []},
+            {'field': 'location', 'label': 'Location', 'aliases': ['Address']},
+            {'field': 'pincode', 'label': 'Pincode', 'aliases': []},
+            {'field': 'qualification', 'label': 'Qualification', 'aliases': []},
+            {'field': 'degree', 'label': 'Degree', 'aliases': []},
+            {'field': 'preferred_timing', 'label': 'Preferred Timing', 'aliases': []},
+            {'field': 'source', 'label': 'Source', 'aliases': []},
+            {'field': 'actual_fees', 'label': 'Actual Fees', 'aliases': []},
+            {'field': 'discount_amount', 'label': 'Discount Amount', 'aliases': ['Discount']},
+            {'field': 'discount_reason', 'label': 'Discount Reason', 'aliases': []},
+            {'field': 'enrollment_date', 'label': 'Enrollment Date', 'aliases': ['Joining Date', 'Joining_Date']},
+            {'field': 'start_date', 'label': 'Start Date', 'aliases': ['First Class Date']},
+            {'field': 'batch_timing', 'label': 'Batch Timing', 'aliases': []},
+            {'field': 'status', 'label': 'Status', 'aliases': []},
+        ],
+    },
+    'payments': {
+        'model': PaymentInstallment,
+        'required': ['amount', 'payment_date'],
+        'fields': [
+            {'field': 'student_number', 'label': 'Student ID', 'aliases': ['Student Number']},
+            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
+            {'field': 'amount', 'label': 'Amount', 'aliases': ['Payment Amount']},
+            {'field': 'payment_date', 'label': 'Payment Date', 'aliases': ['Due Date']},
+            {'field': 'payment_mode', 'label': 'Payment Mode', 'aliases': ['Mode']},
+            {'field': 'reference_number', 'label': 'Reference Number', 'aliases': ['Transaction ID']},
+            {'field': 'notes', 'label': 'Notes', 'aliases': ['Remarks']},
+        ],
+    },
+}
+
+
+def import_spec_fields(import_type):
+    spec = ADMIN_IMPORT_SPECS[import_type]
+    model_fields = set(active_model_fields(spec['model']))
+    related = {'branch', 'course', 'assigned_to', 'student_number', 'phone'}
+    return [
+        item for item in spec['fields']
+        if item['field'] in model_fields or item['field'] in related
+    ]
+
+
+def build_column_mapping(import_type, headers, explicit_mapping=None):
+    fields = import_spec_fields(import_type)
+    by_key = {import_header_key(header): header for header in headers}
+    mapping = {}
+    explicit_mapping = explicit_mapping or {}
+    for item in fields:
+        explicit = explicit_mapping.get(item['field'])
+        if explicit in headers:
+            mapping[item['field']] = explicit
+            continue
+        candidates = [item['label'], item['field'], *item.get('aliases', [])]
+        for candidate in candidates:
+            header = by_key.get(import_header_key(candidate))
+            if header:
+                mapping[item['field']] = header
+                break
+    return mapping
+
+
+def lookup_branch(value):
+    value = import_cell(value)
+    if not value:
+        return None
+    if value.isdigit():
+        found = Branch.objects.filter(pk=value, is_active=True).first()
+        if found:
+            return found
+    return Branch.objects.filter(name__iexact=value, is_active=True).first()
+
+
+def lookup_course(value):
+    value = import_cell(value)
+    if not value:
+        return None
+    if value.isdigit():
+        found = Course.objects.filter(pk=value, is_active=True).first()
+        if found:
+            return found
+    return Course.objects.filter(name__iexact=value, is_active=True).first()
+
+
+def lookup_user(value, branch=None):
+    value = import_cell(value)
+    if not value:
+        return None
+    users = User.objects.filter(is_active=True)
+    if branch:
+        users = users.filter(Q(branch=branch) | Q(branch__isnull=True))
+    if value.isdigit():
+        found = users.filter(pk=value).first()
+        if found:
+            return found
+    return users.filter(
+        Q(username__iexact=value) | Q(email__iexact=value) |
+        Q(first_name__iexact=value) | Q(last_name__iexact=value)
+    ).first()
+
+
+def choice_value(value, choices, default=''):
+    raw = import_cell(value)
+    if not raw:
+        return default
+    raw_key = raw.lower().replace(' ', '_').replace('-', '_')
+    for choice_value_item, label in choices:
+        if raw_key == choice_value_item.lower() or raw.lower() == str(label).lower():
+            return choice_value_item
+    return None
+
+
+def validate_admin_import(import_type, headers, rows, mapping):
+    spec = ADMIN_IMPORT_SPECS[import_type]
+    required = [field for field in spec['required'] if field in {item['field'] for item in import_spec_fields(import_type)}]
+    missing = [field for field in required if field not in mapping]
+    mapped_headers = set(mapping.values())
+    extra = [header for header in headers if header and header not in mapped_headers]
+    column_results = [
+        {
+            'field': item['field'],
+            'label': item['label'],
+            'header': mapping.get(item['field'], ''),
+            'status': 'matched' if mapping.get(item['field']) else ('missing' if item['field'] in required else 'optional'),
+        }
+        for item in import_spec_fields(import_type)
+    ]
+    ready, skipped, failed = [], [], []
+    seen_phones, seen_students = set(), set()
+
+    for row in rows:
+        row_number = row['_row_number']
+        def value(field):
+            return import_cell(row.get(mapping.get(field, ''), ''))
+
+        errors = []
+        skip_reason = ''
+        payload = {}
+        for field in required:
+            if not value(field):
+                errors.append(f'{field} is required.')
+
+        if import_type == 'leads':
+            phone = normalize_phone_number(value('phone'))
+            if phone and (Lead.objects.filter(phone=value('phone')).exists() or phone in seen_phones):
+                skip_reason = 'Duplicate phone number.'
+            seen_phones.add(phone)
+            branch = lookup_branch(value('branch'))
+            course = lookup_course(value('course'))
+            if value('branch') and not branch:
+                errors.append('Branch does not exist.')
+            if value('course') and not course:
+                errors.append('Course does not exist.')
+            counsellor = lookup_user(value('assigned_to'), branch) if value('assigned_to') else None
+            if value('assigned_to') and not counsellor:
+                errors.append('Counsellor does not exist.')
+            source = choice_value(value('source'), Lead.Source.choices, Lead.Source.MANUAL)
+            if source is None:
+                errors.append('Source is invalid.')
+            for date_field in ('dob', 'walkin_date', 'next_follow_up_date'):
+                parsed, error = parse_excel_date(value(date_field))
+                if error:
+                    errors.append(f'{date_field}: {error}')
+                payload[date_field] = parsed
+            payload.update({
+                'name': value('name'), 'phone': value('phone'), 'branch_id': branch.id if branch else None,
+                'course_id': course.id if course else None, 'assigned_to_id': counsellor.id if counsellor else None,
+                'email': value('email'), 'location': value('location'), 'pincode': value('pincode'),
+                'qualification': value('qualification'), 'degree': value('degree'),
+                'preferred_timing': value('preferred_timing'), 'source': source,
+                'remarks': value('remarks'),
+            })
+
+        elif import_type == 'enrollments':
+            student_number = value('student_number')
+            phone = normalize_phone_number(value('phone'))
+            if student_number and (Enrollment.objects.filter(student_number=student_number).exists() or student_number in seen_students):
+                skip_reason = 'Duplicate Student ID.'
+            if phone and not skip_reason:
+                existing_phone = any(
+                    normalize_phone_number(existing) == phone
+                    for existing in Enrollment.objects.exclude(phone='').values_list('phone', flat=True)
+                )
+                if existing_phone or phone in seen_phones:
+                    skip_reason = 'Duplicate phone number.'
+            if phone:
+                seen_phones.add(phone)
+            if student_number:
+                seen_students.add(student_number)
+            branch = lookup_branch(value('branch'))
+            course = lookup_course(value('course'))
+            if value('branch') and not branch:
+                errors.append('Branch does not exist.')
+            if value('course') and not course:
+                errors.append('Course does not exist.')
+            actual_fees, error = parse_excel_amount(value('actual_fees'))
+            if error:
+                errors.append(f'actual_fees: {error}')
+            discount_amount, error = parse_excel_amount(value('discount_amount'))
+            if error:
+                errors.append(f'discount_amount: {error}')
+            for date_field in ('dob', 'enrollment_date', 'start_date'):
+                parsed, error = parse_excel_date(value(date_field))
+                if error:
+                    errors.append(f'{date_field}: {error}')
+                payload[date_field] = parsed
+            source = choice_value(value('source'), WalkIn.Source.choices, '')
+            if value('source') and source is None:
+                errors.append('Source is invalid.')
+            status_value = choice_value(value('status'), Enrollment.Status.choices, Enrollment.Status.ACTIVE)
+            if status_value is None:
+                errors.append('Status is invalid.')
+            payload.update({
+                'student_number': student_number or None, 'name': value('name'), 'phone': value('phone'),
+                'branch_id': branch.id if branch else None, 'course_id': course.id if course else None,
+                'email': value('email'), 'location': value('location'), 'pincode': value('pincode'),
+                'qualification': value('qualification'), 'degree': value('degree'),
+                'preferred_timing': value('preferred_timing'), 'source': source,
+                'actual_fees': actual_fees, 'discount_amount': discount_amount or Decimal('0'),
+                'discount_reason': value('discount_reason'), 'batch_timing': value('batch_timing'),
+                'status': status_value,
+            })
+
+        elif import_type == 'payments':
+            student_number = value('student_number')
+            phone = normalize_phone_number(value('phone'))
+            enrollment = None
+            if student_number:
+                enrollment = Enrollment.objects.filter(student_number=student_number).first()
+            if not enrollment and phone:
+                for candidate in Enrollment.objects.filter(status__in=Enrollment.FINAL_STATUSES).select_related('payment'):
+                    if normalize_phone_number(candidate.phone) == phone:
+                        enrollment = candidate
+                        break
+            if not enrollment:
+                errors.append('Existing student/enrollment not found by Student ID or Phone Number.')
+            amount, error = parse_excel_amount(value('amount'))
+            if error:
+                errors.append(error)
+            if amount is not None and amount <= 0:
+                errors.append('Amount must be greater than zero.')
+            payment_date, error = parse_excel_date(value('payment_date'))
+            if error:
+                errors.append(f'payment_date: {error}')
+            payment_mode = choice_value(value('payment_mode'), PaymentInstallment.Mode.choices, PaymentInstallment.Mode.CASH)
+            if payment_mode is None:
+                errors.append('Payment mode is invalid.')
+            payload.update({
+                'enrollment_id': enrollment.id if enrollment else None,
+                'amount': amount,
+                'payment_date': payment_date,
+                'payment_mode': payment_mode,
+                'reference_number': value('reference_number'),
+                'notes': value('notes'),
+            })
+
+        preview = {field: value(field) for field in mapping}
+        item = {'row': row_number, 'preview': preview, 'errors': errors, 'payload': make_json_safe_payload(payload)}
+        if errors:
+            failed.append(item)
+        elif skip_reason:
+            item['skip_reason'] = skip_reason
+            skipped.append(item)
+        else:
+            ready.append(item)
+
+    return {
+        'column_results': column_results,
+        'missing_columns': missing,
+        'extra_columns': extra,
+        'ready_rows': ready,
+        'skipped_rows': skipped,
+        'failed_rows': failed,
+        'blocked': bool(missing),
+    }
+
+
+class AdminDataImportView(APIView):
+    permission_classes = [IsSuperAdmin]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        history = DataImportHistory.objects.select_related('imported_by').order_by('-created_at')[:100]
+        return Response({
+            'types': {
+                key: {
+                    'required': spec['required'],
+                    'fields': import_spec_fields(key),
+                    'model_fields': active_model_fields(spec['model']),
+                }
+                for key, spec in ADMIN_IMPORT_SPECS.items()
+            },
+            'history': DataImportHistorySerializer(history, many=True).data,
+        })
+
+    def post(self, request):
+        action_name = request.data.get('action') or 'preview'
+        if action_name == 'confirm':
+            return self.confirm(request)
+        return self.preview(request)
+
+    def preview(self, request):
+        import_type = request.data.get('import_type')
+        if import_type not in ADMIN_IMPORT_SPECS:
+            return Response({'detail': 'Select a valid import type.'}, status=400)
+        uploaded_file = request.FILES.get('file')
+        if not uploaded_file:
+            return Response({'detail': 'Upload an Excel .xlsx file.'}, status=400)
+        try:
+            mapping = json.loads(request.data.get('mapping') or '{}')
+            headers, rows = read_xlsx_rows(uploaded_file)
+        except Exception as exc:
+            return Response({'detail': str(exc)}, status=400)
+        resolved_mapping = build_column_mapping(import_type, headers, mapping)
+        result = validate_admin_import(import_type, headers, rows, resolved_mapping)
+        history = DataImportHistory.objects.create(
+            imported_by=request.user,
+            file_name=uploaded_file.name,
+            import_type=import_type,
+            rows_skipped=len(result['skipped_rows']),
+            rows_failed=len(result['failed_rows']),
+            status=DataImportHistory.Status.FAILED if result['blocked'] else DataImportHistory.Status.PREVIEWED,
+            error_log=result['failed_rows'][:50] + result['skipped_rows'][:50],
+        )
+        token = None
+        if not result['blocked']:
+            token = str(uuid.uuid4())
+            cache.set(f'admin-import:{token}', {
+                'history_id': history.id,
+                'import_type': import_type,
+                'ready_rows': result['ready_rows'],
+            }, timeout=60 * 30)
+        return Response({
+            'preview_token': token,
+            'headers': headers,
+            'history': DataImportHistorySerializer(history).data,
+            'summary': {
+                'ready_to_import': len(result['ready_rows']),
+                'skipped_duplicates': len(result['skipped_rows']),
+                'invalid_rows': len(result['failed_rows']),
+            },
+            **result,
+        }, status=400 if result['blocked'] else 200)
+
+    def confirm(self, request):
+        token = request.data.get('preview_token')
+        cached = cache.get(f'admin-import:{token}') if token else None
+        if not cached:
+            return Response({'detail': 'Preview expired. Upload and validate the file again.'}, status=400)
+        import_type = cached['import_type']
+        rows = cached['ready_rows']
+        history = DataImportHistory.objects.get(pk=cached['history_id'])
+        imported, failed = self._create_records(import_type, rows, request.user)
+        history.rows_imported = imported
+        history.rows_failed = history.rows_failed + len(failed)
+        history.status = DataImportHistory.Status.PARTIAL if failed else DataImportHistory.Status.SUCCESS
+        if not imported and failed:
+            history.status = DataImportHistory.Status.FAILED
+        history.error_log = (history.error_log or []) + failed[:100]
+        history.save()
+        cache.delete(f'admin-import:{token}')
+        return Response({
+            'history': DataImportHistorySerializer(history).data,
+            'rows_imported': imported,
+            'rows_failed': len(failed),
+            'errors': failed,
+        }, status=201 if imported else 400)
+
+    def _create_records(self, import_type, rows, user):
+        imported = 0
+        failed = []
+        for row in rows:
+            payload = row['payload']
+            try:
+                with transaction.atomic():
+                    if import_type == 'leads':
+                        Lead.objects.create(
+                            name=payload['name'],
+                            phone=payload['phone'],
+                            branch_id=payload['branch_id'],
+                            course_id=payload['course_id'],
+                            assigned_to_id=payload.get('assigned_to_id') or user.id,
+                            created_by=user,
+                            dob=payload.get('dob') or None,
+                            email=payload.get('email') or '',
+                            location=payload.get('location') or '',
+                            pincode=payload.get('pincode') or '',
+                            qualification=payload.get('qualification') or '',
+                            degree=payload.get('degree') or '',
+                            preferred_timing=payload.get('preferred_timing') or '',
+                            walkin_date=payload.get('walkin_date') or None,
+                            next_follow_up_date=payload.get('next_follow_up_date') or None,
+                            source=payload.get('source') or Lead.Source.MANUAL,
+                            remarks=payload.get('remarks') or '',
+                            imported_via_csv=True,
+                        )
+                    elif import_type == 'enrollments':
+                        enrollment = Enrollment(
+                            student_number=payload.get('student_number') or None,
+                            name=payload['name'],
+                            phone=payload['phone'],
+                            branch_id=payload['branch_id'],
+                            course_id=payload['course_id'],
+                            final_enrollment_course_id=payload['course_id'],
+                            enrolled_by=user,
+                            created_by=user,
+                            dob=payload.get('dob') or None,
+                            email=payload.get('email') or '',
+                            location=payload.get('location') or '',
+                            pincode=payload.get('pincode') or '',
+                            qualification=payload.get('qualification') or '',
+                            degree=payload.get('degree') or '',
+                            preferred_timing=payload.get('preferred_timing') or '',
+                            source=payload.get('source') or '',
+                            actual_fees=Decimal(str(payload.get('actual_fees') or 0)),
+                            discount_amount=Decimal(str(payload.get('discount_amount') or 0)),
+                            discount_reason=payload.get('discount_reason') or '',
+                            enrollment_date=payload.get('enrollment_date') or timezone.localdate(),
+                            start_date=payload.get('start_date') or None,
+                            batch_timing=payload.get('batch_timing') or '',
+                            status=payload.get('status') or Enrollment.Status.ACTIVE,
+                        )
+                        enrollment.save()
+                    elif import_type == 'payments':
+                        enrollment = Enrollment.objects.get(pk=payload['enrollment_id'])
+                        payment, _ = Payment.objects.get_or_create(
+                            enrollment=enrollment,
+                            defaults={
+                                'total_fees': enrollment_payable_fee(enrollment),
+                                'manual_installment_schedule': [
+                                    {
+                                        **item,
+                                        'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
+                                    }
+                                    for item in get_default_installment_schedule(enrollment)
+                                ],
+                            },
+                        )
+                        amount = Decimal(str(payload.get('amount') or 0))
+                        if amount > payment.balance:
+                            raise ValueError('Payment amount exceeds pending balance.')
+                        allocation = PaymentInstallmentViewSet()._payment_allocation(payment, amount)
+                        active = allocation[0] if allocation else {'index': 1, 'label': 'Imported Payment'}
+                        PaymentInstallment.objects.create(
+                            payment=payment,
+                            enrollment=enrollment,
+                            amount=amount,
+                            payment_date=payload.get('payment_date') or timezone.localdate(),
+                            payment_mode=payload.get('payment_mode') or PaymentInstallment.Mode.CASH,
+                            reference_number=payload.get('reference_number') or '',
+                            notes=payload.get('notes') or '',
+                            collected_by=user,
+                            installment_index=active['index'],
+                            installment_label=active['label'],
+                            document_type=PaymentInstallment.DocumentType.RECEIPT,
+                        )
+                    imported += 1
+            except Exception as exc:
+                failed.append({'row': row.get('row'), 'error': str(exc)})
+        return imported, failed
+
+
+class AdminDataImportTemplateView(APIView):
+    permission_classes = [IsSuperAdmin]
+
+    def get(self, request):
+        import_type = request.query_params.get('type')
+        if import_type not in ADMIN_IMPORT_SPECS:
+            return Response({'detail': 'Select a valid import type.'}, status=400)
+        import openpyxl
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = f'{import_type.title()} Template'
+        fields = import_spec_fields(import_type)
+        sheet.append([item['label'] for item in fields])
+        sample = []
+        for item in fields:
+            field = item['field']
+            if field in ('name',):
+                sample.append('Sample Student')
+            elif field == 'phone':
+                sample.append('9876543210')
+            elif field == 'branch':
+                sample.append('Gandhipuram')
+            elif field == 'course':
+                sample.append('Python')
+            elif field in ('dob', 'walkin_date', 'next_follow_up_date', 'enrollment_date', 'start_date', 'payment_date'):
+                sample.append(timezone.localdate().isoformat())
+            elif field in ('actual_fees', 'amount'):
+                sample.append('10000')
+            elif field == 'discount_amount':
+                sample.append('0')
+            elif field == 'payment_mode':
+                sample.append('cash')
+            else:
+                sample.append('')
+        sheet.append(sample)
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{import_type}-import-template.xlsx"'
+        workbook.save(response)
+        return response
 
 
 class ExternalLeadCaptureView(APIView):
@@ -3135,6 +3756,27 @@ class WalkInViewSet(viewsets.ModelViewSet):
         resolve_public_walkin_notifications(walkin.id)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can delete walk-ins.'}, status=status.HTTP_403_FORBIDDEN)
+        walkin = self.get_object()
+        with transaction.atomic():
+            if walkin.lead_id:
+                Lead.objects.filter(
+                    pk=walkin.lead_id,
+                    converted_to_type='walkin',
+                    converted_record_id=walkin.id,
+                ).update(
+                    status=Lead.Status.NEW,
+                    converted_to_type='',
+                    converted_record_id=None,
+                    converted_at=None,
+                    converted_by=None,
+                )
+            FollowUp.objects.filter(record_type=FollowUp.RecordType.WALKIN, record_id=walkin.id).delete()
+            self.perform_destroy(walkin)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 from serializers import BranchTransferRequestSerializer
 
@@ -3774,6 +4416,38 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'enrollment': EnrollmentDetailSerializer(enrollment, context={'request': request}).data,
         }, status=status.HTTP_201_CREATED)
 
+    def destroy(self, request, *args, **kwargs):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can delete enrollments and students.'}, status=status.HTTP_403_FORBIDDEN)
+        enrollment = self.get_object()
+        with transaction.atomic():
+            if enrollment.lead_id:
+                Lead.objects.filter(
+                    pk=enrollment.lead_id,
+                    converted_to_type='enrollment',
+                    converted_record_id=enrollment.id,
+                ).update(
+                    status=Lead.Status.NEW,
+                    converted_to_type='',
+                    converted_record_id=None,
+                    converted_at=None,
+                    converted_by=None,
+                )
+            if enrollment.walkin_id:
+                WalkIn.objects.filter(
+                    pk=enrollment.walkin_id,
+                    converted_to_type='enrollment',
+                    converted_record_id=enrollment.id,
+                ).update(
+                    status=WalkIn.Status.NEW,
+                    converted_to_type='',
+                    converted_record_id=None,
+                    converted_at=None,
+                    converted_by=None,
+                )
+            self.perform_destroy(enrollment)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 # ============================================================
 # backend/apps/payments/views.py
@@ -4164,9 +4838,6 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if not request.user.is_super_admin:
             return Response({'detail': 'Only admin can delete payments.'}, status=status.HTTP_403_FORBIDDEN)
         payment = self.get_object()
-        reason = str(request.data.get('reason') or '').strip()
-        if not reason:
-            return Response({'detail': 'Reason for deletion is required.'}, status=status.HTTP_400_BAD_REQUEST)
         has_generated_documents = payment.installments.filter(
             Q(receipt_number__gt='') | Q(bill_number__gt='') | Q(bill_generated_at__isnull=False)
         ).exists()
@@ -4182,7 +4853,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             request.user.id,
             payment.id,
             enrollment.id,
-            reason,
+            str(request.data.get('reason') or 'Admin confirmed permanent delete.').strip(),
         )
         return super().destroy(request, *args, **kwargs)
 

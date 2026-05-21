@@ -25,6 +25,7 @@ const adminNavigation = [
   { name: 'Reports', href: '/admin/reports', short: 'RE' },
   { name: 'Receipts', href: '/admin/receipts', short: 'RC' },
   { name: 'User Monitoring', href: '/admin/user-monitoring', short: 'UM' },
+  { name: 'Data Import', href: '/admin/data-import', short: 'IM' },
   { name: 'Lead Import History', href: '/admin/lead-import-history', short: 'LI' },
 ]
 

@@ -344,7 +344,7 @@ class CourseSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/leads/serializers.py
 # ============================================================
-from crm.models import FollowUp, Lead, LeadImportHistory
+from crm.models import DataImportHistory, FollowUp, Lead, LeadImportHistory
 
 
 QUALIFICATION_LABELS = {
@@ -725,6 +725,21 @@ class LeadImportHistorySerializer(serializers.ModelSerializer):
             'file_name', 'total_rows', 'success_count', 'failed_count',
             'duplicate_count', 'status', 'status_display', 'error_log',
             'created_at', 'updated_at',
+        ]
+
+
+class DataImportHistorySerializer(serializers.ModelSerializer):
+    imported_by_name = serializers.CharField(source='imported_by.full_name', read_only=True)
+    import_type_display = serializers.CharField(source='get_import_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = DataImportHistory
+        fields = [
+            'id', 'imported_by', 'imported_by_name', 'file_name',
+            'import_type', 'import_type_display', 'created_at',
+            'rows_imported', 'rows_skipped', 'rows_failed',
+            'status', 'status_display', 'error_log',
         ]
 
 
