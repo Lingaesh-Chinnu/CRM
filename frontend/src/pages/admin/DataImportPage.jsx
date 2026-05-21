@@ -20,6 +20,7 @@ export default function DataImportPage() {
   const [importType, setImportType] = useState('leads')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
+  const [importSummary, setImportSummary] = useState(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -47,6 +48,7 @@ export default function DataImportPage() {
     form.append('import_type', importType)
     setLoading(true)
     setMessage('')
+    setImportSummary(null)
     try {
       const { data } = await api.post('/admin-data-import/', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
@@ -75,6 +77,11 @@ export default function DataImportPage() {
         preview_token: preview.preview_token,
       })
       setMessage(`Import complete. Imported ${data.rows_imported} rows.`)
+      setImportSummary({
+        ...(data.import_summary || {}),
+        duplicates_skipped: data.history?.rows_skipped || 0,
+        invalid_rows: data.history?.rows_failed || data.rows_failed || 0,
+      })
       setPreview(null)
       setFile(null)
       setHistory((current) => [data.history, ...current.filter((row) => row.id !== data.history?.id)])
@@ -127,6 +134,7 @@ export default function DataImportPage() {
               onClick={() => {
                 setImportType(tab.value)
                 setPreview(null)
+                setImportSummary(null)
                 setMessage('')
               }}
               className={`rounded-2xl px-4 py-3 text-sm font-semibold ${importType === tab.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
@@ -165,6 +173,7 @@ export default function DataImportPage() {
               onChange={(event) => {
                 setFile(event.target.files?.[0] || null)
                 setPreview(null)
+                setImportSummary(null)
               }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
             />
@@ -268,6 +277,29 @@ export default function DataImportPage() {
         )}
 
         {message && <p className="mt-5 text-sm font-semibold text-slate-600">{message}</p>}
+
+        {importSummary && (
+          <div className="mt-6 rounded-[24px] border border-emerald-200 bg-emerald-50 p-5 text-emerald-900">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Import Summary</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Imported to</p>
+                <p className="mt-1 text-sm font-black">
+                  {importSummary.imported_to?.length
+                    ? importSummary.imported_to.map((item) => `${item.branch} Branch`).join(', ')
+                    : 'No branch records'}
+                </p>
+              </div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Leads Added</p><p className="mt-1 text-2xl font-black">{importSummary.leads_added || 0}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Enrollments Added</p><p className="mt-1 text-2xl font-black">{importSummary.enrollments_added || 0}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Payments Updated</p><p className="mt-1 text-2xl font-black">{importSummary.payments_updated || 0}</p></div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Skipped / Invalid</p>
+                <p className="mt-1 text-2xl font-black">{importSummary.duplicates_skipped || 0} / {importSummary.invalid_rows || 0}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {preview?.preview_token && preview?.summary?.ready_to_import > 0 && (
           <div className="mt-6 flex justify-end">

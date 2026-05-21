@@ -341,6 +341,20 @@ export default function LeadsListPage() {
           {importError && <p className="mt-4 text-sm font-semibold text-rose-700">{importError}</p>}
           {importResult && (
             <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+              {importResult.import_summary && (
+                <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Import Summary</p>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Imported to</p>
+                      <p className="mt-1 font-black">{importResult.import_summary.imported_to?.map((item) => `${item.branch} Branch`).join(', ') || 'Your Branch'}</p>
+                    </div>
+                    <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Leads Added</p><p className="mt-1 text-xl font-black">{importResult.import_summary.leads_added || 0}</p></div>
+                    <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Duplicates Skipped</p><p className="mt-1 text-xl font-black">{importResult.import_summary.duplicates_skipped || 0}</p></div>
+                    <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Invalid Rows</p><p className="mt-1 text-xl font-black">{importResult.import_summary.invalid_rows || 0}</p></div>
+                  </div>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-4">
                 <div><span className="font-semibold">Total rows:</span> {importResult.total_rows ?? importResult.history?.total_rows ?? 0}</div>
                 <div><span className="font-semibold">Imported:</span> {importResult.successfully_imported ?? importResult.history?.success_count ?? 0}</div>
