@@ -18,7 +18,7 @@ from views import (
     HistoricalAnalyticsEntryViewSet,
     CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
-    AdminReceiptViewSet, LeadImportView, LeadImportHistoryViewSet,
+    AdminReceiptViewSet, LeadImportView, LeadImportTemplateView, LeadImportHistoryViewSet,
     AdminDataImportView, AdminDataImportTemplateView,
     ExternalLeadCaptureView, NotificationViewSet, TeamNoticeViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
@@ -58,6 +58,7 @@ api_urlpatterns = [
     path('auth/heartbeat/', SessionHeartbeatView.as_view(), name='heartbeat'),
 
     path('leads/import/', LeadImportView.as_view(), name='lead-import'),
+    path('leads/import-template/', LeadImportTemplateView.as_view(), name='lead-import-template'),
     path('admin-data-import/', AdminDataImportView.as_view(), name='admin-data-import'),
     path('admin-data-import/template/', AdminDataImportTemplateView.as_view(), name='admin-data-import-template'),
     path('external-leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),

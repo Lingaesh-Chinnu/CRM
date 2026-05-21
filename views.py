@@ -62,7 +62,6 @@ from decimal import Decimal
 from pathlib import Path
 import base64
 import io
-import json
 import logging
 import re
 import uuid
@@ -2363,6 +2362,32 @@ class LeadImportView(APIView):
         }, status=response_status)
 
 
+class LeadImportTemplateView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        import openpyxl
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = 'Leads Template'
+        sheet.append(REQUIRED_LEAD_IMPORT_HEADINGS)
+        sheet.append([
+            'Sample Candidate',
+            '9876543210',
+            'Python',
+            request.user.branch.name if getattr(request.user, 'branch', None) else 'Gandhipuram',
+            'Google',
+            timezone.localdate().isoformat(),
+            'Follow up after demo enquiry.',
+        ])
+        response = HttpResponse(
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = 'attachment; filename="leads-import-template.xlsx"'
+        workbook.save(response)
+        return response
+
+
 class LeadImportHistoryViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = LeadImportHistorySerializer
     permission_classes = [IsSuperAdmin]
@@ -2370,10 +2395,6 @@ class LeadImportHistoryViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return LeadImportHistory.objects.select_related('uploaded_by', 'branch').order_by('-created_at')
-
-
-def import_header_key(value):
-    return re.sub(r'[^a-z0-9]+', '', str(value or '').strip().lower())
 
 
 def import_cell(value):
@@ -2450,61 +2471,61 @@ ADMIN_IMPORT_SPECS = {
         'model': Lead,
         'required': ['name', 'phone', 'branch', 'course'],
         'fields': [
-            {'field': 'name', 'label': 'Name', 'aliases': ['Candidate Name', 'Student Name']},
-            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
-            {'field': 'branch', 'label': 'Branch', 'aliases': ['Branch Name', 'Branch ID']},
-            {'field': 'course', 'label': 'Course', 'aliases': ['Course Interested', 'Course Name']},
-            {'field': 'assigned_to', 'label': 'Counsellor', 'aliases': ['Counsellor Id', 'Counsellor', 'Follow-up By']},
-            {'field': 'dob', 'label': 'DOB', 'aliases': ['Date of Birth']},
-            {'field': 'email', 'label': 'Email', 'aliases': []},
-            {'field': 'location', 'label': 'Location', 'aliases': ['Address']},
-            {'field': 'pincode', 'label': 'Pincode', 'aliases': []},
-            {'field': 'qualification', 'label': 'Qualification', 'aliases': []},
-            {'field': 'degree', 'label': 'Degree', 'aliases': []},
-            {'field': 'preferred_timing', 'label': 'Preferred Timing', 'aliases': []},
-            {'field': 'walkin_date', 'label': 'Walkin Date', 'aliases': ['Visit Date']},
-            {'field': 'next_follow_up_date', 'label': 'Next Follow Up Date', 'aliases': ['Follow-up Date']},
-            {'field': 'source', 'label': 'Source', 'aliases': ['How They Know IIE']},
-            {'field': 'remarks', 'label': 'Remarks', 'aliases': []},
+            {'field': 'name', 'label': 'Candidate Name'},
+            {'field': 'phone', 'label': 'Phone Number'},
+            {'field': 'course', 'label': 'Course Interested'},
+            {'field': 'branch', 'label': 'Branch'},
+            {'field': 'source', 'label': 'How They Know IIE'},
+            {'field': 'next_follow_up_date', 'label': 'Follow-up Date'},
+            {'field': 'remarks', 'label': 'Remarks'},
+            {'field': 'assigned_to', 'label': 'Counsellor'},
+            {'field': 'dob', 'label': 'DOB'},
+            {'field': 'email', 'label': 'Email'},
+            {'field': 'location', 'label': 'Location'},
+            {'field': 'pincode', 'label': 'Pincode'},
+            {'field': 'qualification', 'label': 'Qualification'},
+            {'field': 'degree', 'label': 'Degree'},
+            {'field': 'preferred_timing', 'label': 'Preferred Timing'},
+            {'field': 'walkin_date', 'label': 'Walkin Date'},
         ],
     },
     'enrollments': {
         'model': Enrollment,
         'required': ['name', 'phone', 'branch', 'course', 'actual_fees', 'enrollment_date'],
         'fields': [
-            {'field': 'student_number', 'label': 'Student ID', 'aliases': ['Student Number']},
-            {'field': 'name', 'label': 'Name', 'aliases': ['Student Name']},
-            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
-            {'field': 'branch', 'label': 'Branch', 'aliases': ['Branch Name', 'Branch ID']},
-            {'field': 'course', 'label': 'Course', 'aliases': ['Course Name']},
-            {'field': 'dob', 'label': 'DOB', 'aliases': ['Date of Birth']},
-            {'field': 'email', 'label': 'Email', 'aliases': []},
-            {'field': 'location', 'label': 'Location', 'aliases': ['Address']},
-            {'field': 'pincode', 'label': 'Pincode', 'aliases': []},
-            {'field': 'qualification', 'label': 'Qualification', 'aliases': []},
-            {'field': 'degree', 'label': 'Degree', 'aliases': []},
-            {'field': 'preferred_timing', 'label': 'Preferred Timing', 'aliases': []},
-            {'field': 'source', 'label': 'Source', 'aliases': []},
-            {'field': 'actual_fees', 'label': 'Actual Fees', 'aliases': []},
-            {'field': 'discount_amount', 'label': 'Discount Amount', 'aliases': ['Discount']},
-            {'field': 'discount_reason', 'label': 'Discount Reason', 'aliases': []},
-            {'field': 'enrollment_date', 'label': 'Enrollment Date', 'aliases': ['Joining Date', 'Joining_Date']},
-            {'field': 'start_date', 'label': 'Start Date', 'aliases': ['First Class Date']},
-            {'field': 'batch_timing', 'label': 'Batch Timing', 'aliases': []},
-            {'field': 'status', 'label': 'Status', 'aliases': []},
+            {'field': 'student_number', 'label': 'Stud_Id'},
+            {'field': 'name', 'label': 'name'},
+            {'field': 'phone', 'label': 'phone'},
+            {'field': 'email', 'label': 'email'},
+            {'field': 'branch', 'label': 'branch'},
+            {'field': 'course', 'label': 'course'},
+            {'field': 'dob', 'label': 'dob'},
+            {'field': 'location', 'label': 'location'},
+            {'field': 'pincode', 'label': 'pincode'},
+            {'field': 'qualification', 'label': 'qualification'},
+            {'field': 'degree', 'label': 'degree'},
+            {'field': 'source', 'label': 'source'},
+            {'field': 'preferred_timing', 'label': 'preferred_timing'},
+            {'field': 'actual_fees', 'label': 'actual_fees'},
+            {'field': 'discount_amount', 'label': 'discount_amount'},
+            {'field': 'discount_reason', 'label': 'discount_reason'},
+            {'field': 'enrollment_date', 'label': 'enrollment_date'},
+            {'field': 'start_date', 'label': 'start_date'},
+            {'field': 'batch_timing', 'label': 'batch_timing'},
+            {'field': 'status', 'label': 'status'},
         ],
     },
     'payments': {
         'model': PaymentInstallment,
         'required': ['amount', 'payment_date'],
         'fields': [
-            {'field': 'student_number', 'label': 'Student ID', 'aliases': ['Student Number']},
-            {'field': 'phone', 'label': 'Phone Number', 'aliases': ['Phone']},
-            {'field': 'amount', 'label': 'Amount', 'aliases': ['Payment Amount']},
-            {'field': 'payment_date', 'label': 'Payment Date', 'aliases': ['Due Date']},
-            {'field': 'payment_mode', 'label': 'Payment Mode', 'aliases': ['Mode']},
-            {'field': 'reference_number', 'label': 'Reference Number', 'aliases': ['Transaction ID']},
-            {'field': 'notes', 'label': 'Notes', 'aliases': ['Remarks']},
+            {'field': 'student_number', 'label': 'Stud_Id'},
+            {'field': 'phone', 'label': 'phone'},
+            {'field': 'amount', 'label': 'amount'},
+            {'field': 'payment_date', 'label': 'payment_date'},
+            {'field': 'payment_mode', 'label': 'payment_mode'},
+            {'field': 'reference_number', 'label': 'reference_number'},
+            {'field': 'notes', 'label': 'notes'},
         ],
     },
 }
@@ -2520,23 +2541,12 @@ def import_spec_fields(import_type):
     ]
 
 
-def build_column_mapping(import_type, headers, explicit_mapping=None):
-    fields = import_spec_fields(import_type)
-    by_key = {import_header_key(header): header for header in headers}
-    mapping = {}
-    explicit_mapping = explicit_mapping or {}
-    for item in fields:
-        explicit = explicit_mapping.get(item['field'])
-        if explicit in headers:
-            mapping[item['field']] = explicit
-            continue
-        candidates = [item['label'], item['field'], *item.get('aliases', [])]
-        for candidate in candidates:
-            header = by_key.get(import_header_key(candidate))
-            if header:
-                mapping[item['field']] = header
-                break
-    return mapping
+def import_template_headers(import_type):
+    return [item['label'] for item in import_spec_fields(import_type)]
+
+
+def import_template_mapping(import_type):
+    return {item['field']: item['label'] for item in import_spec_fields(import_type)}
 
 
 def lookup_branch(value):
@@ -2592,15 +2602,17 @@ def choice_value(value, choices, default=''):
 def validate_admin_import(import_type, headers, rows, mapping):
     spec = ADMIN_IMPORT_SPECS[import_type]
     required = [field for field in spec['required'] if field in {item['field'] for item in import_spec_fields(import_type)}]
-    missing = [field for field in required if field not in mapping]
-    mapped_headers = set(mapping.values())
-    extra = [header for header in headers if header and header not in mapped_headers]
+    expected_headers = import_template_headers(import_type)
+    required_labels = {item['field']: item['label'] for item in import_spec_fields(import_type) if item['field'] in required}
+    missing = [label for label in expected_headers if label not in headers]
+    extra = [header for header in headers if header and header not in expected_headers]
+    invalid_order = not missing and not extra and headers != expected_headers
     column_results = [
         {
             'field': item['field'],
             'label': item['label'],
-            'header': mapping.get(item['field'], ''),
-            'status': 'matched' if mapping.get(item['field']) else ('missing' if item['field'] in required else 'optional'),
+            'header': item['label'] if item['label'] in headers else '',
+            'status': 'matched' if item['label'] in headers else ('missing' if item['field'] in required else 'optional'),
         }
         for item in import_spec_fields(import_type)
     ]
@@ -2617,7 +2629,7 @@ def validate_admin_import(import_type, headers, rows, mapping):
         payload = {}
         for field in required:
             if not value(field):
-                errors.append(f'{field} is required.')
+                errors.append(f'{required_labels.get(field, field)} is required.')
 
         if import_type == 'leads':
             phone = normalize_phone_number(value('phone'))
@@ -2747,10 +2759,11 @@ def validate_admin_import(import_type, headers, rows, mapping):
         'column_results': column_results,
         'missing_columns': missing,
         'extra_columns': extra,
+        'invalid_order': invalid_order,
         'ready_rows': ready,
         'skipped_rows': skipped,
         'failed_rows': failed,
-        'blocked': bool(missing),
+        'blocked': bool(missing or extra or invalid_order),
     }
 
 
@@ -2786,11 +2799,10 @@ class AdminDataImportView(APIView):
         if not uploaded_file:
             return Response({'detail': 'Upload an Excel .xlsx file.'}, status=400)
         try:
-            mapping = json.loads(request.data.get('mapping') or '{}')
             headers, rows = read_xlsx_rows(uploaded_file)
         except Exception as exc:
             return Response({'detail': str(exc)}, status=400)
-        resolved_mapping = build_column_mapping(import_type, headers, mapping)
+        resolved_mapping = import_template_mapping(import_type)
         result = validate_admin_import(import_type, headers, rows, resolved_mapping)
         history = DataImportHistory.objects.create(
             imported_by=request.user,

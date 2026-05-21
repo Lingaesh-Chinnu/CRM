@@ -241,6 +241,18 @@ export default function LeadsListPage() {
     }
   }
 
+  const downloadLeadTemplate = async () => {
+    const response = await api.get('/leads/import-template/', { responseType: 'blob' })
+    const url = window.URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'leads-import-template.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(url)
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -289,19 +301,32 @@ export default function LeadsListPage() {
         <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-xl font-black tracking-tight text-slate-950">Import leads</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
-                Required headings: Candidate Name, Phone Number, Course Interested, Branch, How They Know IIE, Follow-up Date, Remarks.
-              </p>
-              <p className="mt-1 text-sm font-semibold leading-6 text-slate-700">
-                Note: Accepts only csv and xlsx files.
-              </p>
+              <h2 className="text-xl font-black tracking-tight text-slate-950">Import Leads</h2>
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Required headings</p>
+                  <p className="mt-2 text-sm leading-6 text-slate-700">
+                    Candidate Name, Phone Number, Course Interested, Branch, How They Know IIE, Follow-up Date, Remarks
+                  </p>
+                </div>
+                <div className="rounded-2xl bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Accepted</p>
+                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">.csv, .xlsx</p>
+                </div>
+              </div>
             </div>
             <button type="button" onClick={() => setImportOpen(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-900">
               Close
             </button>
           </div>
-          <form onSubmit={submitImport} className="mt-5 flex flex-col gap-3 sm:flex-row">
+          <form onSubmit={submitImport} className="mt-5 grid gap-3 lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+            <button
+              type="button"
+              onClick={downloadLeadTemplate}
+              className="inline-flex justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+            >
+              Download Template
+            </button>
             <input
               type="file"
               accept=".csv,.xlsx"

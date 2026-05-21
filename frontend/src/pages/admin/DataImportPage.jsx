@@ -19,7 +19,6 @@ export default function DataImportPage() {
   const [history, setHistory] = useState([])
   const [importType, setImportType] = useState('leads')
   const [file, setFile] = useState(null)
-  const [mapping, setMapping] = useState({})
   const [preview, setPreview] = useState(null)
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -34,7 +33,8 @@ export default function DataImportPage() {
   }, [])
 
   const fields = useMemo(() => config?.[importType]?.fields || [], [config, importType])
-  const headers = preview?.headers || []
+  const requiredFields = useMemo(() => config?.[importType]?.required || [], [config, importType])
+  const requiredHeadings = fields.filter((field) => requiredFields.includes(field.field)).map((field) => field.label)
 
   const previewImport = async (event) => {
     event.preventDefault()
@@ -45,7 +45,6 @@ export default function DataImportPage() {
     const form = new FormData()
     form.append('file', file)
     form.append('import_type', importType)
-    form.append('mapping', JSON.stringify(mapping))
     setLoading(true)
     setMessage('')
     try {
@@ -128,7 +127,6 @@ export default function DataImportPage() {
               onClick={() => {
                 setImportType(tab.value)
                 setPreview(null)
-                setMapping({})
                 setMessage('')
               }}
               className={`rounded-2xl px-4 py-3 text-sm font-semibold ${importType === tab.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
@@ -136,6 +134,26 @@ export default function DataImportPage() {
               {tab.label}
             </button>
           ))}
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Template columns</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
+              Uploads must use the downloaded template columns in the same names and order.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {fields.map((field) => (
+                <span key={field.field} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
+                  {field.label}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Required headings</p>
+            <p className="mt-2 text-sm leading-6 text-amber-900">{requiredHeadings.join(', ')}</p>
+          </div>
         </div>
 
         <form onSubmit={previewImport} className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -162,26 +180,16 @@ export default function DataImportPage() {
 
         {preview?.column_results && (
           <div className="mt-6">
-            <h2 className="text-lg font-black tracking-tight text-slate-950">Column Mapping</h2>
+            <h2 className="text-lg font-black tracking-tight text-slate-950">Column Validation</h2>
             <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {fields.map((field) => {
-                const result = preview.column_results.find((item) => item.field === field.field)
-                return (
-                  <div key={field.field} className={`rounded-2xl border p-4 ${statusClass(result?.status)}`}>
-                    <p className="text-sm font-black">{field.label}</p>
-                    <select
-                      value={mapping[field.field] || result?.header || ''}
-                      onChange={(event) => setMapping((current) => ({ ...current, [field.field]: event.target.value }))}
-                      className="mt-3 w-full rounded-xl border border-white/60 bg-white px-3 py-2 text-sm text-slate-900"
-                    >
-                      <option value="">Not mapped</option>
-                      {Array.from(new Set(headers)).map((header) => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </div>
-                )
-              })}
+              {preview.column_results.map((result) => (
+                <div key={result.field} className={`rounded-2xl border p-4 ${statusClass(result.status)}`}>
+                  <p className="text-sm font-black">{result.label}</p>
+                  <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em]">
+                    {result.status === 'matched' ? 'Matched' : result.status === 'missing' ? 'Missing' : 'Optional'}
+                  </p>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -213,6 +221,15 @@ export default function DataImportPage() {
               <p className="text-sm font-black text-amber-900">Extra columns</p>
               <p className="mt-2 text-sm text-amber-800">{preview.extra_columns?.join(', ') || 'None'}</p>
             </div>
+          </div>
+        )}
+
+        {preview?.invalid_order && (
+          <div className="mt-6 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+            <p className="text-sm font-black text-rose-900">Template order mismatch</p>
+            <p className="mt-2 text-sm text-rose-800">
+              Use the downloaded template without renaming or reordering columns.
+            </p>
           </div>
         )}
 
