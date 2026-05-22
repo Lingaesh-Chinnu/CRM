@@ -1349,8 +1349,11 @@ class UserPerformanceReportView(APIView):
                 created_by=user, enrollment_date__year=year, enrollment_date__month=month
             ).count()
             value_total = Enrollment.objects.filter(
-                created_by=user, enrollment_date__year=year, enrollment_date__month=month
-            ).aggregate(total=Sum('final_fees'))['total'] or 0
+                created_by=user, 
+                enrollment_date__year=year, 
+                enrollment_date__month=month,
+                status__in=[Enrollment.Status.ENROLLED, Enrollment.Status.ACTIVE]
+            ).aggregate(total=Sum('net_payable_fee'))['total'] or 0
 
             lead_target = target.lead_target if target else 0
             walkin_target = target.walkin_target if target else 0
@@ -6043,8 +6046,12 @@ class DashboardSummaryView(APIView):
 
         total_fee_amount = pay_qs.aggregate(total=Sum('total_fees'))['total'] or 0
         total_paid_amount = pay_qs.aggregate(total=Sum('paid_amount'))['total'] or 0
-        value_this_month = enroll_qs.filter(enrollment_date__year=year, enrollment_date__month=month).aggregate(
-            total=Sum('final_fees')
+        value_this_month = enroll_qs.filter(
+            enrollment_date__year=year, 
+            enrollment_date__month=month,
+            status__in=[Enrollment.Status.ENROLLED, Enrollment.Status.ACTIVE]
+        ).aggregate(
+            total=Sum('net_payable_fee')
         )['total'] or 0
         current_month_collected_amount = collection_qs.filter(
             payment_date__year=year,
@@ -6153,7 +6160,10 @@ class DashboardBranchComparisonView(APIView):
         for branch in branches:
             year, month = map(int, month_str.split('-'))
             enroll = Enrollment.objects.filter(
-                branch=branch, enrollment_date__year=year, enrollment_date__month=month
+                branch=branch, 
+                enrollment_date__year=year, 
+                enrollment_date__month=month,
+                status__in=[Enrollment.Status.ENROLLED, Enrollment.Status.ACTIVE]
             )
             data.append({
                 'branch_id':   branch.id,
@@ -6163,7 +6173,7 @@ class DashboardBranchComparisonView(APIView):
                 'walkins':     WalkIn.objects.filter(branch=branch, visit_date__year=year,
                                                      visit_date__month=month).count(),
                 'enrollments': enroll.count(),
-                'value':       enroll.aggregate(v=Sum('final_fees'))['v'] or 0,
+                'value':       enroll.aggregate(v=Sum('net_payable_fee'))['v'] or 0,
             })
         return Response(data)
 
@@ -6353,7 +6363,9 @@ class BranchPerformanceComparisonReportView(APIView):
                 Q(record_type=FollowUp.RecordType.WALKIN, record_id__in=walkins.values('id'))
             ).count()
             due_followups = missed_leads + missed_walkins + completed_followups
-            value = enrollments.aggregate(total=Sum('final_fees'))['total'] or 0
+            value = enrollments.filter(
+                status__in=[Enrollment.Status.ENROLLED, Enrollment.Status.ACTIVE]
+            ).aggregate(total=Sum('net_payable_fee'))['total'] or 0
             target_score = 0
             if target:
                 achieved = sum([
