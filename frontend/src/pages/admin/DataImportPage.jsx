@@ -112,8 +112,7 @@ export default function DataImportPage() {
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Admin</p>
-            <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Data Import</h1>
+              <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Data Import</h1>
           </div>
           <button
             type="button"

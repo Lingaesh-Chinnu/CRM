@@ -298,32 +298,23 @@ export default function LeadsListPage() {
       </section>
 
       {importOpen && (
-        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h2 className="text-xl font-black tracking-tight text-slate-950">Import Leads</h2>
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Required headings</p>
-                  <p className="mt-2 text-sm leading-6 text-slate-700">
-                    Candidate Name, Phone Number, Course Interested, Branch, How They Know IIE, Follow-up Date, Remarks
-                  </p>
-                </div>
-                <div className="rounded-2xl bg-slate-50 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Accepted</p>
-                  <p className="mt-2 text-sm font-semibold leading-6 text-slate-700">.csv, .xlsx</p>
-                </div>
-              </div>
-            </div>
-            <button type="button" onClick={() => setImportOpen(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-900">
-              Close
+        <section className="relative rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+          <div className="flex items-start justify-between gap-4 pr-12">
+            <h2 className="text-xl font-black tracking-tight text-slate-950">Import Leads</h2>
+            <button
+              type="button"
+              onClick={() => setImportOpen(false)}
+              aria-label="Close import leads modal"
+              className="absolute right-5 top-5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-600 text-xl font-bold leading-none text-white shadow-sm transition hover:bg-rose-700 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100 sm:right-6 sm:top-6"
+            >
+              &times;
             </button>
           </div>
-          <form onSubmit={submitImport} className="mt-5 grid gap-3 lg:grid-cols-[auto_minmax(0,1fr)_auto]">
+          <form onSubmit={submitImport} className="mt-6 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
             <button
               type="button"
               onClick={downloadLeadTemplate}
-              className="inline-flex justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
+              className="inline-flex min-h-[48px] items-center justify-center whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             >
               Download Template
             </button>
@@ -331,10 +322,10 @@ export default function LeadsListPage() {
               type="file"
               accept=".csv,.xlsx"
               onChange={(event) => setImportFile(event.target.files?.[0] || null)}
-              className="flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+              className="min-h-[48px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 shadow-inner file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-900 file:shadow-sm transition focus:border-cyan-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-cyan-100"
               required
             />
-            <button disabled={importing} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+            <button disabled={importing} className="inline-flex min-h-[48px] items-center justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60 md:col-span-2 xl:col-span-1">
               {importing ? 'Importing...' : 'Upload & Import'}
             </button>
           </form>
