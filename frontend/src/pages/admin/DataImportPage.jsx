@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
@@ -15,7 +15,6 @@ function statusClass(status) {
 }
 
 export default function DataImportPage() {
-  const [config, setConfig] = useState(null)
   const [history, setHistory] = useState([])
   const [importType, setImportType] = useState('leads')
   const [file, setFile] = useState(null)
@@ -27,15 +26,10 @@ export default function DataImportPage() {
   useEffect(() => {
     api.get('/admin-data-import/')
       .then(({ data }) => {
-        setConfig(data.types)
         setHistory(data.history || [])
       })
       .catch((error) => setMessage(apiErrorMessage(error, 'Failed to load import setup.')))
   }, [])
-
-  const fields = useMemo(() => config?.[importType]?.fields || [], [config, importType])
-  const requiredFields = useMemo(() => config?.[importType]?.required || [], [config, importType])
-  const requiredHeadings = fields.filter((field) => requiredFields.includes(field.field)).map((field) => field.label)
 
   const previewImport = async (event) => {
     event.preventDefault()
@@ -108,23 +102,12 @@ export default function DataImportPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-              <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Data Import</h1>
-          </div>
-          <button
-            type="button"
-            onClick={downloadTemplate}
-            className="inline-flex min-w-[190px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-          >
-            Download Sample Template
-          </button>
-        </div>
+    <div className="space-y-5">
+      <section className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+        <h1 className="text-3xl font-black tracking-tight text-slate-950">Data Import</h1>
       </section>
 
-      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+      <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
         <div className="flex flex-wrap gap-2">
           {importTabs.map((tab) => (
             <button
@@ -143,29 +126,16 @@ export default function DataImportPage() {
           ))}
         </div>
 
-        <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(280px,0.8fr)]">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Template columns</p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              Uploads must use the downloaded template columns in the same names and order.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {fields.map((field) => (
-                <span key={field.field} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200">
-                  {field.label}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Required headings</p>
-            <p className="mt-2 text-sm leading-6 text-amber-900">{requiredHeadings.join(', ')}</p>
-          </div>
-        </div>
-
-        <form onSubmit={previewImport} className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px]">
-          <label className="block">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Excel File</span>
+        <form onSubmit={previewImport} className="mt-5 grid gap-3 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            className="inline-flex min-h-[48px] items-center justify-center whitespace-nowrap rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+          >
+            Download Template
+          </button>
+          <label className="block min-w-0">
+            <span className="sr-only">Excel File</span>
             <input
               type="file"
               accept=".xlsx"
@@ -174,13 +144,13 @@ export default function DataImportPage() {
                 setPreview(null)
                 setImportSummary(null)
               }}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+              className="min-h-[48px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 shadow-inner file:mr-4 file:rounded-xl file:border-0 file:bg-white file:px-4 file:py-2 file:text-sm file:font-semibold file:text-slate-900 file:shadow-sm transition focus:border-cyan-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-cyan-100"
             />
           </label>
           <button
             type="submit"
             disabled={loading}
-            className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            className="inline-flex min-h-[48px] items-center justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:opacity-60"
           >
             {loading ? 'Validating...' : 'Validate & Preview'}
           </button>
