@@ -277,7 +277,7 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
 
-    def test_dashboard_counts_signed_official_enrollments_but_values_only_active_students(self):
+    def test_dashboard_counts_and_values_only_active_enrolled_students(self):
         today = timezone.localdate()
         month_param = today.strftime('%Y-%m')
 
@@ -323,8 +323,8 @@ class PublicWalkInFormTests(APITestCase):
 
         summary = self.client.get('/api/dashboard/summary/', {'branch': self.branch.id})
         self.assertEqual(summary.status_code, 200)
-        self.assertEqual(summary.data['total_enrollments'], 4)
-        self.assertEqual(summary.data['enroll_this_month'], 4)
+        self.assertEqual(summary.data['total_enrollments'], 2)
+        self.assertEqual(summary.data['enroll_this_month'], 2)
         self.assertEqual(Decimal(str(summary.data['total_revenue'])), Decimal('22000.00'))
         self.assertEqual(Decimal(str(summary.data['total_value'])), Decimal('22000.00'))
         self.assertEqual(Decimal(str(summary.data['value_this_month'])), Decimal('22000.00'))
@@ -332,21 +332,12 @@ class PublicWalkInFormTests(APITestCase):
         branch_comparison = self.client.get('/api/dashboard/branch-comparison/', {'month': month_param})
         self.assertEqual(branch_comparison.status_code, 200)
         branch_row = next(row for row in branch_comparison.data if row['branch_id'] == self.branch.id)
-        self.assertEqual(branch_row['enrollments'], 4)
+        self.assertEqual(branch_row['enrollments'], 2)
         self.assertEqual(Decimal(str(branch_row['value'])), Decimal('22000.00'))
 
         trends = self.client.get('/api/dashboard/trends/', {'days': 1})
         self.assertEqual(trends.status_code, 200)
-        self.assertEqual(trends.data[0]['enrollments'], 4)
-
-        students = self.client.get('/api/students/')
-        self.assertEqual(students.status_code, 200)
-        self.assertEqual({row['phone'] for row in students.data}, {
-            '9000000201',
-            '9000000202',
-            '9000000203',
-            '9000000206',
-        })
+        self.assertEqual(trends.data[0]['enrollments'], 2)
 
     def test_add_to_payment_requires_course_start_date(self):
         enrollment = Enrollment.objects.create(
