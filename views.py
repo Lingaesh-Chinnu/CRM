@@ -1745,6 +1745,8 @@ class LeadFilter(django_filters.FilterSet):
         value = (value or '').strip()
         if not value:
             return queryset
+        if value == '__unknown__':
+            return queryset.filter(Q(source__isnull=True) | Q(source=''))
         if value == 'manual':
             if 'imported_via_csv' in missing_model_columns(Lead, ['imported_via_csv']):
                 return queryset.filter(created_by__isnull=False)
@@ -1753,10 +1755,7 @@ class LeadFilter(django_filters.FilterSet):
             if 'imported_via_csv' in missing_model_columns(Lead, ['imported_via_csv']):
                 return queryset.none()
             return queryset.filter(imported_via_csv=True)
-        valid_sources = {choice[0] for choice in Lead.Source.choices}
-        if value in valid_sources:
-            return queryset.filter(source=value)
-        return queryset.none()
+        return queryset.filter(source__iexact=value)
 
     def filter_next_follow_up_date_from(self, queryset, name, value):
         if not value or 'next_follow_up_date' in missing_model_columns(Lead, ['next_follow_up_date']):
@@ -1901,6 +1900,30 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'name': user.full_name or user.username,
                 'branch_id': user.branch_id,
                 'branch_name': user.branch.name if user.branch else '',
+            })
+        return Response(rows)
+
+    @action(detail=False, methods=['get'], url_path='source-options')
+    def source_options(self, request):
+        queryset = visible_candidate_queryset(Lead.objects.all())
+        if not request.user.is_super_admin:
+            queryset = queryset.filter(branch=request.user.branch)
+        branch_id = request.query_params.get('branch')
+        if branch_id and request.user.is_super_admin:
+            queryset = queryset.filter(branch_id=branch_id)
+
+        choices = dict(Lead.Source.choices)
+        rows = []
+        seen = set()
+        for source in queryset.order_by('source').values_list('source', flat=True):
+            value = (source or '').strip()
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append({
+                'value': value or '__unknown__',
+                'label': choices.get(value, value or 'Unknown'),
             })
         return Response(rows)
 

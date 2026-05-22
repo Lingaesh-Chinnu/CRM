@@ -465,11 +465,11 @@ class LeadListSerializer(serializers.ModelSerializer):
         return self.get_status(obj)
 
     def get_source(self, obj):
-        return safe_deferred_value(obj, 'source', Lead.Source.MANUAL) or Lead.Source.MANUAL
+        return safe_deferred_value(obj, 'source', '') or ''
 
     def get_source_display(self, obj):
         source = self.get_source(obj)
-        return dict(Lead.Source.choices).get(source, source or 'Manual')
+        return dict(Lead.Source.choices).get(source, source or 'Unknown')
 
     def get_next_follow_up_date(self, obj):
         value = safe_deferred_value(obj, 'next_follow_up_date', None)

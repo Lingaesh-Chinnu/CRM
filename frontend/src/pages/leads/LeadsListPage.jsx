@@ -55,6 +55,10 @@ function assignedUserName(lead) {
   return lead.assigned_user?.name || lead.assigned_to_name || 'Unassigned'
 }
 
+function sourceLabel(lead) {
+  return lead.source_display || lead.source || 'Unknown'
+}
+
 const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
 
 function statusCount(rows, status) {
@@ -65,10 +69,12 @@ export default function LeadsListPage() {
   const [leads, setLeads] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
   const [branches, setBranches] = useState([])
+  const [sourceOptions, setSourceOptions] = useState([])
   const [filters, setFilters] = useState({
     name: '',
     phone: '',
     status: '',
+    source: '',
     followUp: '',
     followUpBy: '',
     branch: '',
@@ -104,6 +110,10 @@ export default function LeadsListPage() {
       const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
       const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
       const matchesStatus = !filters.status || lead.status === filters.status
+      const leadSource = String(lead.source || '').toLowerCase()
+      const filterSource = String(filters.source || '').toLowerCase()
+      const matchesSource = !filterSource
+        || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
       const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
       const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
       let matchesFollowUp = true
@@ -116,7 +126,7 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesStatus && matchesFollowUp && matchesFollowUpBy
+      return matchesName && matchesPhone && matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy
     })
   }, [filters, leads])
 
@@ -124,6 +134,7 @@ export default function LeadsListPage() {
     filters.name
     || filters.phone
     || filters.status
+    || filters.source
     || filters.followUp
     || filters.followUpBy
     || filters.branch
@@ -149,6 +160,7 @@ export default function LeadsListPage() {
     focus,
     isSuperAdmin,
     filters.branch,
+    filters.source,
     filters.createdFrom,
     filters.createdTo,
   ])
@@ -173,6 +185,14 @@ export default function LeadsListPage() {
       .catch(() => setBranches([]))
   }, [isSuperAdmin])
 
+  useEffect(() => {
+    const params = {}
+    if (isSuperAdmin && filters.branch) params.branch = filters.branch
+    api.get('/leads/source-options/', { params })
+      .then(({ data }) => setSourceOptions(data || []))
+      .catch(() => setSourceOptions([]))
+  }, [isSuperAdmin, filters.branch])
+
   const fetchLeads = async () => {
     setLoading(true)
     try {
@@ -183,6 +203,7 @@ export default function LeadsListPage() {
       if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
       if (isSuperAdmin && filters.branch) params.branch = filters.branch
+      if (filters.source) params.source = filters.source
       if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
       if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
       const { data } = await api.get('/leads/', { params })
@@ -209,6 +230,7 @@ export default function LeadsListPage() {
       name: '',
       phone: '',
       status: '',
+      source: '',
       followUp: '',
       followUpBy: '',
       branch: '',
@@ -396,6 +418,19 @@ export default function LeadsListPage() {
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Source</span>
+            <select
+              value={filters.source}
+              onChange={(event) => updateFilter('source', event.target.value)}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              <option value="">All Sources</option>
+              {sourceOptions.map((option) => (
+                <option key={option.value || 'unknown'} value={option.value}>{option.label || 'Unknown'}</option>
+              ))}
+            </select>
+          </label>
           {isSuperAdmin && (
             <>
               <label className="block">
@@ -564,6 +599,9 @@ export default function LeadsListPage() {
                     <div className="flex w-full flex-col gap-2 lg:w-[190px] lg:items-stretch lg:justify-center">
                       <div className="w-full rounded-full bg-slate-100 px-3 py-1 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
                         {statusLabel(lead.status)}
+                      </div>
+                      <div className="w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-center text-[11px] font-semibold text-slate-500">
+                        Source: {sourceLabel(lead)}
                       </div>
                       <div className="w-full rounded-full border border-slate-200 bg-white px-3 py-1 text-center text-xs font-semibold text-slate-600">
                         Follow-up: {assignedUserName(lead)}
