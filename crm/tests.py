@@ -1,9 +1,11 @@
 from django.contrib.auth import get_user_model
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from unittest import mock
+from decimal import Decimal
 
-from crm.models import Branch, Course, Enrollment, Lead, Payment, PaymentInstallment, WalkIn
+from crm.models import Branch, Course, Enrollment, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
@@ -274,6 +276,77 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
             {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
+
+    def test_dashboard_counts_signed_official_enrollments_but_values_only_active_students(self):
+        today = timezone.localdate()
+        month_param = today.strftime('%Y-%m')
+
+        def create_enrollment(name, phone, status_value, fee):
+            return Enrollment.objects.create(
+                branch=self.branch,
+                course=self.course,
+                name=name,
+                phone=phone,
+                preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                enrollment_date=today,
+                actual_fees=fee,
+                discount_amount=0,
+                status=status_value,
+            )
+
+        active = create_enrollment('Active Student', '9000000201', Enrollment.Status.ACTIVE, 10000)
+        enrolled = create_enrollment('Enrolled Student', '9000000202', Enrollment.Status.ENROLLED, 12000)
+        completed = create_enrollment('Completed Student', '9000000203', Enrollment.Status.COMPLETED, 14000)
+        rules_sent = create_enrollment('Rules Sent Candidate', '9000000204', Enrollment.Status.RULES_SENT, 16000)
+        rules_submitted = create_enrollment('Rules Submitted Candidate', '9000000205', Enrollment.Status.RULES_SUBMITTED, 18000)
+        signed_rules_submitted = create_enrollment('Signed Submitted Student', '9000000206', Enrollment.Status.RULES_SUBMITTED, 20000)
+        unsigned_rules_submitted = create_enrollment('Unsigned Submitted Candidate', '9000000207', Enrollment.Status.RULES_SUBMITTED, 22000)
+        RulesSigningRequest.objects.create(
+            enrollment=signed_rules_submitted,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        RulesSigningRequest.objects.create(
+            enrollment=unsigned_rules_submitted,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        Payment.objects.create(enrollment=active, total_fees=active.net_payable_fee, paid_amount=1000)
+        Payment.objects.create(enrollment=enrolled, total_fees=enrolled.net_payable_fee, paid_amount=2000)
+        Payment.objects.create(enrollment=completed, total_fees=completed.net_payable_fee, paid_amount=14000)
+        Payment.objects.create(enrollment=rules_sent, total_fees=rules_sent.net_payable_fee, paid_amount=16000)
+        Payment.objects.create(enrollment=rules_submitted, total_fees=rules_submitted.net_payable_fee, paid_amount=18000)
+        Payment.objects.create(enrollment=signed_rules_submitted, total_fees=signed_rules_submitted.net_payable_fee, paid_amount=20000)
+        Payment.objects.create(enrollment=unsigned_rules_submitted, total_fees=unsigned_rules_submitted.net_payable_fee, paid_amount=22000)
+
+        self.client.force_authenticate(self.admin)
+
+        summary = self.client.get('/api/dashboard/summary/', {'branch': self.branch.id})
+        self.assertEqual(summary.status_code, 200)
+        self.assertEqual(summary.data['total_enrollments'], 4)
+        self.assertEqual(summary.data['enroll_this_month'], 4)
+        self.assertEqual(Decimal(str(summary.data['total_revenue'])), Decimal('22000.00'))
+        self.assertEqual(Decimal(str(summary.data['total_value'])), Decimal('22000.00'))
+        self.assertEqual(Decimal(str(summary.data['value_this_month'])), Decimal('22000.00'))
+
+        branch_comparison = self.client.get('/api/dashboard/branch-comparison/', {'month': month_param})
+        self.assertEqual(branch_comparison.status_code, 200)
+        branch_row = next(row for row in branch_comparison.data if row['branch_id'] == self.branch.id)
+        self.assertEqual(branch_row['enrollments'], 4)
+        self.assertEqual(Decimal(str(branch_row['value'])), Decimal('22000.00'))
+
+        trends = self.client.get('/api/dashboard/trends/', {'days': 1})
+        self.assertEqual(trends.status_code, 200)
+        self.assertEqual(trends.data[0]['enrollments'], 4)
+
+        students = self.client.get('/api/students/')
+        self.assertEqual(students.status_code, 200)
+        self.assertEqual({row['phone'] for row in students.data}, {
+            '9000000201',
+            '9000000202',
+            '9000000203',
+            '9000000206',
+        })
 
     def test_add_to_payment_requires_course_start_date(self):
         enrollment = Enrollment.objects.create(
