@@ -106,6 +106,10 @@ def official_enrollment_queryset(queryset):
 def enrollment_value_queryset(queryset):
     return queryset.filter(status__in=ENROLLMENT_VALUE_STATUSES)
 
+
+def current_month_enrollment_queryset(queryset, year, month):
+    return enrollment_value_queryset(queryset).filter(enrollment_date__year=year, enrollment_date__month=month)
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
@@ -1363,15 +1367,13 @@ class UserPerformanceReportView(APIView):
             walkins_count = WalkIn.objects.filter(
                 created_by=user, visit_date__year=year, visit_date__month=month
             ).count()
-            enrollments_count = Enrollment.objects.filter(
-                created_by=user, enrollment_date__year=year, enrollment_date__month=month
+            enrollments = current_month_enrollment_queryset(
+                Enrollment.objects.filter(created_by=user),
+                year,
+                month,
             )
-            enrollments_count = enrollment_value_queryset(enrollments_count).count()
-            value_total = enrollment_value_queryset(Enrollment.objects.filter(
-                created_by=user, 
-                enrollment_date__year=year, 
-                enrollment_date__month=month,
-            )).aggregate(total=Sum('net_payable_fee'))['total'] or 0
+            enrollments_count = enrollments.count()
+            value_total = enrollments.aggregate(total=Sum('net_payable_fee'))['total'] or 0
 
             lead_target = target.lead_target if target else 0
             walkin_target = target.walkin_target if target else 0
@@ -5902,8 +5904,10 @@ def calculate_user_monthly_rating(user, year=None, month=None):
 
     lead_qs = Lead.objects.filter(created_by=user, created_at__date__gte=start, created_at__date__lte=end)
     walkin_qs = WalkIn.objects.filter(created_by=user, visit_date__gte=start, visit_date__lte=end)
-    enroll_qs = enrollment_value_queryset(
-        Enrollment.objects.filter(created_by=user, enrollment_date__gte=start, enrollment_date__lte=end)
+    enroll_qs = current_month_enrollment_queryset(
+        Enrollment.objects.filter(created_by=user),
+        year,
+        month,
     )
     lead_count = lead_qs.count()
     enroll_count = enroll_qs.count()
@@ -6071,10 +6075,8 @@ class DashboardSummaryView(APIView):
         total_value_amount = value_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
-        value_this_month = value_enroll_qs.filter(
-            enrollment_date__year=year, 
-            enrollment_date__month=month,
-        ).aggregate(
+        monthly_value_enroll_qs = current_month_enrollment_queryset(enroll_qs, year, month)
+        value_this_month = monthly_value_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
         current_month_collected_amount = collection_qs.filter(
@@ -6130,7 +6132,7 @@ class DashboardSummaryView(APIView):
         leads_this_month = lead_qs.filter(created_at__year=year, created_at__month=month).count()
         walkins_this_month = walkin_qs.filter(visit_date__year=year, visit_date__month=month).count()
         counted_enroll_qs = enrollment_value_queryset(enroll_qs)
-        enroll_this_month = counted_enroll_qs.filter(enrollment_date__year=year, enrollment_date__month=month).count()
+        enroll_this_month = monthly_value_enroll_qs.count()
         conversion_rate = round((enroll_this_month / leads_this_month) * 100, 2) if leads_this_month else 0
 
         return Response({
@@ -6185,11 +6187,9 @@ class DashboardBranchComparisonView(APIView):
         data = []
         for branch in branches:
             year, month = map(int, month_str.split('-'))
-            enroll = enrollment_value_queryset(Enrollment.objects.filter(
-                branch=branch, 
-                enrollment_date__year=year, 
-                enrollment_date__month=month,
-            ))
+            enroll = current_month_enrollment_queryset(Enrollment.objects.filter(
+                branch=branch,
+            ), year, month)
             value = enroll.aggregate(v=Sum('net_payable_fee'))['v'] or 0
             data.append({
                 'branch_id':   branch.id,
@@ -6344,9 +6344,7 @@ class ConversionFunnelReportView(APIView):
         branch_id = request.query_params.get('branch')
         lead_qs = Lead.objects.filter(created_at__year=year, created_at__month=month)
         walkin_qs = WalkIn.objects.filter(visit_date__year=year, visit_date__month=month)
-        enroll_qs = enrollment_value_queryset(
-            Enrollment.objects.filter(enrollment_date__year=year, enrollment_date__month=month)
-        )
+        enroll_qs = current_month_enrollment_queryset(Enrollment.objects.all(), year, month)
         if branch_id and branch_id != 'all':
             lead_qs = lead_qs.filter(branch_id=branch_id)
             walkin_qs = walkin_qs.filter(branch_id=branch_id)
@@ -6381,9 +6379,7 @@ class BranchPerformanceComparisonReportView(APIView):
         for branch in Branch.objects.filter(is_active=True).order_by('name'):
             leads = Lead.objects.filter(branch=branch, created_at__year=year, created_at__month=month)
             walkins = WalkIn.objects.filter(branch=branch, visit_date__year=year, visit_date__month=month)
-            enrollments = enrollment_value_queryset(
-                Enrollment.objects.filter(branch=branch, enrollment_date__year=year, enrollment_date__month=month)
-            )
+            enrollments = current_month_enrollment_queryset(Enrollment.objects.filter(branch=branch), year, month)
             payments = Payment.objects.filter(enrollment__branch=branch)
             target = BranchTarget.objects.filter(branch=branch, year=year, month=month).first()
             missed_leads = Lead.objects.filter(branch=branch, next_follow_up_date__lt=today).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).count()

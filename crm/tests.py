@@ -280,10 +280,11 @@ class PublicWalkInFormTests(APITestCase):
     def test_dashboard_counts_and_values_only_active_enrolled_students(self):
         today = timezone.localdate()
         month_param = today.strftime('%Y-%m')
+        previous_month_time = timezone.now() - timezone.timedelta(days=40)
 
-        def create_enrollment(name, phone, status_value, fee):
-            return Enrollment.objects.create(
-                branch=self.branch,
+        def create_enrollment(name, phone, status_value, fee, created_at=None):
+            enrollment = Enrollment.objects.create(
+                branch=self.other_branch,
                 course=self.course,
                 name=name,
                 phone=phone,
@@ -293,14 +294,25 @@ class PublicWalkInFormTests(APITestCase):
                 discount_amount=0,
                 status=status_value,
             )
+            if created_at:
+                Enrollment.objects.filter(pk=enrollment.pk).update(created_at=created_at)
+                enrollment.refresh_from_db()
+            return enrollment
 
-        active = create_enrollment('Active Student', '9000000201', Enrollment.Status.ACTIVE, 10000)
-        enrolled = create_enrollment('Enrolled Student', '9000000202', Enrollment.Status.ENROLLED, 12000)
-        completed = create_enrollment('Completed Student', '9000000203', Enrollment.Status.COMPLETED, 14000)
-        rules_sent = create_enrollment('Rules Sent Candidate', '9000000204', Enrollment.Status.RULES_SENT, 16000)
-        rules_submitted = create_enrollment('Rules Submitted Candidate', '9000000205', Enrollment.Status.RULES_SUBMITTED, 18000)
-        signed_rules_submitted = create_enrollment('Signed Submitted Student', '9000000206', Enrollment.Status.RULES_SUBMITTED, 20000)
-        unsigned_rules_submitted = create_enrollment('Unsigned Submitted Candidate', '9000000207', Enrollment.Status.RULES_SUBMITTED, 22000)
+        active = create_enrollment('Active Student 1', '9000000201', Enrollment.Status.ACTIVE, 29900)
+        active_old_created = create_enrollment('Active Student 2', '9000000202', Enrollment.Status.ACTIVE, 19900, previous_month_time)
+        active_three = create_enrollment('Active Student 3', '9000000203', Enrollment.Status.ACTIVE, 33900)
+        active_four_old_created = create_enrollment('Active Student 4', '9000000204', Enrollment.Status.ACTIVE, 5900, previous_month_time)
+        enrolled = create_enrollment('Enrolled Student 1', '9000000205', Enrollment.Status.ENROLLED, 29900)
+        enrolled_two = create_enrollment('Enrolled Student 2', '9000000206', Enrollment.Status.ENROLLED, 36900)
+        enrolled_three = create_enrollment('Enrolled Student 3', '9000000207', Enrollment.Status.ENROLLED, 23900)
+        enrolled_four = create_enrollment('Enrolled Student 4', '9000000208', Enrollment.Status.ENROLLED, 23900)
+        enrolled_five = create_enrollment('Enrolled Student 5', '9000000209', Enrollment.Status.ENROLLED, 29900)
+        completed = create_enrollment('Completed Student', '9000000214', Enrollment.Status.COMPLETED, 14000)
+        rules_sent = create_enrollment('Rules Sent Candidate', '9000000210', Enrollment.Status.RULES_SENT, 5900)
+        rules_submitted = create_enrollment('Rules Submitted Candidate', '9000000211', Enrollment.Status.RULES_SUBMITTED, 18000)
+        signed_rules_submitted = create_enrollment('Signed Submitted Student', '9000000212', Enrollment.Status.RULES_SUBMITTED, 20000)
+        unsigned_rules_submitted = create_enrollment('Unsigned Submitted Candidate', '9000000213', Enrollment.Status.RULES_SUBMITTED, 22000)
         RulesSigningRequest.objects.create(
             enrollment=signed_rules_submitted,
             status=RulesSigningRequest.Status.SUBMITTED,
@@ -312,32 +324,39 @@ class PublicWalkInFormTests(APITestCase):
             sent_at=timezone.now(),
         )
         Payment.objects.create(enrollment=active, total_fees=active.net_payable_fee, paid_amount=1000)
+        Payment.objects.create(enrollment=active_old_created, total_fees=active_old_created.net_payable_fee, paid_amount=19900)
+        Payment.objects.create(enrollment=active_three, total_fees=active_three.net_payable_fee, paid_amount=33900)
+        Payment.objects.create(enrollment=active_four_old_created, total_fees=active_four_old_created.net_payable_fee, paid_amount=5900)
         Payment.objects.create(enrollment=enrolled, total_fees=enrolled.net_payable_fee, paid_amount=2000)
+        Payment.objects.create(enrollment=enrolled_two, total_fees=enrolled_two.net_payable_fee, paid_amount=36900)
+        Payment.objects.create(enrollment=enrolled_three, total_fees=enrolled_three.net_payable_fee, paid_amount=23900)
+        Payment.objects.create(enrollment=enrolled_four, total_fees=enrolled_four.net_payable_fee, paid_amount=23900)
+        Payment.objects.create(enrollment=enrolled_five, total_fees=enrolled_five.net_payable_fee, paid_amount=29900)
         Payment.objects.create(enrollment=completed, total_fees=completed.net_payable_fee, paid_amount=14000)
-        Payment.objects.create(enrollment=rules_sent, total_fees=rules_sent.net_payable_fee, paid_amount=16000)
+        Payment.objects.create(enrollment=rules_sent, total_fees=rules_sent.net_payable_fee, paid_amount=5900)
         Payment.objects.create(enrollment=rules_submitted, total_fees=rules_submitted.net_payable_fee, paid_amount=18000)
         Payment.objects.create(enrollment=signed_rules_submitted, total_fees=signed_rules_submitted.net_payable_fee, paid_amount=20000)
         Payment.objects.create(enrollment=unsigned_rules_submitted, total_fees=unsigned_rules_submitted.net_payable_fee, paid_amount=22000)
 
         self.client.force_authenticate(self.admin)
 
-        summary = self.client.get('/api/dashboard/summary/', {'branch': self.branch.id})
+        summary = self.client.get('/api/dashboard/summary/', {'branch': self.other_branch.id})
         self.assertEqual(summary.status_code, 200)
-        self.assertEqual(summary.data['total_enrollments'], 2)
-        self.assertEqual(summary.data['enroll_this_month'], 2)
-        self.assertEqual(Decimal(str(summary.data['total_revenue'])), Decimal('22000.00'))
-        self.assertEqual(Decimal(str(summary.data['total_value'])), Decimal('22000.00'))
-        self.assertEqual(Decimal(str(summary.data['value_this_month'])), Decimal('22000.00'))
+        self.assertEqual(summary.data['total_enrollments'], 9)
+        self.assertEqual(summary.data['enroll_this_month'], 9)
+        self.assertEqual(Decimal(str(summary.data['total_revenue'])), Decimal('234100.00'))
+        self.assertEqual(Decimal(str(summary.data['total_value'])), Decimal('234100.00'))
+        self.assertEqual(Decimal(str(summary.data['value_this_month'])), Decimal('234100.00'))
 
         branch_comparison = self.client.get('/api/dashboard/branch-comparison/', {'month': month_param})
         self.assertEqual(branch_comparison.status_code, 200)
-        branch_row = next(row for row in branch_comparison.data if row['branch_id'] == self.branch.id)
-        self.assertEqual(branch_row['enrollments'], 2)
-        self.assertEqual(Decimal(str(branch_row['value'])), Decimal('22000.00'))
+        branch_row = next(row for row in branch_comparison.data if row['branch_id'] == self.other_branch.id)
+        self.assertEqual(branch_row['enrollments'], 9)
+        self.assertEqual(Decimal(str(branch_row['value'])), Decimal('234100.00'))
 
         trends = self.client.get('/api/dashboard/trends/', {'days': 1})
         self.assertEqual(trends.status_code, 200)
-        self.assertEqual(trends.data[0]['enrollments'], 2)
+        self.assertEqual(trends.data[0]['enrollments'], 9)
 
     def test_add_to_payment_requires_course_start_date(self):
         enrollment = Enrollment.objects.create(
