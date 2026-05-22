@@ -378,6 +378,10 @@ class Lead(TimeStampedModel):
     external_message = models.TextField(blank=True)
     is_duplicate = models.BooleanField(default=False, db_index=True)
     imported_via_csv = models.BooleanField(default=False, db_index=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name='deleted_leads')
     status      = models.CharField(max_length=40, choices=Status.choices, default=Status.NEW, db_index=True)
     source      = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
     converted_to_type = models.CharField(max_length=20, blank=True)
@@ -569,6 +573,10 @@ class WalkIn(TimeStampedModel):
     converted_at                    = models.DateTimeField(null=True, blank=True)
     converted_by                    = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                                         related_name='converted_walkins')
+    is_deleted                      = models.BooleanField(default=False, db_index=True)
+    deleted_at                      = models.DateTimeField(null=True, blank=True)
+    deleted_by                      = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                                        related_name='deleted_walkins')
 
     class Meta:
         db_table = 'walkins'
@@ -879,6 +887,10 @@ class Enrollment(TimeStampedModel):
 
     status           = models.CharField(max_length=30, choices=Status.choices,
                                         default=Status.PENDING_RULES, db_index=True)
+    is_deleted       = models.BooleanField(default=False, db_index=True)
+    deleted_at       = models.DateTimeField(null=True, blank=True)
+    deleted_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                         related_name='deleted_enrollments')
 
     class Meta:
         db_table = 'enrollments'

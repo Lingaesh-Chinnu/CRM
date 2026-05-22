@@ -52,6 +52,7 @@ import LeadImportHistoryPage from './pages/admin/LeadImportHistoryPage'
 import LeadInboxPage from './pages/admin/LeadInboxPage'
 import WhatsAppTemplatesPage from './pages/admin/WhatsAppTemplatesPage'
 import DataImportPage from './pages/admin/DataImportPage'
+import DeleteCandidatesPage from './pages/admin/DeleteCandidatesPage'
 
 // Public
 import PublicWalkInForm from './pages/public/PublicWalkInForm'
@@ -139,6 +140,7 @@ export default function App() {
           <Route path="admin/lead-import-history" element={<LeadImportHistoryPage />} />
           <Route path="admin/data-import" element={<DataImportPage />} />
           <Route path="admin/lead-inbox" element={<LeadInboxPage />} />
+          <Route path="admin/delete-candidates" element={<DeleteCandidatesPage />} />
           <Route path="admin/whatsapp-templates" element={<WhatsAppTemplatesPage />} />
         </Route>
       </Route>

@@ -23,6 +23,7 @@ from views import (
     ExternalLeadCaptureView, NotificationViewSet, TeamNoticeViewSet, WhatsAppTemplateViewSet,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
+    DeleteCandidatesView,
     ExportLeadsExcelView, ExportEnrollmentsExcelView,
     UserPerformanceReportView, UserRatingReportView, ConversionFunnelReportView,
     BranchPerformanceComparisonReportView, PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
@@ -73,6 +74,7 @@ api_urlpatterns = [
     path('dashboard/trends/', DashboardTrendView.as_view(), name='dashboard-trends'),
     path('dashboard/historical-analytics/', DashboardHistoricalAnalyticsView.as_view(), name='dashboard-historical-analytics'),
     path('dashboard/my-rating/', DashboardMyRatingView.as_view(), name='dashboard-my-rating'),
+    path('admin/delete-candidates/', DeleteCandidatesView.as_view(), name='delete-candidates'),
 
     path('reports/export/leads/', ExportLeadsExcelView.as_view(), name='export-leads'),
     path('reports/export/enrollments/', ExportEnrollmentsExcelView.as_view(), name='export-enrollments'),

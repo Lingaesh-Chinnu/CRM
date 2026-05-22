@@ -110,6 +110,93 @@ def enrollment_value_queryset(queryset):
 def current_month_enrollment_queryset(queryset, year, month):
     return enrollment_value_queryset(queryset).filter(enrollment_date__year=year, enrollment_date__month=month)
 
+
+def visible_candidate_queryset(queryset):
+    model = queryset.model
+    if 'is_deleted' in missing_model_columns(model, ['is_deleted']):
+        return queryset
+    return queryset.filter(is_deleted=False)
+
+
+def visible_payment_queryset(queryset):
+    if 'is_deleted' in missing_model_columns(Enrollment, ['is_deleted']):
+        return queryset
+    return queryset.filter(enrollment__is_deleted=False)
+
+
+def candidate_identifier(candidate):
+    if isinstance(candidate, Enrollment):
+        return candidate.student_number or ''
+    if isinstance(candidate, WalkIn):
+        return candidate.candidate_number or ''
+    return candidate.lead_number or ''
+
+
+def candidate_record_type(candidate):
+    if isinstance(candidate, Enrollment):
+        return 'enrollment'
+    if isinstance(candidate, WalkIn):
+        return 'walkin'
+    return 'lead'
+
+
+def candidate_added_by(candidate):
+    user = getattr(candidate, 'created_by', None) or getattr(candidate, 'enrolled_by', None)
+    if not user:
+        return ''
+    return user.full_name or user.username or ''
+
+
+def candidate_deleted_by(candidate):
+    user = getattr(candidate, 'deleted_by', None)
+    if not user:
+        return ''
+    return user.full_name or user.username or ''
+
+
+def candidate_payload(candidate):
+    return {
+        'id': candidate.id,
+        'record_type': candidate_record_type(candidate),
+        'student_id': candidate_identifier(candidate),
+        'name': candidate.name,
+        'phone': candidate.phone,
+        'branch': candidate.branch.name if candidate.branch else '',
+        'branch_id': candidate.branch_id,
+        'course': candidate.course.name if candidate.course else '',
+        'status': candidate.status,
+        'added_date': candidate.created_at,
+        'added_by': candidate_added_by(candidate),
+        'deleted_at': getattr(candidate, 'deleted_at', None),
+        'deleted_by': candidate_deleted_by(candidate),
+    }
+
+
+def linked_candidate_records(candidate):
+    records = [candidate]
+    if isinstance(candidate, Enrollment):
+        if candidate.walkin_id:
+            records.append(candidate.walkin)
+        if candidate.lead_id:
+            records.append(candidate.lead)
+        elif candidate.walkin_id and candidate.walkin.lead_id:
+            records.append(candidate.walkin.lead)
+    elif isinstance(candidate, WalkIn):
+        if hasattr(candidate, 'enrollment') and candidate.enrollment:
+            records.append(candidate.enrollment)
+        if candidate.lead_id:
+            records.append(candidate.lead)
+    elif isinstance(candidate, Lead):
+        if hasattr(candidate, 'walkin') and candidate.walkin:
+            records.append(candidate.walkin)
+            if hasattr(candidate.walkin, 'enrollment') and candidate.walkin.enrollment:
+                records.append(candidate.walkin.enrollment)
+        records.extend(list(candidate.enrollments.all()))
+    unique = {}
+    for record in records:
+        unique[(candidate_record_type(record), record.id)] = record
+    return list(unique.values())
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
@@ -782,8 +869,8 @@ def generate_smart_notifications(user):
     if not user.is_authenticated:
         return
     today = timezone.localdate()
-    lead_scope = Lead.objects.all() if user.is_super_admin else Lead.objects.filter(branch=user.branch)
-    walkin_scope = WalkIn.objects.all() if user.is_super_admin else WalkIn.objects.filter(branch=user.branch)
+    lead_scope = visible_candidate_queryset(Lead.objects.all() if user.is_super_admin else Lead.objects.filter(branch=user.branch))
+    walkin_scope = visible_candidate_queryset(WalkIn.objects.all() if user.is_super_admin else WalkIn.objects.filter(branch=user.branch))
     lead_due_qs = active_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
     lead_missed_qs = missed_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
     walkin_due_qs = active_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
@@ -803,22 +890,22 @@ def generate_smart_notifications(user):
         create_notification_once(user, 'Walk-in follow-up due today', f'{walkin.name} needs follow-up today.', Notification.NType.WARNING, f'/walkins/{walkin.id}')
     for walkin in walkin_missed_qs[:25]:
         create_notification_once(user, 'Missed walk-in follow-up', f'{walkin.name} has a missed follow-up.', Notification.NType.ERROR, f'/walkins/{walkin.id}')
-    payment_qs = Payment.objects.filter(
+    payment_qs = visible_payment_queryset(Payment.objects.filter(
         next_payment_date=today,
         status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
         paid_amount__lt=F('total_fees'),
-    ).select_related('enrollment')
+    ).select_related('enrollment'))
     if not user.is_super_admin:
         payment_qs = payment_qs.filter(enrollment__branch=user.branch)
     payment_due_ids = list(payment_qs.values_list('id', flat=True))
     prune_stale_payment_due_notifications(user, payment_due_ids)
     for payment in payment_qs[:25]:
         create_notification_once(user, 'Payment due today', f'{payment.enrollment.name} has a payment due today.', Notification.NType.WARNING, f'/payments/{payment.id}')
-    enrollment_qs = Enrollment.objects.filter(
+    enrollment_qs = visible_candidate_queryset(Enrollment.objects.filter(
         status__in=Enrollment.FINAL_STATUSES,
         dob__month=today.month,
         dob__day=today.day,
-    )
+    ))
     if not user.is_super_admin:
         enrollment_qs = enrollment_qs.filter(branch=user.branch)
     for enrollment in enrollment_qs[:25]:
@@ -1710,12 +1797,12 @@ class LeadViewSet(viewsets.ModelViewSet):
             'converted_record_id', 'converted_at', 'converted_by',
         ])
         if self.action == 'list':
-            qs = Lead.objects.select_related('course', 'branch', 'assigned_to')
+            qs = visible_candidate_queryset(Lead.objects.select_related('course', 'branch', 'assigned_to'))
         else:
             related = ['course', 'branch', 'assigned_to', 'created_by']
             if 'converted_by' not in missing_columns:
                 related.append('converted_by')
-            qs = Lead.objects.select_related(*related)
+            qs = visible_candidate_queryset(Lead.objects.select_related(*related))
         if missing_columns:
             qs = qs.defer(*missing_columns)
         if self.action != 'list':
@@ -3579,9 +3666,9 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.action == 'list':
-            qs = WalkIn.objects.select_related('course', 'branch', 'assigned_to', 'created_by', 'enrollment')
+            qs = visible_candidate_queryset(WalkIn.objects.select_related('course', 'branch', 'assigned_to', 'created_by', 'enrollment'))
         else:
-            qs = WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead','enrollment')
+            qs = visible_candidate_queryset(WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead','enrollment'))
         missing_columns = missing_model_columns(WalkIn, [
             'qualification', 'degree', 'profession', 'year_of_passing',
             'college_company', 'preferred_timing', 'interested_global_certification',
@@ -4364,9 +4451,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     ordering           = ['-enrollment_date']
 
     def get_queryset(self):
-        qs = Enrollment.objects.select_related(
+        qs = visible_candidate_queryset(Enrollment.objects.select_related(
             'course','branch','enrolled_by','created_by'
-        ).prefetch_related('payment__installments')
+        ).prefetch_related('payment__installments'))
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
         if getattr(self, 'action', None) == 'list':
@@ -4857,9 +4944,9 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         return start, end
 
     def get_queryset(self):
-        qs = Payment.objects.select_related(
+        qs = visible_payment_queryset(Payment.objects.select_related(
             'enrollment__branch','enrollment__course'
-        ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES)
+        ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
@@ -4874,11 +4961,11 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         return qs
 
     def get_summary_queryset(self):
-        qs = Payment.objects.select_related('enrollment__branch').filter(
+        qs = visible_payment_queryset(Payment.objects.select_related('enrollment__branch').filter(
             enrollment__status__in=Enrollment.FINAL_STATUSES,
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
             paid_amount__lt=F('total_fees'),
-        )
+        ))
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
@@ -5840,6 +5927,87 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         return response
 
 
+class DeleteCandidatesView(APIView):
+    permission_classes = [IsSuperAdmin]
+
+    record_models = {
+        'lead': Lead,
+        'walkin': WalkIn,
+        'enrollment': Enrollment,
+    }
+
+    def base_queryset(self, model):
+        if model is Lead:
+            return Lead.objects.select_related('branch', 'course', 'created_by', 'deleted_by', 'walkin')
+        if model is WalkIn:
+            return WalkIn.objects.select_related('branch', 'course', 'created_by', 'deleted_by', 'lead', 'enrollment')
+        return Enrollment.objects.select_related('branch', 'course', 'created_by', 'enrolled_by', 'deleted_by', 'lead', 'walkin', 'walkin__lead')
+
+    def filtered_queryset(self, model, request, deleted):
+        qs = self.base_queryset(model).filter(is_deleted=deleted)
+        branch_id = request.query_params.get('branch')
+        search = (request.query_params.get('search') or '').strip()
+        if branch_id and branch_id != 'all':
+            qs = qs.filter(branch_id=branch_id)
+        if search:
+            search_filter = Q(name__icontains=search) | Q(phone__icontains=search)
+            if model is Lead:
+                search_filter |= Q(lead_number__icontains=search)
+            elif model is WalkIn:
+                search_filter |= Q(candidate_number__icontains=search)
+            else:
+                search_filter |= Q(student_number__icontains=search)
+            qs = qs.filter(search_filter)
+        return qs
+
+    def get(self, request):
+        deleted = request.query_params.get('deleted') == 'true'
+        rows = []
+        for model in (Lead, WalkIn, Enrollment):
+            rows.extend(candidate_payload(candidate) for candidate in self.filtered_queryset(model, request, deleted))
+        rows.sort(
+            key=lambda row: row['deleted_at'] or row['added_date'] or timezone.now(),
+            reverse=True,
+        )
+        return Response(rows)
+
+    def get_candidate(self, record_type, pk):
+        model = self.record_models.get(record_type)
+        if not model:
+            raise DjangoValidationError('Invalid candidate type.')
+        return self.base_queryset(model).get(pk=pk)
+
+    def post(self, request):
+        record_type = request.data.get('record_type')
+        candidate_id = request.data.get('id')
+        action_name = request.data.get('action')
+        model = self.record_models.get(record_type)
+        if not model:
+            return Response({'detail': 'Invalid candidate type.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            candidate = self.get_candidate(record_type, candidate_id)
+        except model.DoesNotExist:
+            return Response({'detail': 'Candidate not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        records = linked_candidate_records(candidate)
+        if action_name == 'delete':
+            deleted_at = timezone.now()
+            for record in records:
+                record.is_deleted = True
+                record.deleted_at = deleted_at
+                record.deleted_by = request.user
+                record.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at'])
+            return Response({'detail': 'Candidate moved to deleted history.'})
+        if action_name == 'restore':
+            for record in records:
+                record.is_deleted = False
+                record.deleted_at = None
+                record.deleted_by = None
+                record.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at'])
+            return Response({'detail': 'Candidate restored.'})
+        return Response({'detail': 'Invalid action.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
 def next_birthday(dob, today):
     try:
         birthday = dob.replace(year=today.year)
@@ -5902,10 +6070,10 @@ def calculate_user_monthly_rating(user, year=None, month=None):
         score -= points
         breakdown[key] = {'deduction': points, 'detail': detail}
 
-    lead_qs = Lead.objects.filter(created_by=user, created_at__date__gte=start, created_at__date__lte=end)
-    walkin_qs = WalkIn.objects.filter(created_by=user, visit_date__gte=start, visit_date__lte=end)
+    lead_qs = visible_candidate_queryset(Lead.objects.filter(created_by=user, created_at__date__gte=start, created_at__date__lte=end))
+    walkin_qs = visible_candidate_queryset(WalkIn.objects.filter(created_by=user, visit_date__gte=start, visit_date__lte=end))
     enroll_qs = current_month_enrollment_queryset(
-        Enrollment.objects.filter(created_by=user),
+        visible_candidate_queryset(Enrollment.objects.filter(created_by=user)),
         year,
         month,
     )
@@ -5919,12 +6087,12 @@ def calculate_user_monthly_rating(user, year=None, month=None):
     else:
         breakdown['conversion_rate'] = {'deduction': 0, 'detail': f'Conversion rate {conversion_rate:.2f}%.'}
 
-    overdue_payments = Payment.objects.filter(
+    overdue_payments = visible_payment_queryset(Payment.objects.filter(
         enrollment__created_by=user,
         status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
         next_payment_date__gte=start,
         next_payment_date__lte=effective_end,
-    )
+    ))
     if overdue_payments.filter(status=Payment.Status.UNPAID).exists():
         deduct('payment_reminder', 10, 'Missed payment reminder found for an unpaid due payment.')
     elif overdue_payments.filter(status=Payment.Status.PARTIAL).exists():
@@ -5938,10 +6106,10 @@ def calculate_user_monthly_rating(user, year=None, month=None):
     else:
         breakdown['payment_collection'] = {'deduction': 0, 'detail': 'No pending uncollected due payment detected.'}
 
-    birthday_count = Enrollment.objects.filter(
+    birthday_count = visible_candidate_queryset(Enrollment.objects.filter(
         branch=user.branch,
         dob__month=month,
-    )
+    ))
     birthday_count = official_enrollment_queryset(birthday_count).exclude(dob__isnull=True).count() if user.branch_id else 0
     birthday_sent = WhatsAppMessage.objects.filter(
         sent_by=user,
@@ -5954,34 +6122,34 @@ def calculate_user_monthly_rating(user, year=None, month=None):
     else:
         breakdown['birthday_wishes'] = {'deduction': 0, 'detail': 'Birthday wish requirement met or no birthdays detected.'}
 
-    missed_lead_followups = Lead.objects.filter(
+    missed_lead_followups = visible_candidate_queryset(Lead.objects.filter(
         created_by=user,
         next_follow_up_date__gte=start,
         next_follow_up_date__lt=effective_end,
-    ).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
+    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
     if missed_lead_followups:
         deduct('lead_followups', 10, 'Lead follow-up due date was missed.')
     else:
         breakdown['lead_followups'] = {'deduction': 0, 'detail': 'No missed lead follow-ups detected.'}
 
-    missed_walkin_followups = WalkIn.objects.filter(
+    missed_walkin_followups = visible_candidate_queryset(WalkIn.objects.filter(
         created_by=user,
         follow_up_date__gte=start,
         follow_up_date__lt=effective_end,
-    ).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).exists()
+    )).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).exists()
     if missed_walkin_followups:
         deduct('walkin_followups', 10, 'Walk-in follow-up due date was missed.')
     else:
         breakdown['walkin_followups'] = {'deduction': 0, 'detail': 'No missed walk-in follow-ups detected.'}
 
     late_response_cutoff = timezone.now() - timedelta(days=1)
-    late_response = Lead.objects.filter(
+    late_response = visible_candidate_queryset(Lead.objects.filter(
         created_by=user,
         created_at__date__gte=start,
         created_at__date__lte=end,
         created_at__lt=late_response_cutoff,
         status=Lead.Status.NEW,
-    ).exists()
+    )).exists()
     if late_response:
         deduct('response_time', 10, 'New lead remained unanswered for more than one day.')
     else:
@@ -6038,10 +6206,10 @@ class DashboardSummaryView(APIView):
         month = today.month
 
         # Branch filter
-        lead_qs   = Lead.objects.all()
-        walkin_qs = WalkIn.objects.all()
-        enroll_qs = Enrollment.objects.all()
-        pay_qs    = Payment.objects.all()
+        lead_qs   = visible_candidate_queryset(Lead.objects.all())
+        walkin_qs = visible_candidate_queryset(WalkIn.objects.all())
+        enroll_qs = visible_candidate_queryset(Enrollment.objects.all())
+        pay_qs    = visible_payment_queryset(Payment.objects.all())
         collection_qs = PaymentInstallment.objects.all()
         transfer_qs = BranchTransferRequest.objects.filter(status=BranchTransferRequest.Status.PENDING)
         target_qs = BranchTarget.objects.filter(year=year, month=month)
@@ -6075,8 +6243,12 @@ class DashboardSummaryView(APIView):
         total_value_amount = value_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
-        monthly_value_enroll_qs = current_month_enrollment_queryset(enroll_qs, year, month)
-        value_this_month = monthly_value_enroll_qs.aggregate(
+        dashboard_monthly_enroll_qs = enroll_qs.filter(
+            created_at__year=year,
+            created_at__month=month,
+            status__in=["enrolled", "active"],
+        )
+        value_this_month = dashboard_monthly_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
         current_month_collected_amount = collection_qs.filter(
@@ -6132,7 +6304,7 @@ class DashboardSummaryView(APIView):
         leads_this_month = lead_qs.filter(created_at__year=year, created_at__month=month).count()
         walkins_this_month = walkin_qs.filter(visit_date__year=year, visit_date__month=month).count()
         counted_enroll_qs = enrollment_value_queryset(enroll_qs)
-        enroll_this_month = monthly_value_enroll_qs.count()
+        enroll_this_month = dashboard_monthly_enroll_qs.count()
         conversion_rate = round((enroll_this_month / leads_this_month) * 100, 2) if leads_this_month else 0
 
         return Response({
@@ -6187,17 +6359,17 @@ class DashboardBranchComparisonView(APIView):
         data = []
         for branch in branches:
             year, month = map(int, month_str.split('-'))
-            enroll = current_month_enrollment_queryset(Enrollment.objects.filter(
+            enroll = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(
                 branch=branch,
-            ), year, month)
+            )), year, month)
             value = enroll.aggregate(v=Sum('net_payable_fee'))['v'] or 0
             data.append({
                 'branch_id':   branch.id,
                 'branch_name': branch.name,
-                'leads':       Lead.objects.filter(branch=branch, created_at__year=year,
-                                                   created_at__month=month).count(),
-                'walkins':     WalkIn.objects.filter(branch=branch, visit_date__year=year,
-                                                     visit_date__month=month).count(),
+                'leads':       visible_candidate_queryset(Lead.objects.filter(branch=branch, created_at__year=year,
+                                                   created_at__month=month)).count(),
+                'walkins':     visible_candidate_queryset(WalkIn.objects.filter(branch=branch, visit_date__year=year,
+                                                     visit_date__month=month)).count(),
                 'enrollments': enroll.count(),
                 'value':       value,
             })
@@ -6215,9 +6387,9 @@ class DashboardTrendView(APIView):
 
         for i in range(days - 1, -1, -1):
             day = (timezone.now() - timedelta(days=i)).date()
-            lead_qs   = Lead.objects.filter(created_at__date=day)
-            walkin_qs = WalkIn.objects.filter(visit_date=day)
-            enroll_qs = enrollment_value_queryset(Enrollment.objects.filter(enrollment_date=day))
+            lead_qs   = visible_candidate_queryset(Lead.objects.filter(created_at__date=day))
+            walkin_qs = visible_candidate_queryset(WalkIn.objects.filter(visit_date=day))
+            enroll_qs = enrollment_value_queryset(visible_candidate_queryset(Enrollment.objects.filter(enrollment_date=day)))
 
             if not user.is_super_admin:
                 lead_qs   = lead_qs.filter(branch=user.branch)
@@ -6342,9 +6514,9 @@ class ConversionFunnelReportView(APIView):
         year = int(request.query_params.get('year') or timezone.localdate().year)
         month = int(request.query_params.get('month') or timezone.localdate().month)
         branch_id = request.query_params.get('branch')
-        lead_qs = Lead.objects.filter(created_at__year=year, created_at__month=month)
-        walkin_qs = WalkIn.objects.filter(visit_date__year=year, visit_date__month=month)
-        enroll_qs = current_month_enrollment_queryset(Enrollment.objects.all(), year, month)
+        lead_qs = visible_candidate_queryset(Lead.objects.filter(created_at__year=year, created_at__month=month))
+        walkin_qs = visible_candidate_queryset(WalkIn.objects.filter(visit_date__year=year, visit_date__month=month))
+        enroll_qs = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.all()), year, month)
         if branch_id and branch_id != 'all':
             lead_qs = lead_qs.filter(branch_id=branch_id)
             walkin_qs = walkin_qs.filter(branch_id=branch_id)
@@ -6377,13 +6549,13 @@ class BranchPerformanceComparisonReportView(APIView):
         today = timezone.localdate()
         rows = []
         for branch in Branch.objects.filter(is_active=True).order_by('name'):
-            leads = Lead.objects.filter(branch=branch, created_at__year=year, created_at__month=month)
-            walkins = WalkIn.objects.filter(branch=branch, visit_date__year=year, visit_date__month=month)
-            enrollments = current_month_enrollment_queryset(Enrollment.objects.filter(branch=branch), year, month)
-            payments = Payment.objects.filter(enrollment__branch=branch)
+            leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, created_at__year=year, created_at__month=month))
+            walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, visit_date__year=year, visit_date__month=month))
+            enrollments = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(branch=branch)), year, month)
+            payments = visible_payment_queryset(Payment.objects.filter(enrollment__branch=branch))
             target = BranchTarget.objects.filter(branch=branch, year=year, month=month).first()
-            missed_leads = Lead.objects.filter(branch=branch, next_follow_up_date__lt=today).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).count()
-            missed_walkins = WalkIn.objects.filter(branch=branch, follow_up_date__lt=today).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).count()
+            missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).count()
+            missed_walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, follow_up_date__lt=today)).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).count()
             completed_followups = FollowUp.objects.filter(created_at__year=year, created_at__month=month).filter(
                 Q(record_type=FollowUp.RecordType.LEAD, record_id__in=leads.values('id')) |
                 Q(record_type=FollowUp.RecordType.WALKIN, record_id__in=walkins.values('id'))
@@ -6430,7 +6602,7 @@ class ExportLeadsExcelView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        qs = Lead.objects.select_related('course','branch','assigned_to').order_by('-created_at')
+        qs = visible_candidate_queryset(Lead.objects.select_related('course','branch','assigned_to')).order_by('-created_at')
         if not request.user.is_super_admin:
             qs = qs.filter(branch=request.user.branch)
 
@@ -6476,9 +6648,9 @@ class ExportEnrollmentsExcelView(APIView):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE
             )
 
-        qs = Enrollment.objects.select_related(
+        qs = visible_candidate_queryset(Enrollment.objects.select_related(
             'course','branch','enrolled_by','payment'
-        ).order_by('-enrollment_date')
+        )).order_by('-enrollment_date')
         if not request.user.is_super_admin:
             qs = qs.filter(branch=request.user.branch)
 
