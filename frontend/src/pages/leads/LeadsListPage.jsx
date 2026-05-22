@@ -298,19 +298,18 @@ export default function LeadsListPage() {
       </section>
 
       {importOpen && (
-        <section className="relative rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-          <div className="flex items-start justify-between gap-4 pr-12">
-            <h2 className="text-xl font-black tracking-tight text-slate-950">Import Leads</h2>
-            <button
-              type="button"
-              onClick={() => setImportOpen(false)}
-              aria-label="Close import leads modal"
-              className="absolute right-5 top-5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-600 text-xl font-bold leading-none text-white shadow-sm transition hover:bg-rose-700 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100 sm:right-6 sm:top-6"
-            >
-              &times;
-            </button>
-          </div>
-          <form onSubmit={submitImport} className="mt-6 grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:items-center">
+        <section className="relative rounded-[24px] border border-slate-200 bg-white p-4 pt-14 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-5 sm:pt-14">
+          <button
+            type="button"
+            onClick={() => setImportOpen(false)}
+            aria-label="Close import leads modal"
+            className="absolute right-4 top-4 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-600 text-white shadow-sm transition hover:bg-rose-700 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-rose-100 sm:right-5 sm:top-5"
+          >
+            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M5 5L15 15M15 5L5 15" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </button>
+          <form onSubmit={submitImport} className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center xl:grid-cols-[auto_minmax(0,1fr)_auto]">
             <button
               type="button"
               onClick={downloadLeadTemplate}
