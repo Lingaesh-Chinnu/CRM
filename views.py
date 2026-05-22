@@ -2748,6 +2748,45 @@ def choice_value(value, choices, default=''):
     return None
 
 
+def normalized_phone_exists(model, phone):
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return False
+    return any(
+        normalize_phone_number(existing) == normalized
+        for existing in model.objects.exclude(phone='').values_list('phone', flat=True)
+    )
+
+
+def enrollment_duplicate_exists(student_number='', phone=''):
+    student_number = import_cell(student_number)
+    if student_number and Enrollment.objects.filter(student_number__iexact=student_number).exists():
+        return True
+    return normalized_phone_exists(Enrollment, phone)
+
+
+def lead_duplicate_exists(phone=''):
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return False
+    return normalized_phone_exists(Lead, normalized) or normalized_phone_exists(Enrollment, normalized)
+
+
+def payment_installment_duplicate_exists(payment, amount, payment_date, payment_mode, reference_number=''):
+    if not payment or amount is None or not payment_date:
+        return False
+    existing_installments = PaymentInstallment.objects.filter(
+        payment=payment,
+        amount=amount,
+        payment_date=payment_date,
+        payment_mode=payment_mode,
+    )
+    reference_number = import_cell(reference_number)
+    if reference_number:
+        existing_installments = existing_installments.filter(reference_number__iexact=reference_number)
+    return existing_installments.exists()
+
+
 def validate_admin_import(import_type, headers, rows, mapping):
     spec = ADMIN_IMPORT_SPECS[import_type]
     required = [field for field in spec['required'] if field in {item['field'] for item in import_spec_fields(import_type)}]
@@ -2782,9 +2821,10 @@ def validate_admin_import(import_type, headers, rows, mapping):
 
         if import_type == 'leads':
             phone = normalize_phone_number(value('phone'))
-            if phone and (Lead.objects.filter(phone=value('phone')).exists() or phone in seen_phones):
-                skip_reason = 'Duplicate phone number.'
-            seen_phones.add(phone)
+            if phone and (lead_duplicate_exists(phone) or phone in seen_phones):
+                skip_reason = 'Lead already exists - skipped safely.'
+            if phone:
+                seen_phones.add(phone)
             branch = lookup_branch(value('branch'))
             course = lookup_course(value('course'))
             if value('branch') and not branch:
@@ -2815,19 +2855,16 @@ def validate_admin_import(import_type, headers, rows, mapping):
         elif import_type == 'enrollments':
             student_number = value('student_number')
             phone = normalize_phone_number(value('phone'))
-            if student_number and (Enrollment.objects.filter(student_number=student_number).exists() or student_number in seen_students):
-                skip_reason = 'Duplicate Student ID.'
+            student_key = student_number.lower() if student_number else ''
+            if student_number and (Enrollment.objects.filter(student_number__iexact=student_number).exists() or student_key in seen_students):
+                skip_reason = 'Student already exists - skipped safely.'
             if phone and not skip_reason:
-                existing_phone = any(
-                    normalize_phone_number(existing) == phone
-                    for existing in Enrollment.objects.exclude(phone='').values_list('phone', flat=True)
-                )
-                if existing_phone or phone in seen_phones:
-                    skip_reason = 'Duplicate phone number.'
+                if normalized_phone_exists(Enrollment, phone) or phone in seen_phones:
+                    skip_reason = 'Student already exists - skipped safely.'
             if phone:
                 seen_phones.add(phone)
-            if student_number:
-                seen_students.add(student_number)
+            if student_key:
+                seen_students.add(student_key)
             branch = lookup_branch(value('branch'))
             course = lookup_course(value('course'))
             if value('branch') and not branch:
@@ -2871,7 +2908,7 @@ def validate_admin_import(import_type, headers, rows, mapping):
             if not student_number and not phone:
                 errors.append('Stud_Id or phone is required for payment matching.')
             if student_number:
-                enrollment = Enrollment.objects.filter(student_number=student_number).first()
+                enrollment = Enrollment.objects.filter(student_number__iexact=student_number).first()
             if not enrollment and phone:
                 for candidate in Enrollment.objects.filter(status__in=Enrollment.FINAL_STATUSES).select_related('payment'):
                     if normalize_phone_number(candidate.phone) == phone:
@@ -2881,6 +2918,12 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 errors.append('Existing student/enrollment not found by Student ID or Phone Number.')
             elif enrollment.status not in Enrollment.FINAL_STATUSES:
                 errors.append('Enrollment is not an active/student record yet.')
+            payment = None
+            if enrollment and not errors:
+                try:
+                    payment = enrollment.payment
+                except Payment.DoesNotExist:
+                    skip_reason = 'Payment record does not exist - skipped safely.'
             if value('branch') and not branch:
                 errors.append('Branch does not exist.')
             if branch and enrollment and enrollment.branch_id != branch.id:
@@ -2900,9 +2943,8 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 errors.append('Payment mode is invalid.')
             if payment_mode and payment_mode != PaymentInstallment.Mode.CASH and not value('reference_number'):
                 errors.append('Reference number is required for non-cash payments.')
-            if enrollment and amount is not None:
-                payment = getattr(enrollment, 'payment', None)
-                pending_balance = payment.balance if payment else enrollment_payable_fee(enrollment)
+            if enrollment and payment and amount is not None:
+                pending_balance = payment.balance
                 if amount > pending_balance:
                     errors.append('Payment amount exceeds pending balance.')
                 duplicate_key = (
@@ -2915,17 +2957,14 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 if duplicate_key in seen_payments:
                     skip_reason = 'Duplicate payment entry in this file.'
                 seen_payments.add(duplicate_key)
-                if payment:
-                    existing_installments = PaymentInstallment.objects.filter(
-                        payment=payment,
-                        amount=amount,
-                        payment_date=payment_date,
-                        payment_mode=payment_mode,
-                    )
-                    if value('reference_number'):
-                        existing_installments = existing_installments.filter(reference_number=value('reference_number'))
-                    if existing_installments.exists():
-                        skip_reason = 'Duplicate payment entry already exists.'
+                if payment and payment_installment_duplicate_exists(
+                    payment,
+                    amount,
+                    payment_date,
+                    payment_mode,
+                    value('reference_number'),
+                ):
+                    skip_reason = 'Payment already exists - skipped safely.'
             payload.update({
                 'name': value('name'),
                 'branch_id': branch.id if branch else (enrollment.branch_id if enrollment else None),
@@ -3034,32 +3073,41 @@ class AdminDataImportView(APIView):
         import_type = cached['import_type']
         rows = cached['ready_rows']
         history = DataImportHistory.objects.get(pk=cached['history_id'])
-        imported, failed, import_summary = self._create_records(import_type, rows, request.user)
+        imported, skipped, failed, import_summary = self._create_records(import_type, rows, request.user)
         history.rows_imported = imported
+        history.rows_skipped = history.rows_skipped + len(skipped)
         history.rows_failed = history.rows_failed + len(failed)
-        history.status = DataImportHistory.Status.PARTIAL if failed else DataImportHistory.Status.SUCCESS
-        if not imported and failed:
+        history.status = DataImportHistory.Status.PARTIAL if (failed or skipped) else DataImportHistory.Status.SUCCESS
+        if not imported and failed and not skipped:
             history.status = DataImportHistory.Status.FAILED
-        history.error_log = (history.error_log or []) + failed[:100]
+        history.error_log = (history.error_log or []) + skipped[:100] + failed[:100]
         history.save()
         cache.delete(f'admin-import:{token}')
+        response_status = 201 if imported else (200 if skipped and not failed else 400)
         return Response({
             'history': DataImportHistorySerializer(history).data,
             'rows_imported': imported,
+            'rows_skipped': len(skipped),
             'rows_failed': len(failed),
             'errors': failed,
             'import_summary': import_summary,
-        }, status=201 if imported else 400)
+        }, status=response_status)
 
     def _create_records(self, import_type, rows, user):
         imported = 0
+        skipped = []
         failed = []
         branch_counts = {}
         summary = {
             'imported_to': [],
             'leads_added': 0,
             'enrollments_added': 0,
+            'payments_added': 0,
             'payments_updated': 0,
+            'new_records_added': 0,
+            'duplicates_skipped': 0,
+            'invalid_rows': 0,
+            'failed_rows': 0,
         }
 
         def note_branch(payload):
@@ -3075,6 +3123,9 @@ class AdminDataImportView(APIView):
             try:
                 with transaction.atomic():
                     if import_type == 'leads':
+                        if lead_duplicate_exists(payload.get('phone')):
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Lead already exists - skipped safely.'})
+                            continue
                         Lead.objects.create(
                             name=payload['name'],
                             phone=payload['phone'],
@@ -3096,8 +3147,12 @@ class AdminDataImportView(APIView):
                             imported_via_csv=True,
                         )
                         summary['leads_added'] += 1
+                        summary['new_records_added'] += 1
                         note_branch(payload)
                     elif import_type == 'enrollments':
+                        if enrollment_duplicate_exists(payload.get('student_number'), payload.get('phone')):
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Student already exists - skipped safely.'})
+                            continue
                         enrollment = Enrollment(
                             student_number=payload.get('student_number') or None,
                             name=payload['name'],
@@ -3125,37 +3180,41 @@ class AdminDataImportView(APIView):
                         )
                         enrollment.save()
                         summary['enrollments_added'] += 1
+                        summary['new_records_added'] += 1
                         note_branch(payload)
                     elif import_type == 'payments':
                         enrollment = Enrollment.objects.get(pk=payload['enrollment_id'])
-                        payment, _ = Payment.objects.get_or_create(
-                            enrollment=enrollment,
-                            defaults={
-                                'total_fees': enrollment_payable_fee(enrollment),
-                                'manual_installment_schedule': [
-                                    {
-                                        **item,
-                                        'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
-                                    }
-                                    for item in get_default_installment_schedule(enrollment)
-                                ],
-                            },
-                        )
+                        try:
+                            payment = enrollment.payment
+                        except Payment.DoesNotExist:
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Payment record does not exist - skipped safely.'})
+                            continue
                         amount = Decimal(str(payload.get('amount') or 0))
                         if amount > payment.balance:
                             raise ValueError('Payment amount exceeds pending balance.')
+                        payment_date = payload.get('payment_date') or timezone.localdate()
+                        payment_mode = payload.get('payment_mode') or PaymentInstallment.Mode.CASH
+                        if payment_installment_duplicate_exists(
+                            payment,
+                            amount,
+                            payment_date,
+                            payment_mode,
+                            payload.get('reference_number'),
+                        ):
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Payment already exists - skipped safely.'})
+                            continue
                         allocation = PaymentInstallmentViewSet()._payment_allocation(payment, amount)
                         active = allocation[0] if allocation else {'index': 1, 'label': 'Imported Payment'}
                         reference_number = payload.get('reference_number') or ''
-                        if not reference_number and payload.get('payment_mode') == PaymentInstallment.Mode.CASH:
+                        if not reference_number and payment_mode == PaymentInstallment.Mode.CASH:
                             student_id = enrollment.student_number or f'ENR{enrollment.id}'
                             reference_number = f'{student_id}-P{payment.installments.count() + 1:02d}'
                         PaymentInstallment.objects.create(
                             payment=payment,
                             enrollment=enrollment,
                             amount=amount,
-                            payment_date=payload.get('payment_date') or timezone.localdate(),
-                            payment_mode=payload.get('payment_mode') or PaymentInstallment.Mode.CASH,
+                            payment_date=payment_date,
+                            payment_mode=payment_mode,
                             reference_number=reference_number,
                             notes=payload.get('notes') or '',
                             collected_by=user,
@@ -3165,7 +3224,9 @@ class AdminDataImportView(APIView):
                         )
                         payment.refresh_from_db()
                         resolve_payment_due_notifications_if_inactive(payment)
+                        summary['payments_added'] += 1
                         summary['payments_updated'] += 1
+                        summary['new_records_added'] += 1
                         note_branch({
                             **payload,
                             'branch_id': enrollment.branch_id,
@@ -3174,11 +3235,14 @@ class AdminDataImportView(APIView):
                     imported += 1
             except Exception as exc:
                 failed.append({'row': row.get('row'), 'error': str(exc)})
+        summary['duplicates_skipped'] = len(skipped)
+        summary['invalid_rows'] = len(failed)
+        summary['failed_rows'] = len(failed)
         summary['imported_to'] = [
             {'branch': branch, 'count': count}
             for branch, count in sorted(branch_counts.items())
         ]
-        return imported, failed, summary
+        return imported, skipped, failed, summary
 
 
 class AdminDataImportTemplateView(APIView):

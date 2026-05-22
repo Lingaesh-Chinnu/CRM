@@ -73,8 +73,10 @@ export default function DataImportPage() {
       setMessage(`Import complete. Imported ${data.rows_imported} rows.`)
       setImportSummary({
         ...(data.import_summary || {}),
+        new_records_added: data.import_summary?.new_records_added ?? data.rows_imported ?? 0,
         duplicates_skipped: data.history?.rows_skipped || 0,
         invalid_rows: data.history?.rows_failed || data.rows_failed || 0,
+        failed_rows: data.import_summary?.failed_rows ?? data.rows_failed ?? 0,
       })
       setPreview(null)
       setFile(null)
@@ -259,12 +261,12 @@ export default function DataImportPage() {
                     : 'No branch records'}
                 </p>
               </div>
-              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Leads Added</p><p className="mt-1 text-2xl font-black">{importSummary.leads_added || 0}</p></div>
-              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Enrollments Added</p><p className="mt-1 text-2xl font-black">{importSummary.enrollments_added || 0}</p></div>
-              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Payments Updated</p><p className="mt-1 text-2xl font-black">{importSummary.payments_updated || 0}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">New Records Added</p><p className="mt-1 text-2xl font-black">{importSummary.new_records_added || 0}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Duplicate Records Skipped</p><p className="mt-1 text-2xl font-black">{importSummary.duplicates_skipped || 0}</p></div>
+              <div><p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Invalid Rows</p><p className="mt-1 text-2xl font-black">{importSummary.invalid_rows || 0}</p></div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Skipped / Invalid</p>
-                <p className="mt-1 text-2xl font-black">{importSummary.duplicates_skipped || 0} / {importSummary.invalid_rows || 0}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Failed Rows</p>
+                <p className="mt-1 text-2xl font-black">{importSummary.failed_rows || 0}</p>
               </div>
             </div>
           </div>
