@@ -258,6 +258,62 @@ def clear_stale_walkin_conversion(walkin):
     return True
 
 
+def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
+    data = data or {}
+    walkin.name = data.get('name') or walkin.name
+    walkin.phone = data.get('phone') or walkin.phone
+    walkin.email = data.get('email') or walkin.email
+    walkin.dob = data.get('dob') or walkin.dob
+    walkin.location = data.get('location') or walkin.location
+    walkin.pincode = data.get('pincode') or walkin.pincode
+    if data.get('branch'):
+        walkin.branch_id = data.get('branch')
+    walkin.preferred_timing = data.get('preferred_timing') or walkin.preferred_timing
+    walkin.qualification = data.get('qualification', walkin.qualification or '')
+    walkin.degree = data.get('degree', walkin.degree or '')
+    walkin.status = WalkIn.Status.CONVERTED
+    walkin.remarks = 'Joined'
+    walkin.follow_up_date = None
+    walkin.converted_to_type = 'enrollment'
+    walkin.converted_record_id = enrollment.id
+    walkin.converted_at = timezone.now()
+    walkin.converted_by = user
+    walkin.save(update_fields=[
+        'name', 'phone', 'email', 'dob', 'location', 'pincode',
+        'branch', 'preferred_timing', 'qualification', 'degree',
+        'status', 'remarks', 'follow_up_date', 'converted_to_type',
+        'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
+    ])
+
+
+def mark_lead_enrollment_converted(lead, enrollment, user, data=None):
+    data = data or {}
+    lead.name = data.get('name') or lead.name
+    lead.phone = data.get('phone') or lead.phone
+    lead.dob = data.get('dob') or lead.dob
+    lead.email = data.get('email') or lead.email
+    lead.location = data.get('location') or lead.location
+    lead.pincode = data.get('pincode') or lead.pincode
+    lead.preferred_timing = data.get('preferred_timing') or lead.preferred_timing
+    lead.qualification = data.get('qualification', lead.qualification or '')
+    lead.degree = data.get('degree', lead.degree or '')
+    if data.get('branch'):
+        lead.branch_id = data.get('branch')
+    lead.status = Lead.Status.CONVERTED
+    lead.remarks = 'Joined'
+    lead.next_follow_up_date = None
+    lead.converted_to_type = 'enrollment'
+    lead.converted_record_id = enrollment.id
+    lead.converted_at = timezone.now()
+    lead.converted_by = user
+    lead.save(update_fields=[
+        'name', 'phone', 'dob', 'email', 'location', 'pincode',
+        'preferred_timing', 'qualification', 'degree', 'branch',
+        'status', 'remarks', 'next_follow_up_date', 'converted_to_type',
+        'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
+    ])
+
+
 def app_url(path):
     """Build a URL path inside the configured application mount."""
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
@@ -1195,19 +1251,7 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
     )
 
     walkin = transfer_request.walkin
-    walkin.name = payload.get('name') or walkin.name
-    walkin.phone = payload.get('phone') or walkin.phone
-    walkin.email = payload.get('email') or walkin.email
-    walkin.dob = payload.get('dob') or walkin.dob
-    walkin.location = payload.get('location') or walkin.location
-    walkin.pincode = payload.get('pincode') or walkin.pincode
-    walkin.preferred_timing = payload.get('preferred_timing') or walkin.preferred_timing
-    walkin.status = WalkIn.Status.TRANSFERRED
-    walkin.remarks = (walkin.remarks + '\n' if walkin.remarks else '') + f'Transferred to {transfer_request.requested_branch.name if transfer_request.requested_branch else "requested branch"}.'
-    walkin.save(update_fields=[
-        'name', 'phone', 'email', 'dob', 'location', 'pincode',
-        'preferred_timing', 'status', 'remarks', 'updated_at',
-    ])
+    mark_walkin_enrollment_converted(walkin, enrollment, reviewer, payload)
     clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
     resolve_public_walkin_notifications(walkin.id)
 
@@ -2100,16 +2144,10 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.status != Lead.Status.CONVERTED
                 or lead.converted_to_type != 'enrollment'
                 or lead.converted_record_id != existing_enrollment.id
+                or lead.next_follow_up_date is not None
+                or lead.remarks != 'Joined'
             ):
-                lead.status = Lead.Status.CONVERTED
-                lead.converted_to_type = 'enrollment'
-                lead.converted_record_id = existing_enrollment.id
-                lead.converted_at = lead.converted_at or existing_enrollment.created_at
-                lead.converted_by = lead.converted_by or existing_enrollment.enrolled_by
-                lead.save(update_fields=[
-                    'status', 'converted_to_type', 'converted_record_id',
-                    'converted_at', 'converted_by', 'updated_at',
-                ])
+                mark_lead_enrollment_converted(lead, existing_enrollment, request.user)
             clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
             return Response(EnrollmentDetailSerializer(existing_enrollment).data, status=200)
         if lead.converted_to_type == 'walkin' or hasattr(lead, 'walkin'):
@@ -2190,26 +2228,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             )
             enrollment.refresh_from_db()
 
-            lead.name = data.get('name')
-            lead.phone = data.get('phone')
-            lead.dob = data.get('dob')
-            lead.email = data.get('email')
-            lead.location = data.get('location')
-            lead.pincode = data.get('pincode')
-            lead.preferred_timing = data.get('preferred_timing')
-            lead.qualification = data.get('qualification', '')
-            lead.degree = data.get('degree', '')
-            lead.branch_id = data.get('branch')
-            lead.status = Lead.Status.CONVERTED
-            lead.converted_to_type = 'enrollment'
-            lead.converted_record_id = enrollment.id
-            lead.converted_at = timezone.now()
-            lead.converted_by = request.user
-            lead.save(update_fields=[
-                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification', 'degree',
-                'branch', 'status', 'converted_to_type', 'converted_record_id',
-                'converted_at', 'converted_by', 'updated_at',
-            ])
+            mark_lead_enrollment_converted(lead, enrollment, request.user, data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
@@ -3989,7 +4008,18 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin = self.get_object()
         from serializers import EnrollmentDetailSerializer
         data = request.data.copy()
-        if valid_walkin_enrollment(walkin):
+        existing_enrollment = valid_walkin_enrollment(walkin)
+        if existing_enrollment:
+            if (
+                walkin.status != WalkIn.Status.CONVERTED
+                or walkin.converted_to_type != 'enrollment'
+                or walkin.converted_record_id != existing_enrollment.id
+                or walkin.follow_up_date is not None
+                or walkin.remarks != 'Joined'
+            ):
+                with transaction.atomic():
+                    mark_walkin_enrollment_converted(walkin, existing_enrollment, request.user)
+            clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
             return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
         clear_stale_walkin_conversion(walkin)
         walkin.refresh_from_db()
@@ -4030,36 +4060,17 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
         serializer = EnrollmentDetailSerializer(data=data, context={'request': request})
         serializer.is_valid(raise_exception=True)
-        enrollment = serializer.save(
-            walkin=walkin,
-            original_walkin_course=walkin.course,
-            final_enrollment_course=course,
-            enrolled_by=request.user,
-            created_by=request.user,
-            status=Enrollment.Status.PENDING_RULES,
-        )
-        enrollment.refresh_from_db()
-
-        walkin.name = data.get('name')
-        walkin.phone = data.get('phone')
-        walkin.email = data.get('email')
-        walkin.dob = data.get('dob')
-        walkin.location = data.get('location')
-        walkin.pincode = data.get('pincode')
-        walkin.branch_id = data.get('branch')
-        walkin.preferred_timing = data.get('preferred_timing')
-        walkin.qualification = data.get('qualification', '')
-        walkin.degree = data.get('degree', '')
-        walkin.status = WalkIn.Status.CONVERTED
-        walkin.converted_to_type = 'enrollment'
-        walkin.converted_record_id = enrollment.id
-        walkin.converted_at = timezone.now()
-        walkin.converted_by = request.user
-        walkin.save(update_fields=[
-            'name', 'phone', 'email', 'dob', 'location', 'pincode',
-            'branch', 'preferred_timing', 'qualification', 'degree', 'status', 'converted_to_type',
-            'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
-        ])
+        with transaction.atomic():
+            enrollment = serializer.save(
+                walkin=walkin,
+                original_walkin_course=walkin.course,
+                final_enrollment_course=course,
+                enrolled_by=request.user,
+                created_by=request.user,
+                status=Enrollment.Status.PENDING_RULES,
+            )
+            enrollment.refresh_from_db()
+            mark_walkin_enrollment_converted(walkin, enrollment, request.user, data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         resolve_public_walkin_notifications(walkin.id)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)

@@ -150,6 +150,9 @@ class PublicWalkInFormTests(APITestCase):
             preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
             source=WalkIn.Source.DIRECT,
             visit_date='2026-05-11',
+            follow_up_date='2026-05-20',
+            remarks='Not Interested',
+            status=WalkIn.Status.NOT_INTERESTED,
         )
         self.client.force_authenticate(self.staff)
 
@@ -171,6 +174,9 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.original_walkin_course, self.course)
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
         self.assertEqual(enrollment.actual_fees, self.final_course.actual_fees)
+        self.assertEqual(walkin.status, WalkIn.Status.CONVERTED)
+        self.assertEqual(walkin.remarks, 'Joined')
+        self.assertIsNone(walkin.follow_up_date)
 
     def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
         walkin = WalkIn.objects.create(
@@ -226,7 +232,9 @@ class PublicWalkInFormTests(APITestCase):
             phone='9000000002',
             preferred_timing=WalkIn.PreferredTiming.WEEKDAY_EVENING,
             source=Lead.Source.WEBSITE,
-            status=Lead.Status.NEW,
+            status=Lead.Status.NOT_INTERESTED,
+            next_follow_up_date='2026-05-20',
+            remarks='Callback later',
             created_by=self.staff,
         )
         self.client.force_authenticate(self.staff)
@@ -248,6 +256,9 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.course, self.final_course)
         self.assertEqual(enrollment.original_walkin_course, self.course)
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
+        self.assertEqual(lead.status, Lead.Status.CONVERTED)
+        self.assertEqual(lead.remarks, 'Joined')
+        self.assertIsNone(lead.next_follow_up_date)
 
     def test_add_to_payment_creates_pending_payment_with_default_schedule(self):
         enrollment = Enrollment.objects.create(

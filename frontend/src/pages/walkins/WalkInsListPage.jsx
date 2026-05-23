@@ -10,7 +10,7 @@ const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, ''
 const statusOptions = [
   { value: 'new', label: 'New' },
   { value: 'follow_up', label: 'Follow Up' },
-  { value: 'converted', label: 'Converted' },
+  { value: 'converted', label: 'Converted to Enrollment' },
   { value: 'not_interested', label: 'Not Interested' },
   { value: 'transferred', label: 'Transferred' },
 ]
@@ -26,7 +26,9 @@ const emptyFilters = {
   date_to: '',
 }
 
-function statusLabel(status) {
+function statusLabel(walkin) {
+  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Converted to Enrollment'
+  const status = walkin?.status
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
@@ -64,6 +66,7 @@ function formatDate(value) {
 
 function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
+  const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
   const summary = [
     ['Total', count],
@@ -106,21 +109,23 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
                     <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
                       <div className="min-w-0">
                         <span className="font-semibold text-slate-800">Latest Remark: </span>
-                        <span className="break-words">{walkin.remarks || 'Not provided'}</span>
+                        <span className="break-words">{isEnrollmentConversion(walkin) ? 'Joined' : walkin.remarks || 'Not provided'}</span>
                       </div>
                       <div className="min-w-0">
                         <span className="font-semibold text-slate-800">Next Follow-up: </span>
-                        {formatDate(walkin.follow_up_date)}
+                        {isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}
                       </div>
                     </div>
                   </div>
                   <div className="flex w-fit flex-col items-start gap-2 sm:items-end">
                     <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-                      {statusLabel(walkin.status)}
+                      {statusLabel(walkin)}
                     </div>
-                    <p className="text-xs font-semibold text-slate-500">
-                      Follow-up: <span className="text-slate-800">{walkInByText(walkin)}</span>
-                    </p>
+                    {!isEnrollmentConversion(walkin) && (
+                      <p className="text-xs font-semibold text-slate-500">
+                        Follow-up: <span className="text-slate-800">{walkInByText(walkin)}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

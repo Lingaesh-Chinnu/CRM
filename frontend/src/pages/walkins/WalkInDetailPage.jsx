@@ -303,6 +303,8 @@ export default function WalkInDetailPage() {
         converted_at: new Date().toISOString(),
         enrollment_id: data.id,
         is_converted_to_enrollment: true,
+        remarks: 'Joined',
+        follow_up_date: null,
       }))
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to convert walk-in to enrollment.')
@@ -532,7 +534,7 @@ export default function WalkInDetailPage() {
 
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
-  const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id)
+  const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id || walkin.status === 'converted')
   const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
   const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
 
@@ -718,10 +720,12 @@ export default function WalkInDetailPage() {
               {detailErrorFor('college_company')}
             </DetailField>
           </div>
-          <FollowUpHistory
-            followUps={walkin.follow_ups || []}
-            onSave={saveFollowUp}
-          />
+          {!hasValidEnrollmentConversion && (
+            <FollowUpHistory
+              followUps={walkin.follow_ups || []}
+              onSave={saveFollowUp}
+            />
+          )}
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {message && <p className="text-sm text-slate-600">{message}</p>}
           </div>
