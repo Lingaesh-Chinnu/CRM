@@ -295,6 +295,17 @@ export default function WalkInDetailPage() {
     try {
       const { data } = await api.post(`/walkins/${id}/convert-to-enrollment/`, payload)
       setMessage('Walk-in converted to enrollment successfully.')
+      const systemFollowUp = {
+        id: `joined-${Date.now()}`,
+        record_type: 'walkin',
+        record_id: Number(id),
+        follow_up_date: todayInputValue(),
+        next_follow_up_date: null,
+        remarks: 'Joined - No follow-up required',
+        updated_by: user?.id || null,
+        updated_by_name: user?.full_name || user?.name || user?.username || '',
+        created_at: new Date().toISOString(),
+      }
       setWalkin((current) => ({
         ...current,
         status: 'converted',
@@ -303,8 +314,8 @@ export default function WalkInDetailPage() {
         converted_at: new Date().toISOString(),
         enrollment_id: data.id,
         is_converted_to_enrollment: true,
-        remarks: 'Joined',
         follow_up_date: null,
+        follow_ups: [systemFollowUp, ...(current.follow_ups || [])],
       }))
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to convert walk-in to enrollment.')
@@ -720,12 +731,11 @@ export default function WalkInDetailPage() {
               {detailErrorFor('college_company')}
             </DetailField>
           </div>
-          {!hasValidEnrollmentConversion && (
-            <FollowUpHistory
-              followUps={walkin.follow_ups || []}
-              onSave={saveFollowUp}
-            />
-          )}
+          <FollowUpHistory
+            followUps={walkin.follow_ups || []}
+            onSave={saveFollowUp}
+            readOnly={hasValidEnrollmentConversion}
+          />
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {message && <p className="text-sm text-slate-600">{message}</p>}
           </div>
@@ -760,8 +770,8 @@ export default function WalkInDetailPage() {
           )}
           {hasValidEnrollmentConversion ? (
             <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-              <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">
-                Converted to Enrollment
+              <span className="inline-flex rounded-full bg-[#DCFCE7] px-[10px] py-1 text-xs font-semibold text-[#166534]">
+                Enrolled
               </span>
               <p className="mt-3 text-sm font-semibold text-emerald-950">
                 {walkin.converted_at ? `Converted on ${formatDateTime(walkin.converted_at)}` : 'Converted record available.'}

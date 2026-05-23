@@ -26,7 +26,7 @@ function todayIso() {
   return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10)
 }
 
-export default function FollowUpHistory({ followUps = [], onSave }) {
+export default function FollowUpHistory({ followUps = [], onSave, readOnly = false }) {
   const [form, setForm] = useState({
     next_follow_up_date: '',
     remarks: '',
@@ -115,6 +115,7 @@ export default function FollowUpHistory({ followUps = [], onSave }) {
         )}
       </div>
 
+      {!readOnly && (
       <div className="mt-4 rounded-2xl border border-cyan-200 bg-white p-4 shadow-[0_18px_45px_-35px_rgba(34,211,238,0.55)]">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Add New Follow-up</p>
         <div className="mt-4 space-y-3">
@@ -161,6 +162,7 @@ export default function FollowUpHistory({ followUps = [], onSave }) {
           </button>
         </div>
       </div>
+      )}
 
       {historyOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-8 backdrop-blur-sm">

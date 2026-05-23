@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
 
-from crm.models import Branch, Course, Enrollment, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Branch, Course, Enrollment, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
@@ -175,8 +175,14 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.final_enrollment_course, self.final_course)
         self.assertEqual(enrollment.actual_fees, self.final_course.actual_fees)
         self.assertEqual(walkin.status, WalkIn.Status.CONVERTED)
-        self.assertEqual(walkin.remarks, 'Joined')
+        self.assertEqual(walkin.remarks, 'Not Interested')
         self.assertIsNone(walkin.follow_up_date)
+        conversion_follow_up = FollowUp.objects.get(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            remarks='Joined - No follow-up required',
+        )
+        self.assertIsNone(conversion_follow_up.next_follow_up_date)
 
     def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
         walkin = WalkIn.objects.create(

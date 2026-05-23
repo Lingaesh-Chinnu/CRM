@@ -10,7 +10,7 @@ const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, ''
 const statusOptions = [
   { value: 'new', label: 'New' },
   { value: 'follow_up', label: 'Follow Up' },
-  { value: 'converted', label: 'Converted to Enrollment' },
+  { value: 'converted', label: 'Enrolled' },
   { value: 'not_interested', label: 'Not Interested' },
   { value: 'transferred', label: 'Transferred' },
 ]
@@ -27,10 +27,17 @@ const emptyFilters = {
 }
 
 function statusLabel(walkin) {
-  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Converted to Enrollment'
+  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Enrolled'
   const status = walkin?.status
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function statusBadgeClass(walkin) {
+  if (walkin?.enrollment_id || walkin?.status === 'converted') {
+    return 'rounded-full bg-[#DCFCE7] px-[10px] py-1 text-xs font-semibold text-[#166534]'
+  }
+  return 'rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600'
 }
 
 function readFilters(searchParams, canFilterByBranch) {
@@ -109,7 +116,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
                     <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
                       <div className="min-w-0">
                         <span className="font-semibold text-slate-800">Latest Remark: </span>
-                        <span className="break-words">{isEnrollmentConversion(walkin) ? 'Joined' : walkin.remarks || 'Not provided'}</span>
+                        <span className="break-words">{walkin.latest_remark || walkin.remarks || 'Not provided'}</span>
                       </div>
                       <div className="min-w-0">
                         <span className="font-semibold text-slate-800">Next Follow-up: </span>
@@ -118,7 +125,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
                     </div>
                   </div>
                   <div className="flex w-fit flex-col items-start gap-2 sm:items-end">
-                    <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                    <div className={statusBadgeClass(walkin)}>
                       {statusLabel(walkin)}
                     </div>
                     {!isEnrollmentConversion(walkin) && (

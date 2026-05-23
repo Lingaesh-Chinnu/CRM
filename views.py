@@ -272,7 +272,6 @@ def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
     walkin.qualification = data.get('qualification', walkin.qualification or '')
     walkin.degree = data.get('degree', walkin.degree or '')
     walkin.status = WalkIn.Status.CONVERTED
-    walkin.remarks = 'Joined'
     walkin.follow_up_date = None
     walkin.converted_to_type = 'enrollment'
     walkin.converted_record_id = enrollment.id
@@ -281,9 +280,24 @@ def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
     walkin.save(update_fields=[
         'name', 'phone', 'email', 'dob', 'location', 'pincode',
         'branch', 'preferred_timing', 'qualification', 'degree',
-        'status', 'remarks', 'follow_up_date', 'converted_to_type',
+        'status', 'follow_up_date', 'converted_to_type',
         'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
     ])
+    system_remark = 'Joined - No follow-up required'
+    if not FollowUp.objects.filter(
+        record_type=FollowUp.RecordType.WALKIN,
+        record_id=walkin.id,
+        remarks=system_remark,
+        next_follow_up_date__isnull=True,
+    ).exists():
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            follow_up_date=timezone.localdate(),
+            next_follow_up_date=None,
+            remarks=system_remark,
+            updated_by=user,
+        )
 
 
 def mark_lead_enrollment_converted(lead, enrollment, user, data=None):
@@ -4015,7 +4029,6 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 or walkin.converted_to_type != 'enrollment'
                 or walkin.converted_record_id != existing_enrollment.id
                 or walkin.follow_up_date is not None
-                or walkin.remarks != 'Joined'
             ):
                 with transaction.atomic():
                     mark_walkin_enrollment_converted(walkin, existing_enrollment, request.user)

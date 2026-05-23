@@ -760,6 +760,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
     walk_in_by_display = serializers.SerializerMethodField()
     enrollment_id = serializers.SerializerMethodField()
     is_converted_to_enrollment = serializers.SerializerMethodField()
+    latest_remark = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -769,7 +770,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
-                  'is_converted_to_enrollment']
+                  'is_converted_to_enrollment','latest_remark']
 
     def to_representation(self, instance):
         defaults = {
@@ -835,6 +836,13 @@ class WalkInListSerializer(serializers.ModelSerializer):
 
     def get_is_converted_to_enrollment(self, obj):
         return self.get_enrollment_id(obj) is not None
+
+    def get_latest_remark(self, obj):
+        follow_up = FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=obj.id,
+        ).order_by('-created_at', '-id').first()
+        return follow_up.remarks if follow_up else obj.remarks
 
 
 class WalkInDetailSerializer(serializers.ModelSerializer):
