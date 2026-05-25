@@ -3,9 +3,10 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
+import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -59,6 +60,13 @@ function assignedUserName(lead) {
 
 function sourceLabel(lead) {
   return lead.source_display || lead.source || 'Unknown'
+}
+
+function statusTone(status) {
+  if (['converted', 'converted_to_walkin', 'enrolled'].includes(status)) return 'green'
+  if (['not_interested', 'wrong_number', 'lost', 'dropped'].includes(status)) return 'red'
+  if (['follow_up', 'will_walk_in', 'callback_later'].includes(status)) return 'amber'
+  return 'slate'
 }
 
 const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
@@ -252,8 +260,17 @@ export default function LeadsListPage() {
     }
   }
 
-  const updateLeadPhone = (leadId, phone) => {
-    setLeads((current) => current.map((lead) => lead.id === leadId ? { ...lead, phone } : lead))
+  const updateLeadFollowUp = (leadId, followUp) => {
+    setLeads((current) => current.map((lead) => (
+      lead.id === leadId
+        ? {
+            ...lead,
+            remarks: followUp.remarks || lead.remarks,
+            next_follow_up_date: followUp.next_follow_up_date,
+            status: lead.status === 'new' ? 'follow_up' : lead.status,
+          }
+        : lead
+    )))
   }
 
   const updateFilter = (field, value) => {
@@ -591,52 +608,45 @@ export default function LeadsListPage() {
             </button>
           </div>
         ) : (
-          <ul className="divide-y divide-slate-200">
-            {filteredLeads.map((lead) => (
-              <li key={lead.id}>
-                <div className="px-6 py-5 transition hover:bg-slate-50 sm:px-8">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_190px] lg:items-center">
-                    <div className="flex min-w-0 items-start gap-4">
-                      <Link to={`/leads/${lead.id}`} className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-sm font-black text-slate-700">
-                        {lead.name?.charAt(0)?.toUpperCase() || '?'}
-                      </Link>
-                      <div className="min-w-0">
-                        <Link to={`/leads/${lead.id}`} className="text-lg font-bold tracking-tight text-slate-950 hover:text-cyan-700">
-                          {lead.name}
-                        </Link>
-                        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
-                          <PhoneNumberEditor recordType="lead" recordId={lead.id} phone={lead.phone} onSaved={(phone) => updateLeadPhone(lead.id, phone)} />
-                          <span>{lead.course_name || 'Course not selected'}</span>
-                        </div>
-                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                          <div className="min-w-0">
-                            <span className="font-semibold text-slate-800">Latest Remark: </span>
-                            <span className="break-words">{lead.remarks || 'No remarks'}</span>
-                          </div>
-                          <div className="min-w-0">
-                            <span className="font-semibold text-slate-800">Next Follow-up: </span>
-                            {formatDate(lead.next_follow_up_date)}
-                          </div>
-                        </div>
-                      </div>
+          <div className="p-4">
+            <CRMTable
+              rows={filteredLeads}
+              emptyMessage="No matching leads."
+              columns={[
+                {
+                  key: 'name',
+                  header: 'Name',
+                  width: 'minmax(150px,1.2fr)',
+                  render: (lead) => (
+                    <div className="min-w-0">
+                      <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
+                      <p className="mt-1 truncate text-xs text-slate-500">{lead.course_name || 'Course not selected'}</p>
                     </div>
-
-                    <div className="flex w-full flex-col gap-2 lg:w-[190px] lg:items-stretch lg:justify-center">
-                      <div className="w-full rounded-full bg-slate-100 px-3 py-1 text-center text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-                        {statusLabel(lead.status)}
-                      </div>
-                      <div className="w-full rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-center text-[11px] font-semibold text-slate-500">
-                        Source: {sourceLabel(lead)}
-                      </div>
-                      <div className="w-full rounded-full border border-slate-200 bg-white px-3 py-1 text-center text-xs font-semibold text-slate-600">
-                        Follow-up: {assignedUserName(lead)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  ),
+                },
+                { key: 'phone', header: 'Phone', width: '120px', render: (lead) => <span className="font-semibold text-slate-800">{lead.phone || '-'}</span> },
+                { key: 'source', header: 'Source', width: '120px', render: (lead) => <span className="truncate text-slate-600">{sourceLabel(lead)}</span> },
+                { key: 'status', header: 'Status', width: '135px', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
+                { key: 'followUpBy', header: 'Follow Up By', width: '150px', render: (lead) => <span className="truncate text-slate-700">{assignedUserName(lead)}</span> },
+                { key: 'nextFollowUp', header: 'Next Follow Up', width: '130px', render: (lead) => <span className="text-slate-700">{formatDate(lead.next_follow_up_date)}</span> },
+                {
+                  key: 'remark',
+                  header: 'Latest Remark',
+                  width: 'minmax(180px,1.4fr)',
+                  render: (lead) => (
+                    <QuickFollowUpEdit
+                      type="lead"
+                      recordId={lead.id}
+                      remark={lead.remarks}
+                      nextDate={lead.next_follow_up_date}
+                      onSaved={(followUp) => updateLeadFollowUp(lead.id, followUp)}
+                    />
+                  ),
+                },
+                { key: 'actions', header: 'Actions', width: '88px', render: (lead) => <TableActionLink to={`/leads/${lead.id}`}>Open</TableActionLink> },
+              ]}
+            />
+          </div>
         )}
       </section>
     </div>

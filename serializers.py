@@ -295,7 +295,7 @@ class TeamNoticeSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/courses/serializers.py
 # ============================================================
-from crm.models import Course, Enrollment, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Course, Enrollment, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn, enrollment_payable_fee
 
 
 COURSE_LINKED_DELETE_MESSAGE = (
@@ -1161,6 +1161,9 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     final_enrollment_course_name = serializers.CharField(source='final_enrollment_course.name', read_only=True)
     branch_name = serializers.CharField(source='branch.name',  read_only=True)
     payment_status = serializers.SerializerMethodField()
+    payment_balance = serializers.SerializerMethodField()
+    paid_amount = serializers.SerializerMethodField()
+    counselor_name = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
@@ -1171,7 +1174,8 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'course_name','branch_name','final_fees','enrollment_date','status',
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
-                  'payment_status','source','source_display','preferred_timing',
+                  'payment_status','payment_balance','paid_amount','counselor_name',
+                  'net_payable_fee','source','source_display','preferred_timing',
                   'preferred_timing_display','qualification','qualification_display','degree',
                   'demo_class','interested_global_certification']
 
@@ -1179,6 +1183,20 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'payment'):
             return obj.payment.status
         return None
+
+    def get_payment_balance(self, obj):
+        if hasattr(obj, 'payment'):
+            return obj.payment.balance
+        return enrollment_payable_fee(obj)
+
+    def get_paid_amount(self, obj):
+        if hasattr(obj, 'payment'):
+            return obj.payment.paid_amount
+        return 0
+
+    def get_counselor_name(self, obj):
+        user = obj.enrolled_by or obj.created_by
+        return user.full_name if user else ''
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)

@@ -3,8 +3,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
+import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
@@ -24,6 +25,7 @@ const emptyFilters = {
   assigned_to: '',
   course: '',
   status: '',
+  source: '',
   date_from: '',
   date_to: '',
 }
@@ -35,11 +37,11 @@ function statusLabel(walkin) {
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-function statusBadgeClass(walkin) {
-  if (walkin?.enrollment_id || walkin?.status === 'converted') {
-    return 'rounded-full bg-[#DCFCE7] px-[10px] py-1 text-xs font-semibold text-[#166534]'
-  }
-  return 'rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600'
+function statusTone(walkin) {
+  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'green'
+  if (walkin?.status === 'not_interested') return 'red'
+  if (walkin?.status === 'follow_up' || walkin?.status === 'demo_attended') return 'amber'
+  return 'slate'
 }
 
 function readFilters(searchParams, canFilterByBranch) {
@@ -50,6 +52,7 @@ function readFilters(searchParams, canFilterByBranch) {
     assigned_to: searchParams.get('assigned_to') || searchParams.get('created_by') || '',
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
+    source: searchParams.get('source') || '',
     date_from: canFilterByBranch ? searchParams.get('date_from') || '' : '',
     date_to: canFilterByBranch ? searchParams.get('date_to') || '' : '',
   }
@@ -77,7 +80,7 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved, activeFilter, onStatusChange }) {
+function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, activeFilter, onStatusChange }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
@@ -106,44 +109,45 @@ function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved, acti
           {emptyMessage}
         </div>
       ) : (
-        <ul className="divide-y divide-slate-200">
-          {walkins.map((walkin) => (
-            <li key={walkin.id}>
-              <div className="px-6 py-5 transition hover:bg-slate-50 sm:px-8">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="p-4">
+          <CRMTable
+            rows={walkins}
+            emptyMessage={emptyMessage}
+            columns={[
+              {
+                key: 'name',
+                header: 'Name',
+                width: 'minmax(150px,1.2fr)',
+                render: (walkin) => (
                   <div className="min-w-0">
-                    <Link to={`/walkins/${walkin.id}`} className="text-lg font-bold tracking-tight text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
-                    <p className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm text-slate-500">
-                      <PhoneNumberEditor recordType="walkin" recordId={walkin.id} phone={walkin.phone} onSaved={(phone) => onPhoneSaved(walkin.id, phone)} />
-                      <span>|</span>
-                      <span>{walkin.course_name || 'Course pending'}</span>
-                    </p>
-                    <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                      <div className="min-w-0">
-                        <span className="font-semibold text-slate-800">Latest Remark: </span>
-                        <span className="break-words">{walkin.latest_remark || walkin.remarks || 'Not provided'}</span>
-                      </div>
-                      <div className="min-w-0">
-                        <span className="font-semibold text-slate-800">Next Follow-up: </span>
-                        {isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}
-                      </div>
-                    </div>
+                    <Link to={`/walkins/${walkin.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
+                    <p className="mt-1 truncate text-xs text-slate-500">{walkin.course_name || 'Course pending'}</p>
                   </div>
-                  <div className="flex w-fit flex-col items-start gap-2 sm:items-end">
-                    <div className={statusBadgeClass(walkin)}>
-                      {statusLabel(walkin)}
-                    </div>
-                    {!isEnrollmentConversion(walkin) && (
-                      <p className="text-xs font-semibold text-slate-500">
-                        Follow-up: <span className="text-slate-800">{walkInByText(walkin)}</span>
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </li>
-          ))}
-        </ul>
+                ),
+              },
+              { key: 'phone', header: 'Phone', width: '120px', render: (walkin) => <span className="font-semibold text-slate-800">{walkin.phone || '-'}</span> },
+              { key: 'source', header: 'Source', width: '120px', render: (walkin) => <span className="truncate text-slate-600">{walkin.source_display || walkin.source || '-'}</span> },
+              { key: 'status', header: 'Status', width: '130px', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
+              { key: 'followUpBy', header: 'Follow Up By', width: '145px', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
+              { key: 'nextFollowUp', header: 'Next Follow Up', width: '130px', render: (walkin) => <span className="text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
+              {
+                key: 'remark',
+                header: 'Latest Remark',
+                width: 'minmax(180px,1.4fr)',
+                render: (walkin) => (
+                  <QuickFollowUpEdit
+                    type="walkin"
+                    recordId={walkin.id}
+                    remark={walkin.latest_remark || walkin.remarks}
+                    nextDate={walkin.follow_up_date}
+                    onSaved={(followUp) => onFollowUpSaved(walkin.id, followUp)}
+                  />
+                ),
+              },
+              { key: 'actions', header: 'Actions', width: '88px', render: (walkin) => <TableActionLink to={`/walkins/${walkin.id}`}>Open</TableActionLink> },
+            ]}
+          />
+        </div>
       )}
 
     </section>
@@ -250,8 +254,18 @@ export default function WalkInsListPage() {
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
-  const updateWalkInPhone = (walkinId, phone) => {
-    const updateRows = (rows) => rows.map((walkin) => walkin.id === walkinId ? { ...walkin, phone } : walkin)
+  const updateWalkInFollowUp = (walkinId, followUp) => {
+    const updateRows = (rows) => rows.map((walkin) => (
+      walkin.id === walkinId
+        ? {
+            ...walkin,
+            latest_remark: followUp.remarks || walkin.latest_remark,
+            remarks: followUp.remarks || walkin.remarks,
+            follow_up_date: followUp.next_follow_up_date,
+            status: walkin.status === 'new' ? 'follow_up' : walkin.status,
+          }
+        : walkin
+    ))
     setCurrentMonthWalkins(updateRows)
     setOtherWalkins(updateRows)
   }
@@ -357,6 +371,20 @@ export default function WalkInsListPage() {
               {statusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
             </select>
           </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Source</span>
+            <select value={filters.source} onChange={(event) => updateFilter('source', event.target.value)} name="source" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All sources</option>
+              <option value="google">Google</option>
+              <option value="justdial">JustDial</option>
+              <option value="direct">Direct</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="friends_reference">Friends Reference</option>
+              <option value="lead_conversion">Lead Conversion</option>
+            </select>
+          </label>
           {canFilterByBranch && (
             <>
               <label className="block">
@@ -391,7 +419,7 @@ export default function WalkInsListPage() {
         walkins={currentMonthWalkins}
         count={currentMonthCount}
         emptyMessage="No current month walk-ins found."
-        onPhoneSaved={updateWalkInPhone}
+        onFollowUpSaved={updateWalkInFollowUp}
         activeFilter={activeSmartFilter}
         onStatusChange={applyStatusFilter}
       />
@@ -402,7 +430,7 @@ export default function WalkInsListPage() {
           walkins={otherWalkins}
           count={otherWalkinsCount}
           emptyMessage="No older walk-ins found."
-          onPhoneSaved={updateWalkInPhone}
+          onFollowUpSaved={updateWalkInFollowUp}
           activeFilter={activeSmartFilter}
           onStatusChange={applyStatusFilter}
         />

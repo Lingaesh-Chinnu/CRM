@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
-import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
+import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -43,6 +42,10 @@ function getPaymentLabel(value) {
   return 'Payment pending'
 }
 
+function money(value) {
+  return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
+}
+
 export default function EnrollmentsListPage() {
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
@@ -52,10 +55,11 @@ export default function EnrollmentsListPage() {
     course: '',
     status: '',
     search: '',
+    enrolledFrom: '',
+    enrolledTo: '',
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
-  const [updatingStudentId, setUpdatingStudentId] = useState(null)
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
 
@@ -65,7 +69,7 @@ export default function EnrollmentsListPage() {
 
   useEffect(() => {
     loadEnrollments()
-  }, [filters.branch, filters.course, filters.status, filters.search, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, filters.search, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
 
   const loadFilterOptions = async () => {
     try {
@@ -99,6 +103,8 @@ export default function EnrollmentsListPage() {
       if (filters.search.trim()) {
         params.search = filters.search.trim()
       }
+      if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
+      if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
 
       const { data } = await api.get('/enrollments/', { params })
       setRows(normaliseListResponse(data))
@@ -108,28 +114,6 @@ export default function EnrollmentsListPage() {
       setMessage(apiErrorMessage(error, 'Failed to load enrollments.'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  const updateStudentField = (studentId, field, value) => {
-    setRows((current) =>
-      current.map((student) =>
-        student.id === studentId ? { ...student, [field]: value } : student
-      )
-    )
-  }
-
-  const saveStudentStatus = async (studentId, status) => {
-    setUpdatingStudentId(studentId)
-
-    try {
-      await api.patch(`/enrollments/${studentId}/`, { status })
-      setMessage('')
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to update student status.'))
-      await loadEnrollments()
-    } finally {
-      setUpdatingStudentId(null)
     }
   }
 
@@ -224,6 +208,14 @@ export default function EnrollmentsListPage() {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
+            <input type="date" value={filters.enrolledFrom} onChange={(event) => setFilters((current) => ({ ...current, enrolledFrom: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+          </label>
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
+            <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+          </label>
         </div>
       </section>
 
@@ -251,145 +243,21 @@ export default function EnrollmentsListPage() {
         ) : rows.length === 0 ? (
           <div className="p-6 text-slate-500">No students match the current filters.</div>
         ) : (
-          <>
-          <div className="divide-y divide-slate-200 md:hidden">
-            {rows.map((row) => (
-              <article key={row.id} className="space-y-4 px-4 py-5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="break-words text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
-                    <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
-                    <div className="mt-2 text-sm text-slate-700">
-                      <PhoneNumberEditor recordType="enrollment" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentField(row.id, 'phone', phone)} />
-                    </div>
-                  </div>
-                  <Link
-                    to={`/enrollments/${row.id}`}
-                    className="shrink-0 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50"
-                  >
-                    View
-                  </Link>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Course</p>
-                    <p className="mt-1 font-bold text-slate-900">{row.course_name || 'Course pending'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Enrollment</p>
-                    <p className="mt-1 font-bold text-slate-900">{formatDate(row.enrollment_date)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Branch</p>
-                    <p className="mt-1 font-bold text-slate-900">{row.branch_name || 'No branch'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Payment</p>
-                    <p className="mt-1 font-bold text-slate-900">{getPaymentLabel(row.payment_status)}</p>
-                  </div>
-                </div>
-
-                <div>
-                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Status</p>
-                  <select
-                    value={statusSelectValue(row.status)}
-                    disabled={updatingStudentId === row.id}
-                    onChange={async (event) => {
-                      const nextStatus = event.target.value
-                      updateStudentField(row.id, 'status', nextStatus)
-                      await saveStudentStatus(row.id, nextStatus)
-                    }}
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
-                  >
-                    <option value="active">Active</option>
-                    <option value="pending">Pending</option>
-                    <option value="completed">Completed</option>
-                    <option value="on_hold">Hold</option>
-                    <option value="inactive">Inactive</option>
-                    <option value="dropped">Dropped</option>
-                    <option value="transferred">Transferred</option>
-                  </select>
-                  <p className="mt-2 text-xs text-slate-500">{getStatusLabel(row.status)}</p>
-                </div>
-              </article>
-            ))}
+          <div className="p-4">
+            <CRMTable
+              rows={rows}
+              columns={[
+                { key: 'name', header: 'Student Name', width: 'minmax(150px,1.2fr)', render: (row) => <div><p className="truncate font-bold text-slate-950">{row.name}</p><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || 'Course pending'}</span> },
+                { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> },
+                { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
+                { key: 'fees', header: 'Fees', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
+                { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                { key: 'counselor', header: 'Counselor', width: '140px', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
+                { key: 'actions', header: 'Actions', width: '96px', render: (row) => <TableActionLink to={`/enrollments/${row.id}`}>Open</TableActionLink> },
+              ]}
+            />
           </div>
-          <div className="hidden overflow-x-auto md:block">
-            <div className="min-w-[1120px]">
-              <div className="grid grid-cols-[1.25fr_1.05fr_1fr_1fr_1fr_0.95fr_0.75fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <div>Student</div>
-                <div>Course</div>
-                <div>Enrollment Date</div>
-                <div>Branch</div>
-                <div>Status</div>
-                <div>Payment</div>
-                <div>Open</div>
-              </div>
-
-              <div className="divide-y divide-slate-200">
-                {rows.map((row) => (
-                  <div key={row.id} className="grid grid-cols-[1.25fr_1.05fr_1fr_1fr_1fr_0.95fr_0.75fr] gap-4 px-6 py-5">
-                    <div>
-                      <p className="text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
-                      <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
-                      <div className="mt-2 text-sm text-slate-700">
-                        <PhoneNumberEditor recordType="enrollment" recordId={row.id} phone={row.phone} onSaved={(phone) => updateStudentField(row.id, 'phone', phone)} />
-                      </div>
-                    </div>
-
-                    <div className="text-sm font-medium text-slate-800">
-                      {row.course_name || 'Course pending'}
-                    </div>
-
-                    <div className="text-sm font-medium text-slate-800">
-                      {formatDate(row.enrollment_date)}
-                    </div>
-
-                    <div className="text-sm font-medium text-slate-800">
-                      {row.branch_name || 'No branch'}
-                    </div>
-
-                    <div className="space-y-2">
-                      <select
-                        value={statusSelectValue(row.status)}
-                        disabled={updatingStudentId === row.id}
-                        onChange={async (event) => {
-                          const nextStatus = event.target.value
-                          updateStudentField(row.id, 'status', nextStatus)
-                          await saveStudentStatus(row.id, nextStatus)
-                        }}
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
-                      >
-                        <option value="active">Active</option>
-                        <option value="pending">Pending</option>
-                        <option value="completed">Completed</option>
-                        <option value="on_hold">Hold</option>
-                        <option value="inactive">Inactive</option>
-                        <option value="dropped">Dropped</option>
-                        <option value="transferred">Transferred</option>
-                      </select>
-                      <p className="text-xs text-slate-500">{getStatusLabel(row.status)}</p>
-                    </div>
-
-                    <div className="space-y-1 text-sm text-slate-700">
-                      <p className="font-semibold text-slate-900">{getPaymentLabel(row.payment_status)}</p>
-                    </div>
-
-                    <div className="flex items-start">
-                      <Link
-                        to={`/enrollments/${row.id}`}
-                        className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
-                      >
-                        View
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          </>
         )}
       </section>
     </div>

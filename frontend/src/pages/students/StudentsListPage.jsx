@@ -1,26 +1,20 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
+import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
 
 function normaliseListResponse(data) {
   return data.results || data
 }
 
-function formatDate(value) {
-  if (!value) return 'Not provided'
-
-  return new Date(value).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-}
-
 function compactValue(value, fallback = 'Not provided') {
   return value || fallback
+}
+
+function money(value) {
+  return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
 
 function studentStatusLabel(value) {
@@ -46,6 +40,8 @@ export default function StudentsListPage() {
     course: '',
     status: '',
     search: '',
+    enrolledFrom: '',
+    enrolledTo: '',
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -58,7 +54,7 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
-  }, [filters.branch, filters.course, filters.status, filters.search, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, filters.search, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
 
   const loadFilterOptions = async () => {
     try {
@@ -92,6 +88,8 @@ export default function StudentsListPage() {
       if (filters.search.trim()) {
         params.search = filters.search.trim()
       }
+      if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
+      if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
 
       const { data } = await api.get('/enrollments/', { params })
       setRows(normaliseListResponse(data))
@@ -191,6 +189,14 @@ export default function StudentsListPage() {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
+            <input type="date" value={filters.enrolledFrom} onChange={(event) => setFilters((current) => ({ ...current, enrolledFrom: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+          </label>
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
+            <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+          </label>
         </div>
       </section>
 
@@ -218,108 +224,21 @@ export default function StudentsListPage() {
         ) : rows.length === 0 ? (
           <div className="p-6 text-slate-500">No students found for the current filters.</div>
         ) : (
-          <>
-            <div className="hidden md:block">
-              <div className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(0,1.15fr)_minmax(0,1.35fr)_150px] gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 pr-5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                <div>Student</div>
-                <div>Contact</div>
-                <div>Date of Birth</div>
-                <div>Branch & Timing</div>
-                <div>Address</div>
-                <div>Profile</div>
-              </div>
-
-              <div className="divide-y divide-slate-200">
-                {rows.map((row) => (
-                  <div key={row.id} className="grid grid-cols-[minmax(0,1.35fr)_minmax(0,1.15fr)_minmax(0,0.85fr)_minmax(0,1.15fr)_minmax(0,1.35fr)_150px] gap-2 px-4 py-4 pr-5 text-sm">
-                    <div className="min-w-0 pr-2">
-                      <p className="break-words text-base font-bold leading-5 tracking-tight text-slate-950">{row.name}</p>
-                      <p className="mt-1 break-words text-xs text-slate-500">{row.student_number}</p>
-                      <p className="mt-2 break-words text-sm font-medium leading-5 text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
-                    </div>
-
-                    <div className="min-w-0 space-y-1 pr-2 text-slate-700">
-                      <p className="break-words text-sm font-semibold leading-5 text-slate-900">{compactValue(row.phone, 'Phone not added')}</p>
-                      <p className="break-words text-xs leading-5">{compactValue(row.email, 'Email not added')}</p>
-                    </div>
-
-                    <div className="min-w-0 break-words pr-2 font-medium leading-5 text-slate-700">
-                      {formatDate(row.dob)}
-                    </div>
-
-                    <div className="min-w-0 space-y-1 pr-2 text-slate-700">
-                      <p className="break-words font-semibold leading-5 text-slate-900">{compactValue(row.branch_name, 'No branch')}</p>
-                      <p className="break-words text-xs leading-5">{compactValue(row.pincode, 'Pincode not added')}</p>
-                      <p className="break-words text-xs leading-5">{compactValue(row.preferred_timing_display, 'Timing not added')}</p>
-                    </div>
-
-                    <div className="min-w-0 pr-2 text-slate-700">
-                      <p className="font-semibold leading-5 text-slate-900">Address</p>
-                      <p className="mt-1 whitespace-normal break-words text-xs leading-5">{compactValue(row.location, 'Address not added')}</p>
-                    </div>
-
-                    <div className="flex w-[150px] min-w-0 flex-col items-center justify-start gap-2 justify-self-end">
-                      <div className="max-w-[120px] whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-center text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-500">
-                        {studentStatusLabel(row.status)}
-                      </div>
-                      <Link
-                        to={`/students/${row.id}`}
-                        className="max-w-[120px] whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-center text-xs font-semibold leading-4 text-slate-900 transition hover:bg-slate-50"
-                      >
-                        View Profile
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="divide-y divide-slate-200 md:hidden">
-              {rows.map((row) => (
-                <article key={row.id} className="space-y-4 px-4 py-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="break-words text-lg font-bold tracking-tight text-slate-950">{row.name}</p>
-                      <p className="mt-1 text-sm text-slate-500">{row.student_number}</p>
-                      <p className="mt-2 break-words text-sm font-medium text-slate-800">{compactValue(row.course_name, 'Course pending')}</p>
-                    </div>
-                    <div className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      {studentStatusLabel(row.status)}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 text-sm text-slate-700">
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Contact</p>
-                      <p className="font-semibold text-slate-900">{compactValue(row.phone, 'Phone not added')}</p>
-                      <p className="mt-1 break-words">{compactValue(row.email, 'Email not added')}</p>
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Date of Birth</p>
-                      <p className="font-medium text-slate-900">{formatDate(row.dob)}</p>
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Branch & Timing</p>
-                      <p className="font-semibold text-slate-900">{compactValue(row.branch_name, 'No branch')}</p>
-                      <p>{compactValue(row.pincode, 'Pincode not added')}</p>
-                      <p>{compactValue(row.preferred_timing_display, 'Timing not added')}</p>
-                    </div>
-                    <div>
-                      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Address</p>
-                      <p className="break-words leading-6">{compactValue(row.location, 'Address not added')}</p>
-                    </div>
-                  </div>
-
-                  <Link
-                    to={`/students/${row.id}`}
-                    className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50"
-                  >
-                    View Profile
-                  </Link>
-                </article>
-              ))}
-            </div>
-          </>
+          <div className="p-4">
+            <CRMTable
+              rows={rows}
+              columns={[
+                { key: 'name', header: 'Student Name', width: 'minmax(150px,1.2fr)', render: (row) => <div><p className="truncate font-bold text-slate-950">{row.name}</p><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{compactValue(row.course_name, 'Course pending')}</span> },
+                { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{compactValue(row.branch_name, 'No branch')}</span> },
+                { key: 'status', header: 'Status', width: '110px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{studentStatusLabel(row.status)}</StatusBadge> },
+                { key: 'fees', header: 'Fees', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
+                { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                { key: 'counselor', header: 'Counselor', width: '140px', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
+                { key: 'actions', header: 'Actions', width: '96px', render: (row) => <TableActionLink to={`/students/${row.id}`}>Open</TableActionLink> },
+              ]}
+            />
+          </div>
         )}
       </section>
     </div>

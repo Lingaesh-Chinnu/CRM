@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
+import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
@@ -366,7 +367,7 @@ export default function PaymentsListPage() {
 
     if (isSuperAdmin) {
       if (!nextPending || !['unpaid', 'partial'].includes(row.status)) {
-        return <Link to={`/payments/${row.id}`} className="inline-flex whitespace-nowrap text-xs font-semibold text-slate-600 hover:text-slate-950">Open</Link>
+        return null
       }
       if (reason?.status === 'pending_response') {
         return <span className="inline-flex whitespace-nowrap rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">Reason Requested</span>
@@ -397,7 +398,7 @@ export default function PaymentsListPage() {
             {sendingId === row.id ? 'Sending...' : 'Reminder'}
           </button>
         ) : (
-          <Link to={`/payments/${row.id}`} className="inline-flex whitespace-nowrap text-xs font-semibold text-slate-600 hover:text-slate-950">Open</Link>
+          null
         )}
         {reason?.status === 'pending_response' && (
           <button type="button" onClick={() => openReasonRequest(reason)} className={secondaryClass}>
@@ -533,90 +534,40 @@ export default function PaymentsListPage() {
               : 'No payment records found for this month.'}
           </div>
         ) : (
-          <>
-            <div className="hidden lg:block">
-              <table className="w-full table-fixed border-collapse text-left text-sm">
-                <thead className="bg-slate-100 text-xs uppercase tracking-[0.12em] text-slate-500">
-                  <tr>
-                    <th className="w-[16%] px-3 py-3">Name</th>
-                    <th className="w-[14%] px-3 py-3">Course</th>
-                    <th className="w-[10%] px-3 py-3 text-right">Course Fees</th>
-                    <th className="w-[10%] px-3 py-3 text-right">Last Paid Amount</th>
-                    <th className="w-[10%] px-3 py-3">Last Paid Date</th>
-                    <th className="w-[10%] px-3 py-3 text-right">Balance Amount</th>
-                    <th className="w-[10%] px-3 py-3 text-right">Next Payment Amount</th>
-                    <th className="w-[10%] px-3 py-3">Next Payment Date</th>
-                    <th className="w-[10%] px-3 py-3">Payment Status</th>
-                    <th className="w-[10%] px-3 py-3">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {rows.map((row) => {
-                    const lastPaid = lastPaidInstallment(row)
-                    const nextPending = nextPendingInstallment(row)
-                    return (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-3 py-4 align-top">
-                          <Link to={`/payments/${row.id}`} className="break-words font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
-                          <p className="mt-1 text-xs text-slate-500">{row.student_phone || 'No phone'}</p>
-                        </td>
-                        <td className="break-words px-3 py-4 align-top text-slate-700">{row.course_name || '-'}</td>
-                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{money(row.total_fees)}</td>
-                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{lastPaid ? money(lastPaid.amount) : '-'}</td>
-                        <td className="px-3 py-4 align-top text-slate-600">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</td>
-                        <td className="px-3 py-4 text-right align-top font-black text-slate-950">{money(row.balance)}</td>
-                        <td className="px-3 py-4 text-right align-top font-semibold text-slate-900">{nextPending ? money(nextPending.pending_amount) : '-'}</td>
-                        <td className="px-3 py-4 align-top text-slate-600">{nextPending ? formatDate(nextPending.due_date) : '-'}</td>
-                        <td className="px-3 py-4 align-top">
-                          <span className="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-600">
-                            {statusLabel(row.status)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-4 align-top">
-                          {actionControls(row)}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="divide-y divide-slate-200 lg:hidden">
-              {rows.map((row) => {
-                const lastPaid = lastPaidInstallment(row)
-                const nextPending = nextPendingInstallment(row)
-                return (
-                  <div key={row.id} className="p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <Link to={`/payments/${row.id}`} className="text-lg font-black tracking-tight text-slate-950">{row.student_name}</Link>
-                        <p className="mt-1 text-sm text-slate-500">{row.student_phone || 'No phone'}</p>
-                      </div>
-                      <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-600">
-                        {statusLabel(row.status)}
-                      </span>
+          <div className="p-4">
+            <CRMTable
+              rows={rows}
+              columns={[
+                {
+                  key: 'student',
+                  header: 'Student',
+                  width: 'minmax(150px,1.25fr)',
+                  render: (row) => (
+                    <div className="min-w-0">
+                      <Link to={`/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                      <p className="mt-1 truncate text-xs text-slate-500">{row.student_phone || row.student_number || '-'}</p>
                     </div>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course</p><p className="font-bold text-slate-950">{row.course_name || '-'}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Course Fees</p><p className="font-bold text-slate-950">Rs {money(row.total_fees)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid</p><p className="font-bold text-slate-950">{lastPaid ? `Rs ${money(lastPaid.amount)}` : '-'}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Last Paid Date</p><p className="font-bold text-slate-950">{lastPaid ? formatDate(lastPaid.payment_date) : '-'}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Balance Amount</p><p className="font-bold text-slate-950">Rs {money(row.balance)}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Next Payment Amount</p><p className="font-bold text-slate-950">{nextPending ? `Rs ${money(nextPending.pending_amount)}` : '-'}</p></div>
-                      <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Next Payment Date</p><p className="font-bold text-slate-950">{nextPending ? formatDate(nextPending.due_date) : '-'}</p></div>
+                  ),
+                },
+                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
+                { key: 'paid', header: 'Paid', width: '105px', render: (row) => <span className="font-semibold text-slate-900">Rs {money(row.paid_amount)}</span> },
+                { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-black text-slate-950">Rs {money(row.balance)}</span> },
+                { key: 'dueDate', header: 'Due Date', width: '120px', render: (row) => <span className="text-slate-700">{formatDate(nextPendingInstallment(row)?.due_date || row.next_payment_date)}</span> },
+                { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={row.status === 'paid' ? 'green' : row.status === 'partial' ? 'amber' : 'red'}>{statusLabel(row.status)}</StatusBadge> },
+                {
+                  key: 'actions',
+                  header: 'Actions',
+                  width: 'minmax(120px,0.9fr)',
+                  render: (row) => (
+                    <div className="flex flex-wrap gap-2">
+                      <TableActionLink to={`/payments/${row.id}`}>Open</TableActionLink>
+                      {actionControls(row)}
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-3">
-                      <Link to={`/payments/${row.id}`} className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900">
-                        Open Details
-                      </Link>
-                      {actionControls(row, true)}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </>
+                  ),
+                },
+              ]}
+            />
+          </div>
         )}
       </section>
 
