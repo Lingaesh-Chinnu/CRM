@@ -6,6 +6,7 @@ import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
+import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
 
 const studentStatusOptions = [
   { value: 'active', label: 'Active' },
@@ -53,15 +54,23 @@ export default function StudentDetailPage() {
   const navigate = useNavigate()
   const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
+  const [courses, setCourses] = useState([])
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [showCourseChange, setShowCourseChange] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
     setLoadError('')
-    api.get(`/enrollments/${id}/`)
-      .then(({ data }) => setRow(data))
+    Promise.all([
+      api.get(`/enrollments/${id}/`),
+      api.get('/courses/'),
+    ])
+      .then(([enrollmentRes, coursesRes]) => {
+        setRow(enrollmentRes.data)
+        setCourses(coursesRes.data.results || coursesRes.data)
+      })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load student profile.')))
   }, [id])
 
@@ -88,13 +97,33 @@ export default function StudentDetailPage() {
     navigate('/students', { replace: true })
   }
 
+  const changeCourse = async (payload) => {
+    setStatusSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/enrollments/${row.id}/change-course/`, payload)
+      setRow(data)
+      setShowCourseChange(false)
+      setMessage('Course changed. Fees and pending installments were recalculated.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to change course.'))
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Student Profile</p>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <h1 className="text-3xl font-black tracking-tight text-slate-950">{row.name}</h1>
-          {isSuperAdmin && <AdminDeleteButton label="student" onConfirm={deleteStudent} />}
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => { setShowCourseChange(true); setMessage('') }} className="w-fit rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 hover:bg-cyan-100">
+              Change Course
+            </button>
+            {isSuperAdmin && <AdminDeleteButton label="student" onConfirm={deleteStudent} />}
+          </div>
         </div>
         <p className="mt-3 text-sm text-slate-500">
           {row.student_number} | {row.course_name || 'No course'} | {row.branch_name || 'No branch'}
@@ -199,6 +228,16 @@ export default function StudentDetailPage() {
           </div>
         </article>
       </section>
+      <CourseChangeHistorySection history={row.course_change_history || []} />
+      {showCourseChange && (
+        <CourseChangeModal
+          enrollment={row}
+          courses={courses}
+          saving={statusSaving}
+          onCancel={() => setShowCourseChange(false)}
+          onSubmit={changeCourse}
+        />
+      )}
     </div>
   )
 }

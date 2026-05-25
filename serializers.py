@@ -1138,7 +1138,21 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import Enrollment, RulesSigningRequest, get_default_installment_schedule
+from crm.models import CourseChangeHistory, Enrollment, RulesSigningRequest, get_default_installment_schedule
+
+
+class CourseChangeHistorySerializer(serializers.ModelSerializer):
+    old_course_name = serializers.CharField(source='old_course.name', read_only=True)
+    new_course_name = serializers.CharField(source='new_course.name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.full_name', read_only=True)
+
+    class Meta:
+        model = CourseChangeHistory
+        fields = [
+            'id', 'old_course', 'old_course_name', 'new_course', 'new_course_name',
+            'changed_by', 'changed_by_name', 'old_fee', 'new_fee', 'reason',
+            'effective_date', 'created_at',
+        ]
 
 
 class EnrollmentListSerializer(serializers.ModelSerializer):
@@ -1186,6 +1200,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     rules_selfie_url = serializers.SerializerMethodField()
     rules_submitted_at = serializers.SerializerMethodField()
     installment_schedule = serializers.SerializerMethodField()
+    course_change_history = CourseChangeHistorySerializer(many=True, read_only=True)
 
     class Meta:
         model  = Enrollment

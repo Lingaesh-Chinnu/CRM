@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
 
-from crm.models import Branch, Course, Enrollment, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Branch, Course, CourseChangeHistory, Enrollment, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
@@ -293,6 +293,90 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
             {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
+
+    def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Transfer Course Student',
+            phone='9000000127',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            ],
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='1st Installment',
+            payment_date='2026-05-11',
+            receipt_number='RCPT-COURSE-CHANGE',
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/change-course/', {
+            'course': self.final_course.id,
+            'reason': 'Student requested upgrade',
+            'effective_date': '2026-05-20',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        enrollment.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(enrollment.course, self.final_course)
+        self.assertEqual(enrollment.actual_fees, self.final_course.actual_fees)
+        self.assertEqual(enrollment.final_fees, Decimal('15000.00'))
+        self.assertEqual(payment.total_fees, Decimal('15000.00'))
+        self.assertEqual(payment.paid_amount, Decimal('5000.00'))
+        self.assertEqual(payment.balance, Decimal('10000.00'))
+        self.assertEqual(PaymentInstallment.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(PaymentInstallment.objects.get(payment=payment).receipt_number, 'RCPT-COURSE-CHANGE')
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+        ])
+        history = CourseChangeHistory.objects.get(enrollment=enrollment)
+        self.assertEqual(history.old_course, self.course)
+        self.assertEqual(history.new_course, self.final_course)
+        self.assertEqual(history.changed_by, self.staff)
+        self.assertEqual(history.reason, 'Student requested upgrade')
+        self.assertEqual(str(history.effective_date), '2026-05-20')
+
+    def test_change_course_respects_branch_permissions(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.other_branch,
+            course=self.course,
+            name='Other Branch Course Student',
+            phone='9000000128',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/change-course/', {
+            'course': self.final_course.id,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 404)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.course, self.course)
+        self.assertFalse(CourseChangeHistory.objects.filter(enrollment=enrollment).exists())
 
     def test_dashboard_counts_and_values_only_active_enrolled_students(self):
         today = timezone.localdate()

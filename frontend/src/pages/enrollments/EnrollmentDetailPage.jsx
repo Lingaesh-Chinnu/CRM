@@ -6,6 +6,7 @@ import { openWhatsApp } from '../../utils/whatsappTemplates'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
+import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -117,6 +118,7 @@ export default function EnrollmentDetailPage() {
   const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
   const [branches, setBranches] = useState([])
+  const [courses, setCourses] = useState([])
   const [startDate, setStartDate] = useState('')
   const [batchTiming, setBatchTiming] = useState('')
   const [phone, setPhone] = useState('')
@@ -127,6 +129,7 @@ export default function EnrollmentDetailPage() {
   const [rulesErrors, setRulesErrors] = useState({})
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showCourseChange, setShowCourseChange] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
@@ -134,11 +137,13 @@ export default function EnrollmentDetailPage() {
     Promise.all([
       api.get(`/enrollments/${id}/`),
       isSuperAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
+      api.get('/courses/'),
     ])
-      .then(([enrollmentRes, branchesRes]) => {
+      .then(([enrollmentRes, branchesRes, coursesRes]) => {
         const data = enrollmentRes.data
         setRow(data)
         setBranches(branchesRes.data.results || branchesRes.data)
+        setCourses(coursesRes.data.results || coursesRes.data)
         setBranch(data.branch || '')
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
@@ -294,6 +299,21 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const changeCourse = async (payload) => {
+    setSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/enrollments/${id}/change-course/`, payload)
+      setRow(data)
+      setShowCourseChange(false)
+      setMessage('Course changed. Fees and pending installments were recalculated.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to change course.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const deleteEnrollment = async () => {
     await api.delete(`/enrollments/${id}/`)
     navigate('/enrollments', { replace: true })
@@ -315,6 +335,9 @@ export default function EnrollmentDetailPage() {
             <div className="flex items-center gap-2">
               <button type="button" onClick={() => { resetDetailsEdit(); setEditingDetails(true); setMessage('') }} className="w-fit rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
                 Edit
+              </button>
+              <button type="button" onClick={() => { setShowCourseChange(true); setMessage('') }} className="w-fit rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 hover:bg-cyan-100">
+                Change Course
               </button>
               {isSuperAdmin && <AdminDeleteButton label="enrollment" onConfirm={deleteEnrollment} />}
             </div>
@@ -517,12 +540,22 @@ export default function EnrollmentDetailPage() {
           </p>
         )}
       </section>
+      <CourseChangeHistorySection history={row.course_change_history || []} />
       {pendingDetailChanges.length > 0 && (
         <ConfirmChangesModal
           changes={pendingDetailChanges}
           saving={saving}
           onCancel={() => setPendingDetailChanges([])}
           onConfirm={saveDetails}
+        />
+      )}
+      {showCourseChange && (
+        <CourseChangeModal
+          enrollment={row}
+          courses={courses}
+          saving={saving}
+          onCancel={() => setShowCourseChange(false)}
+          onSubmit={changeCourse}
         />
       )}
     </div>

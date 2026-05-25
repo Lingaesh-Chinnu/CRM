@@ -76,7 +76,8 @@ from crm.models import (
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
-    PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, get_default_installment_schedule, enrollment_payable_fee,
+    PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
+    get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -85,7 +86,7 @@ from serializers import (
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
-    PaymentReasonRequestSerializer,
+    PaymentReasonRequestSerializer, CourseChangeHistorySerializer,
 )
 
 
@@ -4551,6 +4552,84 @@ class EnrollmentFilter(django_filters.FilterSet):
         fields = ['status', 'branch', 'course']
 
 
+def serialize_installment_schedule(schedule):
+    rows = []
+    for item in schedule or []:
+        due_date = item.get('due_date')
+        rows.append({
+            **item,
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+        })
+    return rows
+
+
+def decimal_to_schedule_amount(value):
+    value = Decimal(str(value or 0))
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
+def rebuild_pending_installment_schedule(enrollment, payment):
+    new_total = Decimal(str(enrollment_payable_fee(enrollment) or 0))
+    paid_amount = Decimal(str(payment.paid_amount or 0))
+    if new_total <= 0:
+        return []
+
+    default_schedule = serialize_installment_schedule(get_default_installment_schedule(enrollment))
+    if paid_amount <= 0:
+        return default_schedule
+
+    if paid_amount >= new_total:
+        return [{
+            'label': 'Course Fee',
+            'amount': decimal_to_schedule_amount(new_total),
+            'due_date': enrollment.enrollment_date.isoformat() if enrollment.enrollment_date else None,
+        }]
+
+    locked_items = []
+    locked_total = Decimal('0')
+    paid_cursor = Decimal('0')
+    for item in get_payment_installment_schedule(payment):
+        item_amount = Decimal(str(item.get('amount') or 0))
+        if item_amount <= 0:
+            continue
+        if paid_cursor + item_amount > paid_amount:
+            break
+        if locked_total + item_amount > new_total:
+            break
+        locked_items.append({
+            'label': item.get('label') or f'{len(locked_items) + 1} Installment',
+            'amount': decimal_to_schedule_amount(item_amount),
+            'due_date': item.get('due_date').isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
+        })
+        paid_cursor += item_amount
+        locked_total += item_amount
+
+    remaining_total = new_total - locked_total
+    if remaining_total <= 0:
+        return locked_items
+
+    pending_count = max(len(default_schedule) - len(locked_items), 1)
+    base_amount = remaining_total // pending_count
+    amounts = [base_amount for _ in range(pending_count)]
+    amounts[-1] += remaining_total - (base_amount * pending_count)
+    due_dates = [item.get('due_date') for item in default_schedule[len(locked_items):]]
+    while len(due_dates) < pending_count:
+        due_dates.append(enrollment.start_date or enrollment.enrollment_date)
+
+    future_items = []
+    for offset, amount in enumerate(amounts, start=1):
+        index = len(locked_items) + offset
+        default_item = default_schedule[index - 1] if index - 1 < len(default_schedule) else {}
+        future_items.append({
+            'label': default_item.get('label') or f'{index} Installment',
+            'amount': decimal_to_schedule_amount(amount),
+            'due_date': due_dates[offset - 1].isoformat() if hasattr(due_dates[offset - 1], 'isoformat') else due_dates[offset - 1],
+        })
+    return locked_items + future_items
+
+
 class EnrollmentViewSet(viewsets.ModelViewSet):
     """Enrollment records. Staff sees own branch."""
     permission_classes = [IsStaffOrAdmin]
@@ -4586,6 +4665,71 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if enrollment.status in Enrollment.FINAL_STATUSES:
             resolve_rules_signed_notifications(enrollment.id)
         return response
+
+    @action(detail=True, methods=['post'], url_path='change-course')
+    def change_course(self, request, pk=None):
+        enrollment = self.get_object()
+        course_id = request.data.get('course') or request.data.get('new_course')
+        if not course_id:
+            return Response({'course': 'Select a new course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_course = Course.objects.filter(pk=course_id, is_active=True).first()
+        if not new_course:
+            return Response({'course': 'Select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
+        if enrollment.course_id == new_course.id:
+            return Response({'course': 'New course must be different from the current course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        effective_date_raw = request.data.get('effective_date')
+        effective_date = parse_date(effective_date_raw) if effective_date_raw else timezone.localdate()
+        if not effective_date:
+            return Response({'effective_date': 'Enter a valid effective date.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = str(request.data.get('reason') or '').strip()
+
+        with transaction.atomic():
+            enrollment = (
+                Enrollment.objects
+                .select_for_update()
+                .select_related('course', 'branch')
+                .get(pk=enrollment.pk)
+            )
+            old_course = enrollment.course
+            old_fee = enrollment_payable_fee(enrollment)
+
+            enrollment.course = new_course
+            enrollment.final_enrollment_course = new_course
+            enrollment.actual_fees = new_course.actual_fees
+            enrollment.discount_amount = new_course.discount_amount
+            enrollment.save(update_fields=[
+                'course', 'final_enrollment_course', 'actual_fees', 'discount_amount',
+                'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
+            ])
+            new_fee = enrollment_payable_fee(enrollment)
+
+            CourseChangeHistory.objects.create(
+                enrollment=enrollment,
+                old_course=old_course,
+                new_course=new_course,
+                changed_by=request.user,
+                old_fee=old_fee,
+                new_fee=new_fee,
+                reason=reason,
+                effective_date=effective_date,
+            )
+
+            payment = getattr(enrollment, 'payment', None)
+            if payment:
+                payment = Payment.objects.select_for_update().get(pk=payment.pk)
+                payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+                payment.total_fees = new_fee
+                payment.manual_installment_schedule = rebuild_pending_installment_schedule(enrollment, payment)
+                payment.save(update_fields=[
+                    'total_fees', 'paid_amount', 'manual_installment_schedule',
+                    'status', 'next_payment_date', 'updated_at',
+                ])
+
+        enrollment.refresh_from_db()
+        return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):

@@ -914,6 +914,26 @@ class Enrollment(TimeStampedModel):
         return f'{self.student_number or "Pending"} - {self.name}'
 
 
+class CourseChangeHistory(TimeStampedModel):
+    """Audit trail for enrollment course changes."""
+
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='course_change_history')
+    old_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_changes_from')
+    new_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_changes_to')
+    changed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_changes_made')
+    old_fee = models.DecimalField(max_digits=10, decimal_places=2)
+    new_fee = models.DecimalField(max_digits=10, decimal_places=2)
+    reason = models.TextField(blank=True)
+    effective_date = models.DateField()
+
+    class Meta:
+        db_table = 'course_change_history'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.enrollment_id}: {self.old_course} -> {self.new_course}'
+
+
 class RulesSigningRequest(TimeStampedModel):
     """Public token-based Rules & Regulation signing gate for an enrollment."""
 
