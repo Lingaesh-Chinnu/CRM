@@ -312,7 +312,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.course, self.course)
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.assigned_to, self.staff)
-        self.assertEqual(walkin.source, WalkIn.Source.LEAD_CONVERSION)
+        self.assertEqual(walkin.source, WalkIn.Source.WHATSAPP)
         self.assertEqual(walkin.remarks, 'Will visit branch')
         self.assertEqual(walkin.follow_up_date.isoformat(), '2026-05-20')
         self.assertTrue(FollowUp.objects.filter(
@@ -325,6 +325,66 @@ class PublicWalkInFormTests(APITestCase):
         detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data['id'], walkin.id)
+
+    def test_direct_converted_to_walkin_status_update_creates_walkin(self):
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            name='Status Patch Lead',
+            phone='9000000031',
+            source=Lead.Source.GOOGLE,
+            walkin_date='2026-05-16',
+            next_follow_up_date='2026-05-21',
+            remarks='Direct status update',
+            created_by=self.staff,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.patch(f'/api/leads/{lead.id}/', {
+            'status': Lead.Status.CONVERTED_TO_WALKIN,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        lead.refresh_from_db()
+        walkin = WalkIn.objects.get(lead=lead)
+        self.assertEqual(lead.status, Lead.Status.CONVERTED_TO_WALKIN)
+        self.assertEqual(lead.converted_to_type, 'walkin')
+        self.assertEqual(lead.converted_record_id, walkin.id)
+        self.assertIsNone(lead.next_follow_up_date)
+        self.assertEqual(walkin.phone, lead.phone)
+        self.assertEqual(walkin.visit_date.isoformat(), '2026-05-16')
+
+    def test_lead_to_walkin_reuses_existing_phone_walkin_without_duplicate(self):
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            name='Existing Phone Lead',
+            phone='+91 9000000032',
+            source=Lead.Source.INSTAGRAM,
+            walkin_date='2026-05-17',
+            created_by=self.staff,
+        )
+        existing_walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Existing Walkin',
+            phone='9000000032',
+            source=WalkIn.Source.DIRECT,
+            visit_date='2026-05-12',
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/leads/{lead.id}/convert-to-walkin/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(WalkIn.objects.count(), 1)
+        lead.refresh_from_db()
+        existing_walkin.refresh_from_db()
+        self.assertEqual(existing_walkin.lead, lead)
+        self.assertEqual(lead.converted_to_type, 'walkin')
+        self.assertEqual(lead.converted_record_id, existing_walkin.id)
 
     def test_add_to_payment_creates_pending_payment_with_default_schedule(self):
         enrollment = Enrollment.objects.create(

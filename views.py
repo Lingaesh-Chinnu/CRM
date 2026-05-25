@@ -1894,6 +1894,196 @@ class LeadViewSet(viewsets.ModelViewSet):
             return LeadDetailSerializer
         return LeadDetailSerializer
 
+    @staticmethod
+    def _lead_source_to_walkin_source(lead_source):
+        walkin_sources = {value for value, _ in WalkIn.Source.choices}
+        if lead_source in walkin_sources:
+            return lead_source
+        if lead_source == Lead.Source.MANUAL:
+            return WalkIn.Source.DIRECT
+        return WalkIn.Source.LEAD_CONVERSION
+
+    @staticmethod
+    def _phone_numbers_match(left, right):
+        left = normalize_phone_number(left)
+        right = normalize_phone_number(right)
+        if not left or not right:
+            return False
+        left_variants = {left, left[2:] if left.startswith('91') and len(left) == 12 else left}
+        right_variants = {right, right[2:] if right.startswith('91') and len(right) == 12 else right}
+        return bool(left_variants & right_variants)
+
+    def _find_existing_walkin_for_lead_conversion(self, lead, phone):
+        existing_walkin = None
+        if lead.converted_to_type == 'walkin' and lead.converted_record_id:
+            existing_walkin = WalkIn.objects.select_for_update().filter(pk=lead.converted_record_id).first()
+        existing_walkin = existing_walkin or WalkIn.objects.select_for_update().filter(lead=lead).first()
+        if existing_walkin:
+            return existing_walkin
+
+        normalized_phone = normalize_phone_number(phone)
+        if not normalized_phone:
+            return None
+        walkins = visible_candidate_queryset(
+            WalkIn.objects.select_for_update().exclude(phone__isnull=True).exclude(phone='')
+        )
+        for walkin in walkins:
+            if self._phone_numbers_match(walkin.phone, normalized_phone):
+                return walkin
+        return None
+
+    def _convert_lead_to_walkin(self, request, lead, raw_data=None):
+        data = (raw_data or {}).copy()
+        data.setdefault('name', lead.name)
+        data.setdefault('phone', lead.phone)
+        data.setdefault('dob', lead.dob)
+        data.setdefault('email', lead.email)
+        data.setdefault('location', lead.location)
+        data.setdefault('pincode', lead.pincode)
+        data.setdefault('course', lead.course_id)
+        data.setdefault('branch', lead.branch_id)
+        data.setdefault('preferred_timing', lead.preferred_timing)
+        data.setdefault('qualification', lead.qualification)
+        data.setdefault('degree', lead.degree)
+        data.setdefault('remarks', lead.remarks)
+        data.setdefault('follow_up_date', lead.next_follow_up_date)
+        data.setdefault('visit_date', data.get('conversion_date') or lead.walkin_date or timezone.localdate())
+        if not request.user.is_super_admin:
+            if not request.user.branch_id:
+                return None, None, Response(
+                    {'detail': 'Your account is not assigned to a branch.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            data['branch'] = request.user.branch_id
+
+        required_fields = ['name', 'phone', 'course', 'branch', 'visit_date']
+        missing = [field for field in required_fields if data.get(field) in (None, '')]
+        if missing:
+            return None, None, Response(
+                {'detail': 'Please complete all mandatory fields before converting to walk-in.', 'missing_fields': missing},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        branch = Branch.objects.filter(pk=data.get('branch'), is_active=True).first()
+        if not branch:
+            return None, None, Response({'branch': 'Please select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        course = Course.objects.filter(pk=data.get('course'), is_active=True).first()
+        if not course:
+            return None, None, Response({'course': 'Please select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        year_of_passing = None
+        if data.get('year_of_passing') not in (None, ''):
+            try:
+                year_of_passing = int(data.get('year_of_passing'))
+            except (TypeError, ValueError):
+                return None, None, Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
+            if year_of_passing < 1900 or year_of_passing > 2100:
+                return None, None, Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                lead = Lead.objects.select_for_update().get(pk=lead.pk)
+                if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
+                    return None, None, Response(
+                        {'detail': 'This record has already been converted.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                name = str(data.get('name') or '').strip()
+                phone = str(data.get('phone') or '').strip()
+                existing_walkin = self._find_existing_walkin_for_lead_conversion(lead, phone)
+                if existing_walkin:
+                    if existing_walkin.lead_id and existing_walkin.lead_id != lead.id:
+                        return None, None, Response(
+                            {'detail': 'A walk-in already exists for this phone number and is linked to another lead.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    walkin_update_fields = []
+                    if existing_walkin.lead_id != lead.id:
+                        existing_walkin.lead = lead
+                        walkin_update_fields.append('lead')
+                    mapped_source = self._lead_source_to_walkin_source(lead.source)
+                    if existing_walkin.source in ('', WalkIn.Source.LEAD_CONVERSION) and existing_walkin.source != mapped_source:
+                        existing_walkin.source = mapped_source
+                        walkin_update_fields.append('source')
+                    if walkin_update_fields:
+                        existing_walkin.save(update_fields=[*walkin_update_fields, 'updated_at'])
+                    walkin = existing_walkin
+                    response_status = status.HTTP_200_OK
+                else:
+                    walkin = WalkIn.objects.create(
+                        lead=lead,
+                        branch=branch,
+                        course=course,
+                        assigned_to=lead.assigned_to,
+                        created_by=request.user,
+                        name=name,
+                        phone=phone,
+                        dob=data.get('dob') or None,
+                        email=str(data.get('email') or '').strip(),
+                        location=str(data.get('location') or '').strip(),
+                        pincode=str(data.get('pincode') or '').strip(),
+                        qualification=data.get('qualification') or '',
+                        degree=data.get('degree') or '',
+                        year_of_passing=year_of_passing,
+                        college_company=data.get('college_company') or '',
+                        preferred_timing=data.get('preferred_timing') or '',
+                        visit_date=data.get('visit_date'),
+                        follow_up_date=data.get('follow_up_date') or None,
+                        remarks=str(data.get('remarks') or '').strip(),
+                        source=self._lead_source_to_walkin_source(lead.source),
+                        demo_class=data.get('demo_class', False),
+                        interested_global_certification=data.get('interested_global_certification', False),
+                    )
+                    lead_follow_ups = FollowUp.objects.filter(
+                        record_type=FollowUp.RecordType.LEAD,
+                        record_id=lead.id,
+                    ).order_by('created_at', 'id')
+                    FollowUp.objects.bulk_create([
+                        FollowUp(
+                            record_type=FollowUp.RecordType.WALKIN,
+                            record_id=walkin.id,
+                            follow_up_date=follow_up.follow_up_date,
+                            next_follow_up_date=follow_up.next_follow_up_date,
+                            remarks=follow_up.remarks,
+                            updated_by=follow_up.updated_by,
+                        )
+                        for follow_up in lead_follow_ups
+                    ])
+                    response_status = status.HTTP_201_CREATED
+
+                lead.name = name
+                lead.phone = phone
+                lead.dob = data.get('dob') or None
+                lead.email = str(data.get('email') or '').strip()
+                lead.location = str(data.get('location') or '').strip()
+                lead.pincode = str(data.get('pincode') or '').strip()
+                lead.preferred_timing = data.get('preferred_timing') or ''
+                lead.qualification = data.get('qualification') or ''
+                lead.degree = data.get('degree') or ''
+                lead.branch = branch
+                lead.course = course
+                lead.walkin_date = data.get('visit_date')
+                lead.next_follow_up_date = None
+                lead.status = Lead.Status.CONVERTED_TO_WALKIN
+                lead.converted_to_type = 'walkin'
+                lead.converted_record_id = walkin.id
+                lead.converted_at = lead.converted_at or timezone.now()
+                lead.converted_by = lead.converted_by or request.user
+                lead.save(update_fields=[
+                    'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification',
+                    'degree', 'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status',
+                    'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
+                ])
+                walkin.refresh_from_db()
+        except IntegrityError:
+            return None, None, Response(
+                {'detail': 'Walk-in conversion failed. No lead changes were saved.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
+        return walkin, lead, response_status
+
     @action(detail=True, methods=['post'], url_path='send-follow-up-whatsapp')
     def send_follow_up_whatsapp(self, request, pk=None):
         _, response = send_candidate_template(
@@ -2012,6 +2202,11 @@ class LeadViewSet(viewsets.ModelViewSet):
         kwargs['partial'] = kwargs.get('partial', False)
         serializer = self.get_serializer(lead, data=data, partial=kwargs['partial'])
         serializer.is_valid(raise_exception=True)
+        if serializer.validated_data.get('status') == Lead.Status.CONVERTED_TO_WALKIN:
+            walkin, converted_lead, result = self._convert_lead_to_walkin(request, lead, data)
+            if isinstance(result, Response):
+                return result
+            return Response(self.get_serializer(converted_lead).data)
         self.perform_update(serializer)
         response = Response(serializer.data)
         lead.refresh_from_db()
@@ -2025,151 +2220,12 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='convert-to-walkin')
     def convert_to_walkin(self, request, pk=None):
         """Create a walk-in entry from this lead after required details are completed."""
-        from crm.models import WalkIn
         from serializers import WalkInDetailSerializer
         lead = self.get_object()
-        data = request.data.copy()
-        data.setdefault('name', lead.name)
-        data.setdefault('phone', lead.phone)
-        data.setdefault('dob', lead.dob)
-        data.setdefault('email', lead.email)
-        data.setdefault('location', lead.location)
-        data.setdefault('pincode', lead.pincode)
-        data.setdefault('course', lead.course_id)
-        data.setdefault('branch', lead.branch_id)
-        data.setdefault('preferred_timing', lead.preferred_timing)
-        data.setdefault('qualification', lead.qualification)
-        data.setdefault('degree', lead.degree)
-        data.setdefault('remarks', lead.remarks)
-        data.setdefault('follow_up_date', lead.next_follow_up_date)
-        data.setdefault('visit_date', lead.walkin_date or timezone.localdate())
-        if not request.user.is_super_admin:
-            if not request.user.branch_id:
-                return Response(
-                    {'detail': 'Your account is not assigned to a branch.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            data['branch'] = request.user.branch_id
-        required_fields = ['name', 'phone', 'course', 'branch', 'visit_date']
-        missing = [field for field in required_fields if data.get(field) in (None, '')]
-        if missing:
-            return Response(
-                {'detail': 'Please complete all mandatory fields.', 'missing_fields': missing},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        branch = Branch.objects.filter(pk=data.get('branch'), is_active=True).first()
-        if not branch:
-            return Response({'branch': 'Please select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
-        course = Course.objects.filter(pk=data.get('course'), is_active=True).first()
-        if not course:
-            return Response({'course': 'Please select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
-        year_of_passing = None
-        if data.get('year_of_passing') not in (None, ''):
-            try:
-                year_of_passing = int(data.get('year_of_passing'))
-            except (TypeError, ValueError):
-                return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
-            if year_of_passing < 1900 or year_of_passing > 2100:
-                return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        source = WalkIn.Source.LEAD_CONVERSION
-        with transaction.atomic():
-            lead = Lead.objects.select_for_update().select_related(
-                'branch', 'course', 'assigned_to',
-            ).get(pk=lead.pk)
-            existing_walkin = None
-            if lead.converted_to_type == 'walkin' and lead.converted_record_id:
-                existing_walkin = WalkIn.objects.select_for_update().filter(pk=lead.converted_record_id).first()
-            existing_walkin = existing_walkin or WalkIn.objects.select_for_update().filter(lead=lead).first()
-            if existing_walkin:
-                if existing_walkin.source != WalkIn.Source.LEAD_CONVERSION:
-                    existing_walkin.source = WalkIn.Source.LEAD_CONVERSION
-                    existing_walkin.save(update_fields=['source', 'updated_at'])
-                if (
-                    lead.status != Lead.Status.CONVERTED_TO_WALKIN
-                    or lead.converted_to_type != 'walkin'
-                    or lead.converted_record_id != existing_walkin.id
-                ):
-                    lead.status = Lead.Status.CONVERTED_TO_WALKIN
-                    lead.converted_to_type = 'walkin'
-                    lead.converted_record_id = existing_walkin.id
-                    lead.converted_at = lead.converted_at or existing_walkin.created_at
-                    lead.converted_by = lead.converted_by or existing_walkin.created_by
-                    lead.save(update_fields=[
-                        'status', 'converted_to_type', 'converted_record_id',
-                        'converted_at', 'converted_by', 'updated_at',
-                    ])
-                clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
-                return Response(WalkInDetailSerializer(existing_walkin).data, status=200)
-            if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
-                return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
-
-            walkin = WalkIn.objects.create(
-                lead=lead,
-                branch=branch,
-                course=course,
-                assigned_to=lead.assigned_to,
-                created_by=request.user,
-                name=str(data.get('name') or '').strip(),
-                phone=str(data.get('phone') or '').strip(),
-                dob=data.get('dob') or None,
-                email=str(data.get('email') or '').strip(),
-                location=str(data.get('location') or '').strip(),
-                pincode=str(data.get('pincode') or '').strip(),
-                qualification=data.get('qualification') or '',
-                degree=data.get('degree') or '',
-                year_of_passing=year_of_passing,
-                college_company=data.get('college_company') or '',
-                preferred_timing=data.get('preferred_timing') or '',
-                visit_date=data.get('visit_date'),
-                follow_up_date=data.get('follow_up_date') or None,
-                remarks=str(data.get('remarks') or '').strip(),
-                source=source,
-                demo_class=data.get('demo_class', False),
-                interested_global_certification=data.get('interested_global_certification', False),
-            )
-            lead_follow_ups = FollowUp.objects.filter(
-                record_type=FollowUp.RecordType.LEAD,
-                record_id=lead.id,
-            ).order_by('created_at', 'id')
-            FollowUp.objects.bulk_create([
-                FollowUp(
-                    record_type=FollowUp.RecordType.WALKIN,
-                    record_id=walkin.id,
-                    follow_up_date=follow_up.follow_up_date,
-                    next_follow_up_date=follow_up.next_follow_up_date,
-                    remarks=follow_up.remarks,
-                    updated_by=follow_up.updated_by,
-                )
-                for follow_up in lead_follow_ups
-            ])
-
-            lead.name = str(data.get('name') or '').strip()
-            lead.phone = str(data.get('phone') or '').strip()
-            lead.dob = data.get('dob') or None
-            lead.email = str(data.get('email') or '').strip()
-            lead.location = str(data.get('location') or '').strip()
-            lead.pincode = str(data.get('pincode') or '').strip()
-            lead.preferred_timing = data.get('preferred_timing') or ''
-            lead.qualification = data.get('qualification') or ''
-            lead.degree = data.get('degree') or ''
-            lead.branch = branch
-            lead.course = course
-            lead.walkin_date = data.get('visit_date')
-            lead.next_follow_up_date = None
-            lead.status = Lead.Status.CONVERTED_TO_WALKIN
-            lead.converted_to_type = 'walkin'
-            lead.converted_record_id = walkin.id
-            lead.converted_at = timezone.now()
-            lead.converted_by = request.user
-            lead.save(update_fields=[
-                'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification', 'degree',
-                'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status', 'converted_to_type',
-                'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
-            ])
-            walkin.refresh_from_db()
-        clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
-        return Response(WalkInDetailSerializer(walkin).data, status=201)
+        walkin, _, result = self._convert_lead_to_walkin(request, lead, request.data)
+        if isinstance(result, Response):
+            return result
+        return Response(WalkInDetailSerializer(walkin).data, status=result)
 
     @action(detail=True, methods=['post'], url_path='convert-to-enrollment')
     def convert_to_enrollment(self, request, pk=None):
