@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 function prettyValue(value, fallback = '') {
@@ -125,9 +126,10 @@ function DetailField({ label, value, editing = false, children }) {
 
 function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
-        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close confirm changes modal" />
+        <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
         <div className="mt-4 space-y-3">
           {changes.map((change) => (
             <p key={change.field} className="text-sm leading-6 text-slate-700">

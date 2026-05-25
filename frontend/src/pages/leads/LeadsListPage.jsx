@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -355,16 +356,7 @@ export default function LeadsListPage() {
 
       {importOpen && (
         <section className="relative rounded-[24px] border border-slate-200 bg-white p-4 pt-14 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-5 sm:pt-14">
-          <button
-            type="button"
-            onClick={() => setImportOpen(false)}
-            aria-label="Close import leads modal"
-            className="absolute right-4 top-4 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ff6b81] text-white shadow-[0_8px_18px_-10px_rgba(255,107,129,0.75)] transition duration-200 ease-out hover:scale-105 hover:bg-[#f25570] hover:shadow-[0_10px_22px_-10px_rgba(242,85,112,0.85)] focus:outline-none focus:ring-4 focus:ring-rose-100 sm:right-5 sm:top-5"
-          >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <path d="M5.5 5.5L14.5 14.5M14.5 5.5L5.5 14.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-          </button>
+          <ModalCloseButton onClick={() => setImportOpen(false)} label="Close import leads modal" />
           <form onSubmit={submitImport} className="grid gap-3 md:grid-cols-[auto_minmax(0,1fr)] md:items-center xl:grid-cols-[auto_minmax(0,1fr)_auto]">
             <button
               type="button"

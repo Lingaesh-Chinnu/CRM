@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ModalCloseButton from './ModalCloseButton'
 
 function formatDate(value) {
   if (!value) return ''
@@ -165,21 +166,15 @@ export default function FollowUpHistory({ followUps = [], onSave, readOnly = fal
       )}
 
       {historyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-8 backdrop-blur-sm">
-          <div className="grid w-full max-w-5xl gap-4 rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)] lg:grid-cols-[360px_minmax(0,1fr)]">
+        <div onClick={() => setHistoryOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-8 backdrop-blur-sm">
+          <div onClick={(event) => event.stopPropagation()} className="relative grid w-full max-w-5xl gap-4 rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)] lg:grid-cols-[360px_minmax(0,1fr)]">
+            <ModalCloseButton onClick={() => setHistoryOpen(false)} label="Close follow-up history" />
             <div>
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="pr-10">
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">All Follow-ups</p>
                   <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">History</h2>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setHistoryOpen(false)}
-                  className="rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-                >
-                  Close
-                </button>
               </div>
               <div className="mt-4 max-h-[60vh] space-y-2 overflow-y-auto pr-1">
                 {sortedFollowUps.map((entry) => (

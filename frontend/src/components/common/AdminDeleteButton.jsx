@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import ModalCloseButton from './ModalCloseButton'
 
 export default function AdminDeleteButton({
   label = 'record',
@@ -46,9 +47,10 @@ export default function AdminDeleteButton({
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-md rounded-[24px] bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-black tracking-tight text-slate-950">Delete {label}</h3>
+        <div onClick={deleting ? undefined : () => setOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-[24px] bg-white p-6 shadow-2xl">
+            <ModalCloseButton onClick={() => setOpen(false)} disabled={deleting} label={`Close delete ${label} modal`} />
+            <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Delete {label}</h3>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Are you sure you want to permanently delete this record?
             </p>

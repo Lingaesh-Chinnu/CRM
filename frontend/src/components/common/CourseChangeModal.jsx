@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import ModalCloseButton from './ModalCloseButton'
 
 function money(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
@@ -73,18 +74,16 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6">
-      <div className="w-full max-w-2xl rounded-[24px] bg-white p-6 shadow-2xl">
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6">
+      <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-2xl rounded-[24px] bg-white p-6 shadow-2xl">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close course change modal" />
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+          <div className="pr-10">
             <h3 className="text-xl font-black tracking-tight text-slate-950">Change Course</h3>
             <p className="mt-1 text-sm text-slate-500">
               Changing course will recalculate remaining fees and installments. Existing payments will be preserved.
             </p>
           </div>
-          <button type="button" onClick={onCancel} disabled={saving} className="w-fit rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60">
-            Close
-          </button>
         </div>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2">

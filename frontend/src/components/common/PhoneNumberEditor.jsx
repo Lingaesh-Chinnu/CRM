@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../services/api'
+import ModalCloseButton from './ModalCloseButton'
 
 function digitsOnly(value) {
   return String(value || '').replace(/\D/g, '')
@@ -103,9 +104,10 @@ export default function PhoneNumberEditor({ recordType, recordId, phone, onSaved
       {message && <p className="text-xs font-semibold text-emerald-700">{message}</p>}
 
       {confirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-          <div className="w-full max-w-md rounded-[24px] bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm phone change</h3>
+        <div onClick={saving ? undefined : () => setConfirmOpen(false)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-[24px] bg-white p-6 shadow-2xl">
+            <ModalCloseButton onClick={() => setConfirmOpen(false)} disabled={saving} label="Close phone change confirmation" />
+            <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Confirm phone change</h3>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Are you sure you want to change the phone number from {currentPhone} to {pendingPhone}?
             </p>

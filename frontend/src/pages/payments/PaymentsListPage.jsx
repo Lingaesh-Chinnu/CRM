@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
@@ -620,19 +621,17 @@ export default function PaymentsListPage() {
       </section>
 
       {reasonRequest && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4 py-6">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-[24px] bg-white shadow-2xl">
+        <div onClick={closeReasonModal} className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+          <div onClick={(event) => event.stopPropagation()} className="relative max-h-[90vh] w-full max-w-2xl overflow-auto rounded-[24px] bg-white shadow-2xl">
+            <ModalCloseButton onClick={closeReasonModal} label="Close payment reason request" />
             <div className="border-b border-slate-200 px-6 py-5">
               <div className="flex items-start justify-between gap-4">
-                <div>
+                <div className="pr-10">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment Reason Request</p>
                   <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
                     {reasonMode === 'respond' ? 'Respond to Admin' : 'Review Staff Response'}
                   </h3>
                 </div>
-                <button type="button" onClick={closeReasonModal} className="rounded-full border border-slate-200 px-3 py-1 text-sm font-bold text-slate-600">
-                  Close
-                </button>
               </div>
             </div>
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import brandLogo from '../../assets/brand-logo.png'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 const REDIRECT_URL = 'https://www.indrainstitute.com'
 
@@ -150,26 +151,7 @@ export default function PublicLeadForm() {
             }
           `}</style>
 
-          <button
-            type="button"
-            onClick={requestClose}
-            className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-800 sm:right-4 sm:top-4 sm:h-10 sm:w-10"
-            aria-label="Close enquiry form"
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
+          <ModalCloseButton onClick={requestClose} label="Close enquiry form" />
 
           <div className="pr-10 sm:pr-12">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center">

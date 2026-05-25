@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -188,9 +189,10 @@ function DetailField({ label, value, editing = false, children }) {
 
 function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
-        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close confirm changes modal" />
+        <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
         <div className="mt-4 space-y-3">
           {changes.map((change) => (
             <p key={change.field} className="text-sm leading-6 text-slate-700">
@@ -350,10 +352,11 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
-      <form onSubmit={submit} className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)]">
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
+      <form onClick={(event) => event.stopPropagation()} onSubmit={submit} className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-[0_30px_90px_-35px_rgba(15,23,42,0.65)]">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close lead conversion modal" />
         <div className="border-b border-slate-200 px-5 py-4 sm:px-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Convert Lead</p>
+          <p className="pr-10 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Convert Lead</p>
           <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Convert to {label}</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
             Fill the available details. Optional fields can be completed later from the Walk-in page.

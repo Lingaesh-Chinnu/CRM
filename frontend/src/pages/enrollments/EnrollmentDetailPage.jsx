@@ -7,6 +7,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -88,9 +89,10 @@ function DetailCard({ label, value }) {
 
 function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
-      <div className="w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
-        <h3 className="text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close confirm changes modal" />
+        <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Confirm changes</h3>
         <div className="mt-4 space-y-3">
           {changes.map((change) => (
             <p key={change.field} className="text-sm leading-6 text-slate-700">

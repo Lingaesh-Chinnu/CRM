@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
+import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 const monthOptions = [
   { value: 1, label: 'January' },
@@ -265,9 +266,10 @@ export default function TargetsPage() {
       </section>
 
       {targetToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl">
-            <h3 className="text-lg font-black tracking-tight text-slate-950">Delete target record</h3>
+        <div onClick={deleting ? undefined : () => setTargetToDelete(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4">
+          <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl">
+            <ModalCloseButton onClick={() => setTargetToDelete(null)} disabled={deleting} label="Close delete target modal" />
+            <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Delete target record</h3>
             <p className="mt-3 text-sm leading-6 text-slate-600">
               Are you sure you want to delete this target record? You can create a new target after deleting it.
             </p>
