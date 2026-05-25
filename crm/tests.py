@@ -266,6 +266,66 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(lead.remarks, 'Joined')
         self.assertIsNone(lead.next_follow_up_date)
 
+    def test_lead_to_walkin_creates_linked_walkin_with_copied_details(self):
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            name='Walkin Conversion Lead',
+            phone='9000000030',
+            email='walkin-lead@example.com',
+            dob='2000-01-01',
+            location='Coimbatore',
+            pincode='641001',
+            qualification=Lead.Qualification.GRADUATE,
+            degree='BSc',
+            preferred_timing=Lead.PreferredTiming.WEEKDAY_MORNING,
+            source=Lead.Source.WHATSAPP,
+            walkin_date='2026-05-15',
+            next_follow_up_date='2026-05-20',
+            remarks='Will visit branch',
+            created_by=self.staff,
+        )
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=lead.id,
+            follow_up_date='2026-05-10',
+            next_follow_up_date='2026-05-20',
+            remarks='Bring documents',
+            updated_by=self.staff,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/leads/{lead.id}/convert-to-walkin/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead.refresh_from_db()
+        walkin = WalkIn.objects.get(lead=lead)
+        self.assertEqual(lead.status, Lead.Status.CONVERTED)
+        self.assertEqual(lead.converted_to_type, 'walkin')
+        self.assertEqual(lead.converted_record_id, walkin.id)
+        self.assertIsNone(lead.next_follow_up_date)
+        self.assertEqual(walkin.name, lead.name)
+        self.assertEqual(walkin.phone, lead.phone)
+        self.assertEqual(walkin.email, lead.email)
+        self.assertEqual(walkin.dob.isoformat(), '2000-01-01')
+        self.assertEqual(walkin.course, self.course)
+        self.assertEqual(walkin.branch, self.branch)
+        self.assertEqual(walkin.assigned_to, self.staff)
+        self.assertEqual(walkin.source, WalkIn.Source.WHATSAPP)
+        self.assertEqual(walkin.remarks, 'Will visit branch')
+        self.assertEqual(walkin.follow_up_date.isoformat(), '2026-05-20')
+        self.assertTrue(FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            remarks='Bring documents',
+            next_follow_up_date='2026-05-20',
+        ).exists())
+
+        detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['id'], walkin.id)
+
     def test_add_to_payment_creates_pending_payment_with_default_schedule(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,

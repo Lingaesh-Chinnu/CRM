@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import StatusFilterChips from '../../components/common/StatusFilterChips'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -20,6 +21,7 @@ function formatDate(value) {
 }
 
 function getStatusLabel(value) {
+  if (value === 'pending' || value === 'pending_enrollment' || value === 'pending_rules_form') return 'Pending'
   if (value === 'enrolled' || value === 'active') return 'Active'
   if (value === 'completed') return 'Completed'
   if (value === 'on_hold') return 'Hold'
@@ -30,6 +32,7 @@ function getStatusLabel(value) {
 }
 
 function statusSelectValue(value) {
+  if (value === 'pending_enrollment' || value === 'pending_rules_form') return 'pending'
   return value === 'enrolled' ? 'active' : value || 'active'
 }
 
@@ -130,6 +133,14 @@ export default function EnrollmentsListPage() {
     }
   }
 
+  const statusCount = (status) => rows.filter((row) => statusSelectValue(row.status) === status).length
+  const statusSummary = [
+    { label: 'Total', value: '', count: rows.length },
+    { label: 'Active', value: 'active', count: statusCount('active') },
+    { label: 'Pending', value: 'pending', count: statusCount('pending') },
+    { label: 'Completed', value: 'completed', count: statusCount('completed') },
+  ]
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -193,6 +204,7 @@ export default function EnrollmentsListPage() {
             >
               <option value="">All status</option>
               <option value="active">Active</option>
+              <option value="pending">Pending</option>
               <option value="completed">Completed</option>
               <option value="on_hold">Hold</option>
               <option value="inactive">Inactive</option>
@@ -226,9 +238,12 @@ export default function EnrollmentsListPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Students</p>
             <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Student list with course details</h2>
           </div>
-          <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            {rows.length} Students
-          </div>
+          <StatusFilterChips
+            items={statusSummary}
+            value={filters.status}
+            onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
+            className="justify-end"
+          />
         </div>
 
         {loading ? (
@@ -288,6 +303,7 @@ export default function EnrollmentsListPage() {
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
                   >
                     <option value="active">Active</option>
+                    <option value="pending">Pending</option>
                     <option value="completed">Completed</option>
                     <option value="on_hold">Hold</option>
                     <option value="inactive">Inactive</option>
@@ -346,6 +362,7 @@ export default function EnrollmentsListPage() {
                         className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100 disabled:opacity-60"
                       >
                         <option value="active">Active</option>
+                        <option value="pending">Pending</option>
                         <option value="completed">Completed</option>
                         <option value="on_hold">Hold</option>
                         <option value="inactive">Inactive</option>

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import StatusFilterChips from '../../components/common/StatusFilterChips'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -32,6 +33,10 @@ function studentStatusLabel(value) {
   return 'Active'
 }
 
+function statusSelectValue(value) {
+  return value === 'enrolled' ? 'active' : value || 'active'
+}
+
 export default function StudentsListPage() {
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
@@ -39,6 +44,7 @@ export default function StudentsListPage() {
   const [filters, setFilters] = useState({
     branch: '',
     course: '',
+    status: '',
     search: '',
   })
   const [loading, setLoading] = useState(true)
@@ -52,7 +58,7 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
-  }, [filters.branch, filters.course, filters.search, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, filters.search, isSuperAdmin])
 
   const loadFilterOptions = async () => {
     try {
@@ -80,6 +86,9 @@ export default function StudentsListPage() {
       if (filters.course) {
         params.course = filters.course
       }
+      if (filters.status) {
+        params.status = filters.status
+      }
       if (filters.search.trim()) {
         params.search = filters.search.trim()
       }
@@ -94,6 +103,14 @@ export default function StudentsListPage() {
       setLoading(false)
     }
   }
+
+  const statusCount = (status) => rows.filter((row) => statusSelectValue(row.status) === status).length
+  const statusSummary = [
+    { label: 'Total', value: '', count: rows.length },
+    { label: 'Active', value: 'active', count: statusCount('active') },
+    { label: 'Completed', value: 'completed', count: statusCount('completed') },
+    { label: 'Hold', value: 'on_hold', count: statusCount('on_hold') },
+  ]
 
   return (
     <div className="space-y-6">
@@ -147,6 +164,22 @@ export default function StudentsListPage() {
             </select>
           </label>
 
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Status
+            </span>
+            <select
+              value={filters.status}
+              onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              <option value="">All status</option>
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="on_hold">Hold</option>
+            </select>
+          </label>
+
           <label className="min-w-[260px] flex-[1.4]">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Search
@@ -172,9 +205,12 @@ export default function StudentsListPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Directory</p>
             <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Student details</h2>
           </div>
-          <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
-            {rows.length} Students
-          </div>
+          <StatusFilterChips
+            items={statusSummary}
+            value={filters.status}
+            onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
+            className="justify-end"
+          />
         </div>
 
         {loading ? (

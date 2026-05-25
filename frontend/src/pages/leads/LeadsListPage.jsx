@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import StatusFilterChips from '../../components/common/StatusFilterChips'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -130,6 +131,36 @@ export default function LeadsListPage() {
     })
   }, [filters, leads])
 
+  const statusSummaryBaseLeads = useMemo(() => {
+    const nameQuery = filters.name.trim().toLowerCase()
+    const phoneQuery = filters.phone.trim()
+    const today = new Date()
+    const todayValue = isoDate(today)
+    const tomorrowValue = isoDate(addDays(today, 1))
+    const nextSevenValue = isoDate(addDays(today, 7))
+    return leads.filter((lead) => {
+      const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
+      const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
+      const leadSource = String(lead.source || '').toLowerCase()
+      const filterSource = String(filters.source || '').toLowerCase()
+      const matchesSource = !filterSource
+        || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
+      const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
+      const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
+      let matchesFollowUp = true
+      const followUpDate = lead.next_follow_up_date || ''
+      if (filters.followUp === 'today') {
+        matchesFollowUp = followUpDate === todayValue
+      } else if (filters.followUp === 'tomorrow') {
+        matchesFollowUp = followUpDate === tomorrowValue
+      } else if (filters.followUp === 'next7') {
+        matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
+      }
+
+      return matchesName && matchesPhone && matchesSource && matchesFollowUp && matchesFollowUpBy
+    })
+  }, [filters, leads])
+
   const hasFilters = Boolean(
     filters.name
     || filters.phone
@@ -142,11 +173,11 @@ export default function LeadsListPage() {
     || filters.createdTo
   )
   const leadSummary = [
-    ['Total', filteredLeads.length],
-    ['New', statusCount(filteredLeads, 'new')],
-    ['Follow Up', statusCount(filteredLeads, 'follow_up')],
-    ['Will Walk-in', statusCount(filteredLeads, 'will_walk_in')],
-    ['Converted', statusCount(filteredLeads, 'converted')],
+    { label: 'Total', value: '', count: statusSummaryBaseLeads.length },
+    { label: 'New', value: 'new', count: statusCount(statusSummaryBaseLeads, 'new') },
+    { label: 'Follow Up', value: 'follow_up', count: statusCount(statusSummaryBaseLeads, 'follow_up') },
+    { label: 'Will Walk-in', value: 'will_walk_in', count: statusCount(statusSummaryBaseLeads, 'will_walk_in') },
+    { label: 'Converted', value: 'converted', count: statusCount(statusSummaryBaseLeads, 'converted') },
   ]
 
   useEffect(() => {
@@ -511,13 +542,12 @@ export default function LeadsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        <div className="flex flex-wrap gap-2 border-b border-slate-200 px-6 py-4 text-xs font-bold text-slate-600 sm:px-8">
-          {leadSummary.map(([label, value]) => (
-            <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-              {label} {value}
-            </span>
-          ))}
-        </div>
+        <StatusFilterChips
+          items={leadSummary}
+          value={filters.status}
+          onChange={(value) => updateFilter('status', value)}
+          className="border-b border-slate-200 px-6 py-4 sm:px-8"
+        />
         {loadMessage && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
             {loadMessage}

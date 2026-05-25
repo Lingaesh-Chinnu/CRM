@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import StatusFilterChips from '../../components/common/StatusFilterChips'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
@@ -100,7 +101,7 @@ export default function PaymentsListPage() {
   const [reasonMode, setReasonMode] = useState('')
   const [reasonForm, setReasonForm] = useState({ staff_response: '', promised_payment_date: '' })
   const [reasonSubmitting, setReasonSubmitting] = useState(false)
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const options = useMemo(() => monthOptions(), [])
   const [month, setMonth] = useState(searchParams.get('month') || options[0]?.value || monthValue(new Date()))
   const [branch, setBranch] = useState(searchParams.get('branch') || '')
@@ -110,6 +111,17 @@ export default function PaymentsListPage() {
   const duePaymentsFilter = statusFilter === 'due' || statusFilter === 'pending_today'
   const weeklyPendingFilter = statusFilter === 'weekly_pending'
   const reasonRequestId = searchParams.get('reason_request') || ''
+  const todayValue = new Date().toISOString().slice(0, 10)
+  const overdueCount = rows.filter((row) => {
+    const nextPending = nextPendingInstallment(row)
+    return ['unpaid', 'partial'].includes(row.status) && nextPending?.due_date && nextPending.due_date < todayValue
+  }).length
+  const paymentSummary = [
+    { label: 'Total', value: '', count: rows.length },
+    { label: 'Paid', value: 'paid', count: rows.filter((row) => row.status === 'paid').length },
+    { label: 'Partial', value: 'partial', count: rows.filter((row) => row.status === 'partial').length },
+    { label: 'Overdue', value: 'due', count: overdueCount },
+  ]
 
   useEffect(() => {
     if (navigationMessage) {
@@ -177,6 +189,16 @@ export default function PaymentsListPage() {
   const clearStatusFilter = () => {
     setBranch('')
     navigate('/payments')
+  }
+
+  const applyStatusFilter = (value) => {
+    const nextParams = new URLSearchParams()
+    if (month) nextParams.set('month', month)
+    if (isSuperAdmin && branch) nextParams.set('branch', branch)
+    if (search.trim()) nextParams.set('search', search.trim())
+    if (dueThisWeek && value) nextParams.set('due_this_week', dueThisWeek)
+    if (value) nextParams.set('status', value)
+    setSearchParams(nextParams)
   }
 
   const closeReasonModal = () => {
@@ -486,9 +508,17 @@ export default function PaymentsListPage() {
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-slate-200 px-5 py-4">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">
-            {weeklyPendingFilter ? 'Weekly Pending Payments' : duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment tracking'}
-          </h2>
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <h2 className="text-xl font-black tracking-tight text-slate-950">
+              {weeklyPendingFilter ? 'Weekly Pending Payments' : duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment tracking'}
+            </h2>
+            <StatusFilterChips
+              items={paymentSummary}
+              value={statusFilter}
+              onChange={applyStatusFilter}
+              className="xl:justify-end"
+            />
+          </div>
         </div>
 
         {loading ? (

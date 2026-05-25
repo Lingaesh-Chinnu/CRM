@@ -4,13 +4,15 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import PhoneNumberEditor from '../../components/common/PhoneNumberEditor'
+import StatusFilterChips from '../../components/common/StatusFilterChips'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
 const statusOptions = [
   { value: 'new', label: 'New' },
   { value: 'follow_up', label: 'Follow Up' },
-  { value: 'converted', label: 'Enrolled' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'converted', label: 'Converted' },
   { value: 'not_interested', label: 'Not Interested' },
   { value: 'transferred', label: 'Transferred' },
 ]
@@ -27,7 +29,7 @@ const emptyFilters = {
 }
 
 function statusLabel(walkin) {
-  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Enrolled'
+  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Converted'
   const status = walkin?.status
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
@@ -71,29 +73,32 @@ function formatDate(value) {
   })
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved }) {
+function todayIso() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function WalkInSection({ title, walkins, count, emptyMessage, onPhoneSaved, activeFilter, onStatusChange }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
+  const todayWalkInCount = walkins.filter((walkin) => walkin.visit_date === todayIso()).length
   const summary = [
-    ['Total', count],
-    ['Enrolled', statusCount('converted')],
-    ['Follow Up', statusCount('follow_up')],
-    ['Interested', statusCount('new')],
-    ['Not Interested', statusCount('not_interested')],
+    { label: 'Total', value: '', count },
+    { label: 'Today Walk-in', value: '__today_walkin', count: todayWalkInCount },
+    { label: 'Demo Attended', value: 'demo_attended', count: statusCount('demo_attended') },
+    { label: 'Converted', value: 'converted', count: statusCount('converted') },
   ]
 
   return (
     <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
       <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 xl:flex-row xl:items-center xl:justify-between sm:px-8">
         <h2 className="text-xl font-black tracking-tight text-slate-950">{title}</h2>
-        <div className="flex flex-wrap gap-2 text-xs font-bold text-slate-600 xl:justify-end">
-          {summary.map(([label, value]) => (
-            <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-              {label} {value}
-            </span>
-          ))}
-        </div>
+        <StatusFilterChips
+          items={summary}
+          value={activeFilter}
+          onChange={onStatusChange}
+          className="xl:justify-end"
+        />
       </div>
 
       {walkins.length === 0 ? (
@@ -251,6 +256,26 @@ export default function WalkInsListPage() {
     setOtherWalkins(updateRows)
   }
 
+  const applyStatusFilter = (value) => {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('visit_date_from')
+    nextParams.delete('visit_date_to')
+    if (value === '__today_walkin') {
+      const today = todayIso()
+      nextParams.delete('status')
+      nextParams.set('visit_date_from', today)
+      nextParams.set('visit_date_to', today)
+    } else if (value) {
+      nextParams.set('status', value)
+    } else {
+      nextParams.delete('status')
+    }
+    setSearchParams(nextParams)
+  }
+  const activeSmartFilter = visitDateFrom === todayIso() && visitDateTo === todayIso()
+    ? '__today_walkin'
+    : appliedFilters.status
+
   const submitFilters = (event) => {
     event.preventDefault()
     const nextParams = new URLSearchParams()
@@ -367,6 +392,8 @@ export default function WalkInsListPage() {
         count={currentMonthCount}
         emptyMessage="No current month walk-ins found."
         onPhoneSaved={updateWalkInPhone}
+        activeFilter={activeSmartFilter}
+        onStatusChange={applyStatusFilter}
       />
 
       <div className="pt-2">
@@ -376,6 +403,8 @@ export default function WalkInsListPage() {
           count={otherWalkinsCount}
           emptyMessage="No older walk-ins found."
           onPhoneSaved={updateWalkInPhone}
+          activeFilter={activeSmartFilter}
+          onStatusChange={applyStatusFilter}
         />
       </div>
     </div>

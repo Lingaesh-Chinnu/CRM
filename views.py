@@ -2024,32 +2024,9 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='convert-to-walkin')
     def convert_to_walkin(self, request, pk=None):
         """Create a walk-in entry from this lead after required details are completed."""
-        lead = self.get_object()
         from crm.models import WalkIn
         from serializers import WalkInDetailSerializer
-        existing_walkin = None
-        if lead.converted_to_type == 'walkin' and lead.converted_record_id:
-            existing_walkin = WalkIn.objects.filter(pk=lead.converted_record_id).first()
-        existing_walkin = existing_walkin or WalkIn.objects.filter(lead=lead).first()
-        if existing_walkin:
-            if (
-                lead.status != Lead.Status.CONVERTED
-                or lead.converted_to_type != 'walkin'
-                or lead.converted_record_id != existing_walkin.id
-            ):
-                lead.status = Lead.Status.CONVERTED
-                lead.converted_to_type = 'walkin'
-                lead.converted_record_id = existing_walkin.id
-                lead.converted_at = lead.converted_at or existing_walkin.created_at
-                lead.converted_by = lead.converted_by or existing_walkin.created_by
-                lead.save(update_fields=[
-                    'status', 'converted_to_type', 'converted_record_id',
-                    'converted_at', 'converted_by', 'updated_at',
-                ])
-            clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
-            return Response(WalkInDetailSerializer(existing_walkin).data, status=200)
-        if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
-            return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
+        lead = self.get_object()
         data = request.data.copy()
         data.setdefault('name', lead.name)
         data.setdefault('phone', lead.phone)
@@ -2062,6 +2039,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('preferred_timing', lead.preferred_timing)
         data.setdefault('qualification', lead.qualification)
         data.setdefault('degree', lead.degree)
+        data.setdefault('remarks', lead.remarks)
+        data.setdefault('follow_up_date', lead.next_follow_up_date)
         data.setdefault('visit_date', lead.walkin_date or timezone.localdate())
         if not request.user.is_super_admin:
             if not request.user.branch_id:
@@ -2095,6 +2074,33 @@ class LeadViewSet(viewsets.ModelViewSet):
         walkin_source_values = {choice[0] for choice in WalkIn.Source.choices}
         source = lead.source if lead.source in walkin_source_values else WalkIn.Source.GOOGLE
         with transaction.atomic():
+            lead = Lead.objects.select_for_update().select_related(
+                'branch', 'course', 'assigned_to',
+            ).get(pk=lead.pk)
+            existing_walkin = None
+            if lead.converted_to_type == 'walkin' and lead.converted_record_id:
+                existing_walkin = WalkIn.objects.select_for_update().filter(pk=lead.converted_record_id).first()
+            existing_walkin = existing_walkin or WalkIn.objects.select_for_update().filter(lead=lead).first()
+            if existing_walkin:
+                if (
+                    lead.status != Lead.Status.CONVERTED
+                    or lead.converted_to_type != 'walkin'
+                    or lead.converted_record_id != existing_walkin.id
+                ):
+                    lead.status = Lead.Status.CONVERTED
+                    lead.converted_to_type = 'walkin'
+                    lead.converted_record_id = existing_walkin.id
+                    lead.converted_at = lead.converted_at or existing_walkin.created_at
+                    lead.converted_by = lead.converted_by or existing_walkin.created_by
+                    lead.save(update_fields=[
+                        'status', 'converted_to_type', 'converted_record_id',
+                        'converted_at', 'converted_by', 'updated_at',
+                    ])
+                clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
+                return Response(WalkInDetailSerializer(existing_walkin).data, status=200)
+            if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
+                return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
+
             walkin = WalkIn.objects.create(
                 lead=lead,
                 branch=branch,
@@ -2113,10 +2119,27 @@ class LeadViewSet(viewsets.ModelViewSet):
                 college_company=data.get('college_company') or '',
                 preferred_timing=data.get('preferred_timing') or '',
                 visit_date=data.get('visit_date'),
+                follow_up_date=data.get('follow_up_date') or None,
+                remarks=str(data.get('remarks') or '').strip(),
                 source=source,
                 demo_class=data.get('demo_class', False),
                 interested_global_certification=data.get('interested_global_certification', False),
             )
+            lead_follow_ups = FollowUp.objects.filter(
+                record_type=FollowUp.RecordType.LEAD,
+                record_id=lead.id,
+            ).order_by('created_at', 'id')
+            FollowUp.objects.bulk_create([
+                FollowUp(
+                    record_type=FollowUp.RecordType.WALKIN,
+                    record_id=walkin.id,
+                    follow_up_date=follow_up.follow_up_date,
+                    next_follow_up_date=follow_up.next_follow_up_date,
+                    remarks=follow_up.remarks,
+                    updated_by=follow_up.updated_by,
+                )
+                for follow_up in lead_follow_ups
+            ])
 
             lead.name = str(data.get('name') or '').strip()
             lead.phone = str(data.get('phone') or '').strip()
@@ -2130,6 +2153,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.branch = branch
             lead.course = course
             lead.walkin_date = data.get('visit_date')
+            lead.next_follow_up_date = None
             lead.status = Lead.Status.CONVERTED
             lead.converted_to_type = 'walkin'
             lead.converted_record_id = walkin.id
@@ -2137,7 +2161,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.converted_by = request.user
             lead.save(update_fields=[
                 'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification', 'degree',
-                'branch', 'course', 'walkin_date', 'status', 'converted_to_type',
+                'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status', 'converted_to_type',
                 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
             ])
             walkin.refresh_from_db()
