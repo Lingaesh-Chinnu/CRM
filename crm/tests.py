@@ -301,7 +301,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         lead.refresh_from_db()
         walkin = WalkIn.objects.get(lead=lead)
-        self.assertEqual(lead.status, Lead.Status.CONVERTED)
+        self.assertEqual(lead.status, Lead.Status.CONVERTED_TO_WALKIN)
         self.assertEqual(lead.converted_to_type, 'walkin')
         self.assertEqual(lead.converted_record_id, walkin.id)
         self.assertIsNone(lead.next_follow_up_date)
@@ -312,7 +312,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.course, self.course)
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.assigned_to, self.staff)
-        self.assertEqual(walkin.source, WalkIn.Source.WHATSAPP)
+        self.assertEqual(walkin.source, WalkIn.Source.LEAD_CONVERSION)
         self.assertEqual(walkin.remarks, 'Will visit branch')
         self.assertEqual(walkin.follow_up_date.isoformat(), '2026-05-20')
         self.assertTrue(FollowUp.objects.filter(

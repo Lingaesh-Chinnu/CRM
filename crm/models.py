@@ -320,6 +320,7 @@ class Lead(TimeStampedModel):
         ENROLLED                         = 'enrolled',                         'Enrolled'
         DROPPED                          = 'dropped',                          'Dropped'
         CONVERTED                        = 'converted',                        'Converted'
+        CONVERTED_TO_WALKIN              = 'converted_to_walkin',              'Converted to Walk-in'
         LOST                             = 'lost',                             'Lost'
 
     class Source(models.TextChoices):
@@ -511,6 +512,7 @@ class WalkIn(TimeStampedModel):
         FACEBOOK          = 'facebook',          'Facebook'
         WHATSAPP          = 'whatsapp',          'WhatsApp'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'
+        LEAD_CONVERSION   = 'lead_conversion',   'Lead Conversion'
 
     class WalkInBy(models.TextChoices):
         LINCY_SCANIA = 'lincy_scania', 'Mrs. Lincy Scania'

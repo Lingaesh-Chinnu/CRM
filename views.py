@@ -840,6 +840,7 @@ LEAD_CLOSED_FOLLOW_UP_STATUSES = [
     Lead.Status.WALK_IN,
     Lead.Status.ENROLLED,
     Lead.Status.CONVERTED,
+    Lead.Status.CONVERTED_TO_WALKIN,
     Lead.Status.NOT_INTERESTED,
     Lead.Status.JOINED_OTHER_INSTITUTE,
     Lead.Status.DROPPED,
@@ -2071,8 +2072,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             if year_of_passing < 1900 or year_of_passing > 2100:
                 return Response({'year_of_passing': 'Enter a valid passed out year.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        walkin_source_values = {choice[0] for choice in WalkIn.Source.choices}
-        source = lead.source if lead.source in walkin_source_values else WalkIn.Source.GOOGLE
+        source = WalkIn.Source.LEAD_CONVERSION
         with transaction.atomic():
             lead = Lead.objects.select_for_update().select_related(
                 'branch', 'course', 'assigned_to',
@@ -2082,12 +2082,15 @@ class LeadViewSet(viewsets.ModelViewSet):
                 existing_walkin = WalkIn.objects.select_for_update().filter(pk=lead.converted_record_id).first()
             existing_walkin = existing_walkin or WalkIn.objects.select_for_update().filter(lead=lead).first()
             if existing_walkin:
+                if existing_walkin.source != WalkIn.Source.LEAD_CONVERSION:
+                    existing_walkin.source = WalkIn.Source.LEAD_CONVERSION
+                    existing_walkin.save(update_fields=['source', 'updated_at'])
                 if (
-                    lead.status != Lead.Status.CONVERTED
+                    lead.status != Lead.Status.CONVERTED_TO_WALKIN
                     or lead.converted_to_type != 'walkin'
                     or lead.converted_record_id != existing_walkin.id
                 ):
-                    lead.status = Lead.Status.CONVERTED
+                    lead.status = Lead.Status.CONVERTED_TO_WALKIN
                     lead.converted_to_type = 'walkin'
                     lead.converted_record_id = existing_walkin.id
                     lead.converted_at = lead.converted_at or existing_walkin.created_at
@@ -2154,7 +2157,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             lead.course = course
             lead.walkin_date = data.get('visit_date')
             lead.next_follow_up_date = None
-            lead.status = Lead.Status.CONVERTED
+            lead.status = Lead.Status.CONVERTED_TO_WALKIN
             lead.converted_to_type = 'walkin'
             lead.converted_record_id = walkin.id
             lead.converted_at = timezone.now()
@@ -6405,7 +6408,7 @@ def calculate_user_monthly_rating(user, year=None, month=None):
         created_by=user,
         next_follow_up_date__gte=start,
         next_follow_up_date__lt=effective_end,
-    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
+    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
     if missed_lead_followups:
         deduct('lead_followups', 10, 'Lead follow-up due date was missed.')
     else:
@@ -6801,7 +6804,7 @@ class ConversionFunnelReportView(APIView):
             walkin_qs = walkin_qs.filter(branch_id=branch_id)
             enroll_qs = enroll_qs.filter(branch_id=branch_id)
         total_leads = lead_qs.count()
-        contacted = lead_qs.filter(status__in=[Lead.Status.CONTACTED, Lead.Status.INTERESTED, Lead.Status.FOLLOW_UP, Lead.Status.WALK_IN, Lead.Status.ENROLLED, Lead.Status.CONVERTED]).count()
+        contacted = lead_qs.filter(status__in=[Lead.Status.CONTACTED, Lead.Status.INTERESTED, Lead.Status.FOLLOW_UP, Lead.Status.WALK_IN, Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN]).count()
         walkins = walkin_qs.count()
         enrollments = enroll_qs.count()
 
@@ -6833,7 +6836,7 @@ class BranchPerformanceComparisonReportView(APIView):
             enrollments = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(branch=branch)), year, month)
             payments = visible_payment_queryset(Payment.objects.filter(enrollment__branch=branch))
             target = BranchTarget.objects.filter(branch=branch, year=year, month=month).first()
-            missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.DROPPED, Lead.Status.LOST]).count()
+            missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.DROPPED, Lead.Status.LOST]).count()
             missed_walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, follow_up_date__lt=today)).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).count()
             completed_followups = FollowUp.objects.filter(created_at__year=year, created_at__month=month).filter(
                 Q(record_type=FollowUp.RecordType.LEAD, record_id__in=leads.values('id')) |

@@ -160,7 +160,7 @@ function formatDateTime(value) {
 function conversionStatusLabel(lead) {
   if (lead?.converted_to_type === 'walkin') return 'Converted to Walk-in'
   if (lead?.converted_to_type === 'enrollment') return 'Converted to Enrollment'
-  if (lead?.status === 'walk_in') return 'Converted to Walk-in'
+  if (lead?.status === 'walk_in' || lead?.status === 'converted_to_walkin') return 'Converted to Walk-in'
   if (lead?.status === 'enrolled' || lead?.status === 'converted') return 'Converted to Enrollment'
   return statusLabel(lead?.status)
 }
@@ -665,7 +665,7 @@ export default function LeadDetailPage() {
       branch_name: data.branch_name || prev.branch_name,
       course: data.course || prev.course,
       course_name: data.course_name || prev.course_name,
-      status: type === 'enrollment' ? 'converted' : 'walk_in',
+      status: type === 'enrollment' ? 'converted' : 'converted_to_walkin',
       converted_to_type: type,
       converted_record_id: data.id,
       converted_at: new Date().toISOString(),

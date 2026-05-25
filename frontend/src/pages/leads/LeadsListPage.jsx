@@ -63,7 +63,8 @@ function sourceLabel(lead) {
 const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
 
 function statusCount(rows, status) {
-  return rows.filter((row) => row.status === status).length
+  const statuses = Array.isArray(status) ? status : [status]
+  return rows.filter((row) => statuses.includes(row.status)).length
 }
 
 export default function LeadsListPage() {
@@ -110,7 +111,9 @@ export default function LeadsListPage() {
     return leads.filter((lead) => {
       const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
       const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
-      const matchesStatus = !filters.status || lead.status === filters.status
+      const matchesStatus = !filters.status
+        || lead.status === filters.status
+        || (filters.status === 'converted' && lead.status === 'converted_to_walkin')
       const leadSource = String(lead.source || '').toLowerCase()
       const filterSource = String(filters.source || '').toLowerCase()
       const matchesSource = !filterSource
@@ -177,7 +180,7 @@ export default function LeadsListPage() {
     { label: 'New', value: 'new', count: statusCount(statusSummaryBaseLeads, 'new') },
     { label: 'Follow Up', value: 'follow_up', count: statusCount(statusSummaryBaseLeads, 'follow_up') },
     { label: 'Will Walk-in', value: 'will_walk_in', count: statusCount(statusSummaryBaseLeads, 'will_walk_in') },
-    { label: 'Converted', value: 'converted', count: statusCount(statusSummaryBaseLeads, 'converted') },
+    { label: 'Converted', value: 'converted', count: statusCount(statusSummaryBaseLeads, ['converted', 'converted_to_walkin']) },
   ]
 
   useEffect(() => {
