@@ -15,8 +15,10 @@ function formatDateTime(value) {
 
 function counselorLabel(user) {
   if (!user) return ''
-  const name = user.full_name || [user.first_name, user.last_name].filter(Boolean).join(' ') || user.username
-  return user.branch_name ? `${name} - ${user.branch_name}` : name
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim()
+  const name = user.full_name || user.name || user.display_name || fullName || user.username || user.email || 'Counselor'
+  const branch = user.branch_name || user.branch_display || ''
+  return branch ? `${name} - ${branch}` : name
 }
 
 export default function CounselorReassignmentPanel({

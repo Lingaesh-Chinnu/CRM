@@ -3,9 +3,12 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const importTabs = [
-  { value: 'leads', label: 'Import Leads' },
-  { value: 'enrollments', label: 'Import Enrollments' },
-  { value: 'payments', label: 'Import Payments' },
+  { value: 'leads', label: 'Leads' },
+  { value: 'walkins', label: 'Walk-ins' },
+  { value: 'courses', label: 'Courses' },
+  { value: 'enrollments', label: 'Enrollments' },
+  { value: 'students', label: 'Students' },
+  { value: 'payments', label: 'Payments' },
 ]
 
 function statusClass(status) {
@@ -34,7 +37,7 @@ export default function DataImportPage() {
   const previewImport = async (event) => {
     event.preventDefault()
     if (!file) {
-      setMessage('Upload an Excel .xlsx file.')
+      setMessage('Upload an Excel .xlsx or CSV file.')
       return
     }
     const form = new FormData()
@@ -140,7 +143,7 @@ export default function DataImportPage() {
             <span className="sr-only">Excel File</span>
             <input
               type="file"
-              accept=".xlsx"
+              accept=".xlsx,.csv"
               onChange={(event) => {
                 setFile(event.target.files?.[0] || null)
                 setPreview(null)

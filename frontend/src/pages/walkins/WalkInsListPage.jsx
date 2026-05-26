@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
+import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
@@ -208,6 +209,7 @@ export default function WalkInsListPage() {
   const [staffUsers, setStaffUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
+  const [exporting, setExporting] = useState(false)
   const [filters, setFilters] = useState(emptyFilters)
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useSelector((state) => state.auth)
@@ -227,6 +229,30 @@ export default function WalkInsListPage() {
       window.alert('Public walk-in form link copied.')
     } catch {
       window.alert(publicWalkInLink)
+    }
+  }
+
+  const walkinQueryParams = (format) => {
+    const params = { format }
+    Object.entries(appliedFilters).forEach(([key, value]) => {
+      if (value) params[key] = value
+    })
+    if (visitDateFrom) params.visit_date_from = visitDateFrom
+    if (visitDateTo) params.visit_date_to = visitDateTo
+    if (followUpDateFrom) params.follow_up_date_from = followUpDateFrom
+    if (followUpDateTo) params.follow_up_date_to = followUpDateTo
+    return params
+  }
+
+  const exportWalkins = async (format) => {
+    setExporting(true)
+    setLoadMessage('')
+    try {
+      await downloadExport('/walkins/export/', walkinQueryParams(format), `walkins-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
+    } catch (error) {
+      setLoadMessage(apiErrorMessage(error, 'Failed to export walk-ins.'))
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -358,6 +384,7 @@ export default function WalkInsListPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <ExportMenu onExport={exportWalkins} exporting={exporting} />
           <a href={publicWalkInPath} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
             Open Public Form
           </a>

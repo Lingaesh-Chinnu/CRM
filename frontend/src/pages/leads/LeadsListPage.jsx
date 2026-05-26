@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
+import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -123,6 +124,7 @@ export default function LeadsListPage() {
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
+  const [exporting, setExporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
   const [importError, setImportError] = useState('')
   const { user } = useSelector((state) => state.auth)
@@ -286,6 +288,47 @@ export default function LeadsListPage() {
     }
   }
 
+  const leadQueryParams = (format) => {
+    const params = { format }
+    if (statusFilter || filters.status) params.status = statusFilter || filters.status
+    if (walkinDateFrom) params.walkin_date_from = walkinDateFrom
+    if (walkinDateTo) params.walkin_date_to = walkinDateTo
+    if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
+    if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
+    if (filters.name.trim()) params.name = filters.name.trim()
+    if (filters.phone.trim()) params.phone = filters.phone.trim()
+    if (filters.followUpBy) params.follow_up_by = filters.followUpBy
+    if (isSuperAdmin && filters.branch) params.branch = filters.branch
+    if (filters.source) params.source = filters.source
+    if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
+    if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
+    const today = new Date()
+    if (filters.followUp === 'today') {
+      params.next_follow_up_date_from = isoDate(today)
+      params.next_follow_up_date_to = isoDate(today)
+    } else if (filters.followUp === 'tomorrow') {
+      const tomorrow = isoDate(addDays(today, 1))
+      params.next_follow_up_date_from = tomorrow
+      params.next_follow_up_date_to = tomorrow
+    } else if (filters.followUp === 'next7') {
+      params.next_follow_up_date_from = isoDate(today)
+      params.next_follow_up_date_to = isoDate(addDays(today, 7))
+    }
+    return params
+  }
+
+  const exportLeads = async (format) => {
+    setExporting(true)
+    setLoadMessage('')
+    try {
+      await downloadExport('/leads/export/', leadQueryParams(format), `leads-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
+    } catch (error) {
+      setLoadMessage(apiErrorMessage(error, 'Failed to export leads.'))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const updateLeadFollowUp = (leadId, followUp) => {
     setLeads((current) => current.map((lead) => (
       lead.id === leadId
@@ -381,6 +424,7 @@ export default function LeadsListPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
+          <ExportMenu onExport={exportLeads} exporting={exporting} />
           {canImportLeads && (
             <button
               type="button"

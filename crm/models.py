@@ -453,7 +453,10 @@ class DataImportHistory(TimeStampedModel):
 
     class ImportType(models.TextChoices):
         LEADS = 'leads', 'Leads'
+        WALKINS = 'walkins', 'Walk-ins'
+        COURSES = 'courses', 'Courses'
         ENROLLMENTS = 'enrollments', 'Enrollments'
+        STUDENTS = 'students', 'Students'
         PAYMENTS = 'payments', 'Payments'
 
     class Status(models.TextChoices):

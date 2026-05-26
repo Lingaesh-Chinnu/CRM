@@ -66,6 +66,7 @@ api_urlpatterns = [
     path('admin-data-import/template/', AdminDataImportTemplateView.as_view(), name='admin-data-import-template'),
     path('external-leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture'),
     path('external/leads/', ExternalLeadCaptureView.as_view(), name='external-lead-capture-legacy'),
+    path('students/export/', EnrollmentViewSet.as_view({'get': 'export'}), name='student-export'),
     path('students/', EnrollmentViewSet.as_view({'get': 'list'}), name='student-list'),
     path('students/<int:pk>/', EnrollmentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
     path('dashboard/', DashboardSummaryView.as_view(), name='dashboard-summary-alias'),

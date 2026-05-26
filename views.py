@@ -32,7 +32,7 @@ class IsSuperAdminOrReadOnly(BasePermission):
 # ============================================================
 from rest_framework import viewsets, status, generics, mixins
 from rest_framework.decorators import action
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
@@ -1812,6 +1812,23 @@ class CourseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        headers = ['Course Name', 'Duration Months', 'Actual Fees', 'Discount Amount', 'Final Fees', 'Status']
+        rows = [
+            [
+                course.name,
+                course.duration_months,
+                course.actual_fees,
+                course.discount_amount,
+                course.final_fees,
+                'Active' if course.is_active else 'Inactive',
+            ]
+            for course in queryset.iterator()
+        ]
+        return export_tabular_response('courses-export', headers, rows, requested_export_format(request))
+
     def destroy(self, request, *args, **kwargs):
         course = self.get_object()
         if course_is_linked(course):
@@ -2017,6 +2034,35 @@ class LeadViewSet(viewsets.ModelViewSet):
                 timezone.localdate(),
             )
         return qs
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        headers = [
+            'Lead Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
+            'Follow Up Date', 'Walkin Date', 'Remarks', 'Assigned Counselor',
+            'Email', 'Location', 'Created At',
+        ]
+        rows = [
+            [
+                lead.lead_number,
+                lead.name,
+                lead.phone,
+                lead.course.name if lead.course else '',
+                lead.branch.name if lead.branch else '',
+                lead.get_source_display() if getattr(lead, 'source', '') else '',
+                lead.get_status_display(),
+                getattr(lead, 'next_follow_up_date', None),
+                lead.walkin_date,
+                lead.remarks,
+                lead.assigned_to.full_name if lead.assigned_to else '',
+                lead.email,
+                lead.location,
+                lead.created_at,
+            ]
+            for lead in queryset.iterator()
+        ]
+        return export_tabular_response('leads-export', headers, rows, requested_export_format(request))
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -2301,6 +2347,9 @@ class LeadViewSet(viewsets.ModelViewSet):
             rows.append({
                 'id': user.id,
                 'name': user.full_name or user.username,
+                'full_name': user.full_name,
+                'username': user.username,
+                'email': user.email,
                 'branch_id': user.branch_id,
                 'branch_name': user.branch.name if user.branch else '',
             })
@@ -2861,8 +2910,19 @@ def parse_excel_amount(value):
 
 
 def read_xlsx_rows(uploaded_file):
-    if not str(uploaded_file.name).lower().endswith('.xlsx'):
-        raise ValueError('Only Excel .xlsx files are supported.')
+    name = str(uploaded_file.name).lower()
+    if name.endswith('.csv'):
+        text = uploaded_file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(text))
+        headers = [import_cell(header) for header in (reader.fieldnames or []) if import_cell(header)]
+        rows = []
+        for row_number, row in enumerate(reader, start=2):
+            if not any(import_cell(value) for value in row.values()):
+                continue
+            rows.append({'_row_number': row_number, **{header: import_cell(row.get(header, '')) for header in headers}})
+        return headers, rows
+    if not name.endswith('.xlsx'):
+        raise ValueError('Only Excel .xlsx or CSV files are supported.')
     import openpyxl
     workbook = openpyxl.load_workbook(uploaded_file, read_only=True, data_only=True)
     sheet = workbook.active
@@ -2896,15 +2956,15 @@ ADMIN_IMPORT_SPECS = {
         'model': Lead,
         'required': ['name', 'phone', 'branch', 'course'],
         'fields': [
-            {'field': 'name', 'label': 'Candidate Name'},
-            {'field': 'phone', 'label': 'Phone Number'},
-            {'field': 'course', 'label': 'Course Interested'},
+            {'field': 'name', 'label': 'Name'},
+            {'field': 'phone', 'label': 'Phone'},
+            {'field': 'course', 'label': 'Course'},
             {'field': 'branch', 'label': 'Branch'},
-            {'field': 'source', 'label': 'How They Know IIE'},
+            {'field': 'source', 'label': 'Source'},
             {'field': 'source_description', 'label': 'Source Description'},
-            {'field': 'next_follow_up_date', 'label': 'Follow-up Date'},
+            {'field': 'next_follow_up_date', 'label': 'Follow Up Date'},
             {'field': 'remarks', 'label': 'Remarks'},
-            {'field': 'assigned_to', 'label': 'Counsellor'},
+            {'field': 'assigned_to', 'label': 'Assigned Counselor'},
             {'field': 'dob', 'label': 'DOB'},
             {'field': 'email', 'label': 'Email'},
             {'field': 'location', 'label': 'Location'},
@@ -2915,45 +2975,99 @@ ADMIN_IMPORT_SPECS = {
             {'field': 'walkin_date', 'label': 'Walkin Date'},
         ],
     },
+    'walkins': {
+        'model': WalkIn,
+        'required': ['name', 'phone', 'branch', 'course', 'visit_date'],
+        'fields': [
+            {'field': 'name', 'label': 'Name'},
+            {'field': 'phone', 'label': 'Phone'},
+            {'field': 'course', 'label': 'Course'},
+            {'field': 'branch', 'label': 'Branch'},
+            {'field': 'source', 'label': 'Source'},
+            {'field': 'visit_date', 'label': 'Walk-in Date'},
+            {'field': 'follow_up_date', 'label': 'Follow Up Date'},
+            {'field': 'remarks', 'label': 'Remarks'},
+            {'field': 'assigned_to', 'label': 'Assigned Counselor'},
+            {'field': 'dob', 'label': 'DOB'},
+            {'field': 'email', 'label': 'Email'},
+            {'field': 'location', 'label': 'Location'},
+            {'field': 'pincode', 'label': 'Pincode'},
+            {'field': 'qualification', 'label': 'Qualification'},
+            {'field': 'degree', 'label': 'Degree'},
+            {'field': 'preferred_timing', 'label': 'Preferred Timing'},
+            {'field': 'demo_class', 'label': 'Demo Class'},
+            {'field': 'status', 'label': 'Status'},
+        ],
+    },
+    'courses': {
+        'model': Course,
+        'required': ['name', 'actual_fees'],
+        'fields': [
+            {'field': 'name', 'label': 'Course Name'},
+            {'field': 'duration_months', 'label': 'Duration Months'},
+            {'field': 'actual_fees', 'label': 'Actual Fees'},
+            {'field': 'discount_amount', 'label': 'Discount Amount'},
+            {'field': 'is_active', 'label': 'Status'},
+        ],
+    },
     'enrollments': {
         'model': Enrollment,
         'required': ['name', 'phone', 'branch', 'course', 'actual_fees', 'enrollment_date'],
         'fields': [
-            {'field': 'student_number', 'label': 'Stud_Id'},
-            {'field': 'name', 'label': 'name'},
-            {'field': 'phone', 'label': 'phone'},
-            {'field': 'email', 'label': 'email'},
-            {'field': 'branch', 'label': 'branch'},
-            {'field': 'course', 'label': 'course'},
-            {'field': 'dob', 'label': 'dob'},
-            {'field': 'location', 'label': 'location'},
-            {'field': 'pincode', 'label': 'pincode'},
-            {'field': 'qualification', 'label': 'qualification'},
-            {'field': 'degree', 'label': 'degree'},
-            {'field': 'source', 'label': 'source'},
-            {'field': 'preferred_timing', 'label': 'preferred_timing'},
-            {'field': 'actual_fees', 'label': 'actual_fees'},
-            {'field': 'discount_amount', 'label': 'discount_amount'},
-            {'field': 'discount_reason', 'label': 'discount_reason'},
-            {'field': 'enrollment_date', 'label': 'enrollment_date'},
-            {'field': 'start_date', 'label': 'start_date'},
-            {'field': 'batch_timing', 'label': 'batch_timing'},
-            {'field': 'status', 'label': 'status'},
+            {'field': 'student_number', 'label': 'Student ID'},
+            {'field': 'name', 'label': 'Student Name'},
+            {'field': 'phone', 'label': 'Phone'},
+            {'field': 'course', 'label': 'Course'},
+            {'field': 'branch', 'label': 'Branch'},
+            {'field': 'enrollment_date', 'label': 'Enrollment Date'},
+            {'field': 'actual_fees', 'label': 'Final Fee'},
+            {'field': 'assigned_to', 'label': 'Counselor'},
+            {'field': 'status', 'label': 'Status'},
+            {'field': 'email', 'label': 'Email'},
+            {'field': 'dob', 'label': 'DOB'},
+            {'field': 'location', 'label': 'Location'},
+            {'field': 'pincode', 'label': 'Pincode'},
+            {'field': 'qualification', 'label': 'Qualification'},
+            {'field': 'degree', 'label': 'Degree'},
+            {'field': 'source', 'label': 'Source'},
+            {'field': 'preferred_timing', 'label': 'Preferred Timing'},
+            {'field': 'discount_amount', 'label': 'Discount Amount'},
+            {'field': 'discount_reason', 'label': 'Discount Reason'},
+            {'field': 'start_date', 'label': 'Start Date'},
+            {'field': 'batch_timing', 'label': 'Batch Timing'},
+        ],
+    },
+    'students': {
+        'model': Enrollment,
+        'required': ['name', 'phone', 'branch', 'course', 'actual_fees', 'enrollment_date'],
+        'fields': [
+            {'field': 'student_number', 'label': 'Student ID'},
+            {'field': 'name', 'label': 'Student Name'},
+            {'field': 'phone', 'label': 'Phone'},
+            {'field': 'course', 'label': 'Course'},
+            {'field': 'branch', 'label': 'Branch'},
+            {'field': 'enrollment_date', 'label': 'Enrollment Date'},
+            {'field': 'actual_fees', 'label': 'Final Fee'},
+            {'field': 'assigned_to', 'label': 'Counselor'},
+            {'field': 'status', 'label': 'Status'},
+            {'field': 'email', 'label': 'Email'},
+            {'field': 'dob', 'label': 'DOB'},
+            {'field': 'start_date', 'label': 'Start Date'},
         ],
     },
     'payments': {
         'model': PaymentInstallment,
         'required': ['amount', 'payment_date'],
         'fields': [
-            {'field': 'student_number', 'label': 'Stud_Id'},
-            {'field': 'name', 'label': 'name'},
-            {'field': 'phone', 'label': 'phone'},
-            {'field': 'branch', 'label': 'branch'},
-            {'field': 'amount', 'label': 'amount'},
-            {'field': 'payment_date', 'label': 'payment_date'},
-            {'field': 'payment_mode', 'label': 'payment_mode'},
-            {'field': 'reference_number', 'label': 'reference_number'},
-            {'field': 'notes', 'label': 'notes'},
+            {'field': 'student_number', 'label': 'Student ID'},
+            {'field': 'name', 'label': 'Student Name'},
+            {'field': 'phone', 'label': 'Phone'},
+            {'field': 'branch', 'label': 'Branch'},
+            {'field': 'amount', 'label': 'Amount'},
+            {'field': 'payment_date', 'label': 'Payment Date'},
+            {'field': 'payment_mode', 'label': 'Payment Mode'},
+            {'field': 'reference_number', 'label': 'Reference Number'},
+            {'field': 'notes', 'label': 'Notes'},
         ],
     },
 }
@@ -3066,6 +3180,69 @@ def payment_installment_duplicate_exists(payment, amount, payment_date, payment_
     return existing_installments.exists()
 
 
+def course_duplicate_exists(name):
+    name = import_cell(name)
+    return bool(name and Course.objects.filter(name__iexact=name).exists())
+
+
+def walkin_duplicate_exists(phone='', course=None):
+    normalized = normalize_phone_number(phone)
+    if not normalized:
+        return False
+    queryset = WalkIn.objects.exclude(phone='')
+    if course:
+        queryset = queryset.filter(course=course)
+    return any(normalize_phone_number(existing) == normalized for existing in queryset.values_list('phone', flat=True))
+
+
+def valid_import_phone(value):
+    phone = normalize_phone_number(value)
+    if phone.startswith('91') and len(phone) == 12:
+        phone = phone[2:]
+    if phone.startswith('0') and len(phone) == 11:
+        phone = phone[1:]
+    return phone if len(phone) == 10 else ''
+
+
+def format_export_value(value):
+    if value is None:
+        return ''
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    return value
+
+
+def export_tabular_response(filename, headers, rows, file_format='xlsx'):
+    safe_format = 'csv' if file_format == 'csv' else 'xlsx'
+    if safe_format == 'csv':
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}.csv"'
+        writer = csv.writer(response)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([format_export_value(value) for value in row])
+        return response
+
+    try:
+        import openpyxl
+    except ImportError:
+        return export_tabular_response(filename, headers, rows, 'csv')
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = 'Export'
+    sheet.append(headers)
+    for row in rows:
+        sheet.append([format_export_value(value) for value in row])
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
+    workbook.save(response)
+    return response
+
+
+def requested_export_format(request):
+    return 'csv' if (request.query_params.get('format') or '').lower() == 'csv' else 'xlsx'
+
+
 def validate_admin_import(import_type, headers, rows, mapping):
     spec = ADMIN_IMPORT_SPECS[import_type]
     required = [field for field in spec['required'] if field in {item['field'] for item in import_spec_fields(import_type)}]
@@ -3100,6 +3277,8 @@ def validate_admin_import(import_type, headers, rows, mapping):
 
         if import_type == 'leads':
             phone = normalize_phone_number(value('phone'))
+            if value('phone') and not valid_import_phone(value('phone')):
+                errors.append('Phone must be a valid 10 digit Indian mobile number.')
             if phone and (lead_duplicate_exists(phone) or phone in seen_phones):
                 skip_reason = 'Lead already exists - skipped safely.'
             if phone:
@@ -3131,9 +3310,76 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 'remarks': value('remarks'),
             })
 
-        elif import_type == 'enrollments':
+        elif import_type == 'walkins':
+            phone = normalize_phone_number(value('phone'))
+            if value('phone') and not valid_import_phone(value('phone')):
+                errors.append('Phone must be a valid 10 digit Indian mobile number.')
+            branch = lookup_branch(value('branch'))
+            course = lookup_course(value('course'))
+            if value('branch') and not branch:
+                errors.append('Branch does not exist.')
+            if value('course') and not course:
+                errors.append('Course does not exist.')
+            if phone and (walkin_duplicate_exists(phone, course) or (course and (phone, course.id) in seen_phones)):
+                skip_reason = 'Walk-in already exists - skipped safely.'
+            if phone and course:
+                seen_phones.add((phone, course.id))
+            counsellor = lookup_user(value('assigned_to'), branch) if value('assigned_to') else None
+            if value('assigned_to') and not counsellor:
+                errors.append('Counselor does not exist.')
+            source = choice_value(value('source'), WalkIn.Source.choices, WalkIn.Source.DIRECT)
+            if source is None:
+                errors.append('Source is invalid.')
+            status_value = choice_value(value('status'), WalkIn.Status.choices, WalkIn.Status.NEW)
+            if status_value is None:
+                errors.append('Status is invalid.')
+            for date_field in ('dob', 'visit_date', 'follow_up_date'):
+                parsed, error = parse_excel_date(value(date_field))
+                if error:
+                    errors.append(f'{date_field}: {error}')
+                payload[date_field] = parsed
+            payload.update({
+                'name': value('name'), 'phone': value('phone'), 'branch_id': branch.id if branch else None,
+                'branch_name': branch.name if branch else '',
+                'course_id': course.id if course else None, 'assigned_to_id': counsellor.id if counsellor else None,
+                'email': value('email'), 'location': value('location'), 'pincode': value('pincode'),
+                'qualification': value('qualification'), 'degree': value('degree'),
+                'preferred_timing': value('preferred_timing'), 'source': source,
+                'remarks': value('remarks'), 'status': status_value,
+                'demo_class': str(value('demo_class')).strip().lower() in ('1', 'true', 'yes', 'y'),
+            })
+
+        elif import_type == 'courses':
+            if course_duplicate_exists(value('name')):
+                skip_reason = 'Course already exists - skipped safely.'
+            actual_fees, error = parse_excel_amount(value('actual_fees'))
+            if error:
+                errors.append(f'actual_fees: {error}')
+            discount_amount, error = parse_excel_amount(value('discount_amount'))
+            if error:
+                errors.append(f'discount_amount: {error}')
+            duration_months = value('duration_months')
+            if duration_months:
+                try:
+                    duration_months = int(Decimal(str(duration_months)))
+                except Exception:
+                    errors.append('Duration Months must be numeric.')
+                    duration_months = None
+            status_raw = value('is_active').strip().lower()
+            is_active = status_raw not in ('inactive', 'false', '0', 'no', 'n')
+            payload.update({
+                'name': value('name'),
+                'duration_months': duration_months or None,
+                'actual_fees': actual_fees,
+                'discount_amount': discount_amount or Decimal('0'),
+                'is_active': is_active,
+            })
+
+        elif import_type in ('enrollments', 'students'):
             student_number = value('student_number')
             phone = normalize_phone_number(value('phone'))
+            if value('phone') and not valid_import_phone(value('phone')):
+                errors.append('Phone must be a valid 10 digit Indian mobile number.')
             student_key = student_number.lower() if student_number else ''
             if student_number and (Enrollment.objects.filter(student_number__iexact=student_number).exists() or student_key in seen_students):
                 skip_reason = 'Student already exists - skipped safely.'
@@ -3150,6 +3396,9 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 errors.append('Branch does not exist.')
             if value('course') and not course:
                 errors.append('Course does not exist.')
+            counsellor = lookup_user(value('assigned_to'), branch) if value('assigned_to') else None
+            if value('assigned_to') and not counsellor:
+                errors.append('Counselor does not exist.')
             actual_fees, error = parse_excel_amount(value('actual_fees'))
             if error:
                 errors.append(f'actual_fees: {error}')
@@ -3171,6 +3420,7 @@ def validate_admin_import(import_type, headers, rows, mapping):
                 'student_number': student_number or None, 'name': value('name'), 'phone': value('phone'),
                 'branch_id': branch.id if branch else None, 'course_id': course.id if course else None,
                 'branch_name': branch.name if branch else '',
+                'assigned_to_id': counsellor.id if counsellor else None,
                 'email': value('email'), 'location': value('location'), 'pincode': value('pincode'),
                 'qualification': value('qualification'), 'degree': value('degree'),
                 'preferred_timing': value('preferred_timing'), 'source': source,
@@ -3182,6 +3432,8 @@ def validate_admin_import(import_type, headers, rows, mapping):
         elif import_type == 'payments':
             student_number = value('student_number')
             phone = normalize_phone_number(value('phone'))
+            if value('phone') and not valid_import_phone(value('phone')):
+                errors.append('Phone must be a valid 10 digit Indian mobile number.')
             branch = lookup_branch(value('branch')) if value('branch') else None
             enrollment = None
             if not student_number and not phone:
@@ -3280,7 +3532,7 @@ def validate_admin_import(import_type, headers, rows, mapping):
 
 class AdminDataImportView(APIView):
     permission_classes = [IsSuperAdmin]
-    parser_classes = [MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         history = DataImportHistory.objects.select_related('imported_by').order_by('-created_at')[:100]
@@ -3308,7 +3560,7 @@ class AdminDataImportView(APIView):
             return Response({'detail': 'Select a valid import type.'}, status=400)
         uploaded_file = request.FILES.get('file')
         if not uploaded_file:
-            return Response({'detail': 'Upload an Excel .xlsx file.'}, status=400)
+            return Response({'detail': 'Upload an Excel .xlsx or CSV file.'}, status=400)
         try:
             headers, rows = read_xlsx_rows(uploaded_file)
         except Exception as exc:
@@ -3428,7 +3680,48 @@ class AdminDataImportView(APIView):
                         summary['leads_added'] += 1
                         summary['new_records_added'] += 1
                         note_branch(payload)
-                    elif import_type == 'enrollments':
+                    elif import_type == 'walkins':
+                        course = Course.objects.filter(pk=payload.get('course_id')).first()
+                        if walkin_duplicate_exists(payload.get('phone'), course):
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Walk-in already exists - skipped safely.'})
+                            continue
+                        WalkIn.objects.create(
+                            name=payload['name'],
+                            phone=payload['phone'],
+                            branch_id=payload['branch_id'],
+                            course_id=payload['course_id'],
+                            assigned_to_id=payload.get('assigned_to_id') or user.id,
+                            created_by=user,
+                            dob=payload.get('dob') or None,
+                            email=payload.get('email') or '',
+                            location=payload.get('location') or '',
+                            pincode=payload.get('pincode') or '',
+                            qualification=payload.get('qualification') or '',
+                            degree=payload.get('degree') or '',
+                            preferred_timing=payload.get('preferred_timing') or '',
+                            visit_date=payload.get('visit_date') or timezone.localdate(),
+                            follow_up_date=payload.get('follow_up_date') or None,
+                            source=payload.get('source') or WalkIn.Source.DIRECT,
+                            remarks=payload.get('remarks') or '',
+                            demo_class=bool(payload.get('demo_class')),
+                            status=payload.get('status') or WalkIn.Status.NEW,
+                        )
+                        summary['new_records_added'] += 1
+                        note_branch(payload)
+                    elif import_type == 'courses':
+                        if course_duplicate_exists(payload.get('name')):
+                            skipped.append({'row': row.get('row'), 'skip_reason': 'Course already exists - skipped safely.'})
+                            continue
+                        Course.objects.create(
+                            name=payload['name'],
+                            duration_months=payload.get('duration_months'),
+                            actual_fees=Decimal(str(payload.get('actual_fees') or 0)),
+                            discount_amount=Decimal(str(payload.get('discount_amount') or 0)),
+                            is_active=bool(payload.get('is_active', True)),
+                            created_by=user,
+                        )
+                        summary['new_records_added'] += 1
+                    elif import_type in ('enrollments', 'students'):
                         if enrollment_duplicate_exists(payload.get('student_number'), payload.get('phone')):
                             skipped.append({'row': row.get('row'), 'skip_reason': 'Student already exists - skipped safely.'})
                             continue
@@ -3439,7 +3732,7 @@ class AdminDataImportView(APIView):
                             branch_id=payload['branch_id'],
                             course_id=payload['course_id'],
                             final_enrollment_course_id=payload['course_id'],
-                            enrolled_by=user,
+                            enrolled_by_id=payload.get('assigned_to_id') or user.id,
                             created_by=user,
                             dob=payload.get('dob') or None,
                             email=payload.get('email') or '',
@@ -3458,6 +3751,19 @@ class AdminDataImportView(APIView):
                             status=payload.get('status') or Enrollment.Status.ACTIVE,
                         )
                         enrollment.save()
+                        Payment.objects.get_or_create(
+                            enrollment=enrollment,
+                            defaults={
+                                'total_fees': enrollment_payable_fee(enrollment),
+                                'manual_installment_schedule': [
+                                    {
+                                        **item,
+                                        'due_date': item['due_date'].isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
+                                    }
+                                    for item in get_default_installment_schedule(enrollment)
+                                ],
+                            },
+                        )
                         summary['enrollments_added'] += 1
                         summary['new_records_added'] += 1
                         note_branch(payload)
@@ -3558,6 +3864,12 @@ class AdminDataImportTemplateView(APIView):
                 sample.append('0')
             elif field == 'payment_mode':
                 sample.append('cash')
+            elif field == 'is_active':
+                sample.append('active')
+            elif field == 'status':
+                sample.append('active')
+            elif field == 'duration_months':
+                sample.append('3')
             else:
                 sample.append('')
         sheet.append(sample)
@@ -4053,6 +4365,36 @@ class WalkInViewSet(viewsets.ModelViewSet):
             )
         return qs
 
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        headers = [
+            'Walk-in Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
+            'Walk-in Date', 'Follow Up Date', 'Remarks', 'Assigned Counselor',
+            'Demo Class', 'Email', 'Location', 'Created At',
+        ]
+        rows = [
+            [
+                walkin.candidate_number,
+                walkin.name,
+                walkin.phone,
+                walkin.course.name if walkin.course else '',
+                walkin.branch.name if walkin.branch else '',
+                walkin.get_source_display() if getattr(walkin, 'source', '') else '',
+                walkin.get_status_display(),
+                walkin.visit_date,
+                getattr(walkin, 'follow_up_date', None),
+                walkin.remarks,
+                walkin.assigned_to.full_name if walkin.assigned_to else '',
+                'Yes' if walkin.demo_class else 'No',
+                walkin.email,
+                walkin.location,
+                walkin.created_at,
+            ]
+            for walkin in queryset.iterator()
+        ]
+        return export_tabular_response('walkins-export', headers, rows, requested_export_format(request))
+
     @action(detail=True, methods=['post'], url_path='send-follow-up-whatsapp')
     def send_follow_up_whatsapp(self, request, pk=None):
         _, response = send_candidate_template(
@@ -4151,6 +4493,9 @@ class WalkInViewSet(viewsets.ModelViewSet):
             rows.append({
                 'id': user.id,
                 'name': user.full_name or user.username,
+                'full_name': user.full_name,
+                'username': user.username,
+                'email': user.email,
                 'branch_id': user.branch_id,
                 'branch_name': user.branch.name if user.branch else '',
             })
@@ -4940,6 +5285,37 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if getattr(self, 'action', None) == 'list':
             qs = official_enrollment_queryset(qs)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset())
+        export_kind = request.query_params.get('kind') or 'enrollments'
+        headers = [
+            'Student ID', 'Student Name', 'Phone', 'Course', 'Branch', 'Enrollment Date',
+            'Start Date', 'Final Fee', 'Paid Amount', 'Balance Amount', 'Payment Status',
+            'Counselor', 'Status', 'Email', 'Created At',
+        ]
+        rows = []
+        for enrollment in queryset.select_related('payment').iterator(chunk_size=1000):
+            payment = getattr(enrollment, 'payment', None)
+            rows.append([
+                enrollment.student_number,
+                enrollment.name,
+                enrollment.phone,
+                enrollment.course.name if enrollment.course else '',
+                enrollment.branch.name if enrollment.branch else '',
+                enrollment.enrollment_date,
+                enrollment.start_date,
+                enrollment_payable_fee(enrollment),
+                payment.paid_amount if payment else '',
+                payment.balance if payment else enrollment_payable_fee(enrollment),
+                payment.get_status_display() if payment else 'Unpaid',
+                (enrollment.enrolled_by.full_name if enrollment.enrolled_by else (enrollment.created_by.full_name if enrollment.created_by else '')),
+                enrollment.get_status_display(),
+                enrollment.email,
+                enrollment.created_at,
+            ])
+        return export_tabular_response(f'{export_kind}-export', headers, rows, requested_export_format(request))
 
     def get_serializer_class(self):
         return EnrollmentListSerializer if self.action == 'list' else EnrollmentDetailSerializer
@@ -5981,6 +6357,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if requested_export_format(request) == 'csv':
+            return self._export_csv()
         try:
             import openpyxl
         except ImportError:

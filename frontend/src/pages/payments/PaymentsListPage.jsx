@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
+import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 function statusLabel(status) {
   if (!status) return 'Unknown'
@@ -328,27 +329,16 @@ export default function PaymentsListPage() {
     }
   }
 
-  const exportWorksheet = async () => {
+  const exportWorksheet = async (format) => {
     setExporting(true)
     setMessage('')
     try {
-      const params = { month }
+      const params = { month, format }
       if (statusFilter) params.status = statusFilter
       if (dueThisWeek) params.due_this_week = dueThisWeek
       if (isSuperAdmin && branch) params.branch = branch
       if (search.trim()) params.search = search.trim()
-      const response = await api.get('/payments/export/', { params, responseType: 'blob' })
-      const { data, headers } = response
-      const url = window.URL.createObjectURL(data)
-      const link = document.createElement('a')
-      const disposition = headers?.['content-disposition'] || ''
-      const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || `payment-worksheet-${month}.xlsx`
-      link.href = url
-      link.download = filename
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
+      await downloadExport('/payments/export/', params, `payment-worksheet-${month}.${format === 'csv' ? 'csv' : 'xlsx'}`)
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to export payment worksheet.'))
     } finally {
@@ -440,14 +430,7 @@ export default function PaymentsListPage() {
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={exportWorksheet}
-            disabled={exporting}
-            className="w-fit rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-          >
-            {exporting ? 'Exporting...' : 'Export Excel'}
-          </button>
+          <ExportMenu onExport={exportWorksheet} exporting={exporting} />
         </div>
       </section>
 

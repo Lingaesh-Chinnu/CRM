@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -45,6 +46,7 @@ export default function StudentsListPage() {
     enrolledTo: '',
   })
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState('')
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -100,6 +102,29 @@ export default function StudentsListPage() {
       setMessage(apiErrorMessage(error, 'Failed to load students.'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const studentQueryParams = (format) => {
+    const params = { format, kind: 'students' }
+    if (isSuperAdmin && filters.branch) params.branch = filters.branch
+    if (filters.course) params.course = filters.course
+    if (filters.status) params.status = filters.status
+    if (filters.search.trim()) params.search = filters.search.trim()
+    if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
+    if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
+    return params
+  }
+
+  const exportStudents = async (format) => {
+    setExporting(true)
+    setMessage('')
+    try {
+      await downloadExport('/students/export/', studentQueryParams(format), `students-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to export students.'))
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -212,12 +237,15 @@ export default function StudentsListPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Directory</p>
             <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Student details</h2>
           </div>
-          <StatusFilterChips
-            items={statusSummary}
-            value={filters.status}
-            onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
-            className="justify-end"
-          />
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <StatusFilterChips
+              items={statusSummary}
+              value={filters.status}
+              onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
+              className="justify-end"
+            />
+            <ExportMenu onExport={exportStudents} exporting={exporting} />
+          </div>
         </div>
 
         {loading ? (
