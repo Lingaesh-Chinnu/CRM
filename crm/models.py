@@ -1109,6 +1109,9 @@ class PaymentInstallment(models.Model):
     bill_generated_at= models.DateTimeField(null=True, blank=True)
     bill_generated_by= models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='generated_bills')
+    bill_total       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    document_snapshot = models.JSONField(default=dict, blank=True)
+    document_html    = models.TextField(blank=True)
     collected_by     = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='collections')
     payment_date     = models.DateField(default=timezone.now)

@@ -5953,39 +5953,102 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return installment.bill_number
         return installment.receipt_number
 
-    def _build_bill_html(self, installment):
+    def _receipt_date(self, value):
+        if not value:
+            return 'Not set'
+        if isinstance(value, str):
+            original = value
+            value = parse_date(value[:10])
+            if not value:
+                return original
+        if hasattr(value, 'date') and not hasattr(value, 'day'):
+            value = value.date()
+        if hasattr(value, 'strftime'):
+            return value.strftime('%d/%m/%Y')
+        return str(value)
+
+    def _snapshot_decimal(self, value):
+        return f'{Decimal(str(value or 0)):.2f}'
+
+    def _build_document_snapshot(self, installment):
+        enrollment = installment.enrollment
+        payment = installment.payment
+        is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
+        generated_at = installment.bill_generated_at or timezone.now()
+        cutoff = generated_at if is_bill else timezone.now()
+        historical_installments = payment.installments.filter(created_at__lte=cutoff)
+        paid_amount = historical_installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        total_fees = Decimal(str(payment.total_fees or 0))
+        balance = max(total_fees - paid_amount, Decimal('0'))
+        included = [installment] if is_bill else [installment]
+        return {
+            'document_type': 'bill' if is_bill else 'receipt',
+            'document_number': self._document_number(installment),
+            'generated_at': generated_at.isoformat() if generated_at else '',
+            'generated_by': installment.bill_generated_by.full_name if installment.bill_generated_by_id and installment.bill_generated_by else '',
+            'student_name': enrollment.name,
+            'student_number': enrollment.student_number or '',
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else 'No branch',
+            'branch_phone': enrollment.branch.phone if enrollment.branch and enrollment.branch.phone else 'Phone number not set',
+            'payment_mode': installment.get_payment_mode_display(),
+            'reference_number': installment.reference_number or 'Not provided',
+            'payment_date': self._receipt_date(installment.payment_date),
+            'installment_label': installment.installment_label or str(installment.installment_index),
+            'payment_amount': self._snapshot_decimal(installment.amount),
+            'total_fees': self._snapshot_decimal(total_fees),
+            'paid_amount': self._snapshot_decimal(paid_amount),
+            'balance': self._snapshot_decimal(balance),
+            'bill_total': self._snapshot_decimal(sum((item.amount for item in included), Decimal('0'))),
+            'included_installments': [
+                {
+                    'id': item.id,
+                    'label': item.installment_label or str(item.installment_index),
+                    'payment_date': self._receipt_date(item.payment_date),
+                    'amount': self._snapshot_decimal(item.amount),
+                    'payment_mode': item.get_payment_mode_display(),
+                    'reference_number': item.reference_number or 'Not provided',
+                }
+                for item in included
+            ],
+        }
+
+    def _build_bill_html(self, installment, snapshot=None):
+        snapshot = snapshot or {}
         enrollment = installment.enrollment
         payment = installment.payment
         branch = enrollment.branch
         branch_address_line_1 = 'First Floor, AAKIFAH 2017 Complex, Palghat Main Road,'
         branch_address_line_2 = 'Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008'
-        branch_phone = branch.phone if branch and branch.phone else 'Phone number not set'
+        branch_phone = snapshot.get('branch_phone') or (branch.phone if branch and branch.phone else 'Phone number not set')
         schedule = get_payment_installment_schedule(payment)
-
-        def receipt_date(value):
-            if not value:
-                return 'Not set'
-            if isinstance(value, str):
-                value = parse_date(value)
-            if hasattr(value, 'date') and not hasattr(value, 'day'):
-                value = value.date()
-            if hasattr(value, 'strftime'):
-                return value.strftime('%d/%m/%Y')
-            return str(value)
 
         paid_running_total = 0
         schedule_rows = []
-        for item in schedule:
-            paid_running_total += int(float(item.get('amount') or 0))
-            due_date_display = receipt_date(item.get('due_date'))
-            row_status = 'Paid' if payment.paid_amount >= paid_running_total else 'Upcoming'
+        snapshot_rows = snapshot.get('included_installments') or []
+        if snapshot_rows:
+            iterable_rows = snapshot_rows
+        else:
+            iterable_rows = schedule
+        for item in iterable_rows:
+            if snapshot_rows:
+                label = item.get('label') or 'Installment'
+                due_date_display = item.get('payment_date') or 'Not set'
+                amount = Decimal(str(item.get('amount') or 0))
+                row_status = 'Paid'
+            else:
+                paid_running_total += int(float(item.get('amount') or 0))
+                label = item.get('label') or 'Installment'
+                due_date_display = self._receipt_date(item.get('due_date'))
+                amount = Decimal(str(item.get('amount') or 0))
+                row_status = 'Paid' if payment.paid_amount >= paid_running_total else 'Upcoming'
             status_class = 'paid' if row_status == 'Paid' else 'upcoming'
             schedule_rows.append(
                 f"""
                 <tr>
-                  <td>{escape(str(item.get('label') or 'Installment'))}</td>
+                  <td>{escape(str(label))}</td>
                   <td>{escape(due_date_display)}</td>
-                  <td class="amount">Rs {int(float(item.get('amount') or 0)):,.2f}</td>
+                  <td class="amount">Rs {amount:,.2f}</td>
                   <td class="status-cell"><span class="badge {status_class}">{escape(row_status)}</span></td>
                 </tr>
                 """
@@ -6005,8 +6068,21 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
         document_title = 'Official Payment Bill' if is_bill else 'Payment Receipt'
         document_number_label = 'Bill No' if is_bill else 'Receipt No'
-        document_number = self._document_number(installment)
+        document_number = snapshot.get('document_number') or self._document_number(installment)
         partial_note = '' if is_bill else '<div class="partial-note">Partial Payment Received</div>'
+        student_name = snapshot.get('student_name') or enrollment.name
+        student_number = snapshot.get('student_number') or enrollment.student_number or ''
+        course_name = snapshot.get('course_name') or (enrollment.course.name if enrollment.course else '')
+        branch_name = snapshot.get('branch_name') or (branch.name if branch else 'No branch')
+        payment_mode = snapshot.get('payment_mode') or installment.get_payment_mode_display()
+        reference_number = snapshot.get('reference_number') or installment.reference_number or 'Not provided'
+        payment_date = snapshot.get('payment_date') or self._receipt_date(installment.payment_date)
+        installment_label = snapshot.get('installment_label') or installment.installment_label or str(installment.installment_index)
+        payment_amount = Decimal(str(snapshot.get('payment_amount') or installment.amount or 0))
+        total_fees = Decimal(str(snapshot.get('total_fees') or payment.total_fees or 0))
+        paid_amount = Decimal(str(snapshot.get('paid_amount') or payment.paid_amount or 0))
+        balance = Decimal(str(snapshot.get('balance') or payment.balance or 0))
+        generated_at = snapshot.get('generated_at') or installment.bill_generated_at
         return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -6081,22 +6157,22 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       {partial_note}
       <div class="section">
         <div class="grid">
-          <div class="field"><div class="label">STUDENT NAME</div><div class="value">{escape(enrollment.name)}</div></div>
-          <div class="field"><div class="label">STUDENT ID</div><div class="value">{escape(enrollment.student_number)}</div></div>
-          <div class="field"><div class="label">COURSE</div><div class="value">{escape(enrollment.course.name)}</div></div>
-          <div class="field"><div class="label">BRANCH</div><div class="value">{escape(branch.name if branch else 'No branch')}</div></div>
-          <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(installment.get_payment_mode_display())}</div></div>
-          <div class="field"><div class="label">REFERENCE NO</div><div class="value">{escape(installment.reference_number or 'Not provided')}</div></div>
-          <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(receipt_date(installment.payment_date))}</div></div>
-          <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment.installment_label or str(installment.installment_index))}</div></div>
-          <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {installment.amount:,.2f}</div></div>
-          <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {payment.total_fees:,.2f}</div></div>
-          <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {payment.paid_amount:,.2f}</div></div>
-          <div class="field"><div class="label">BALANCE</div><div class="value amount">Rs {payment.balance:,.2f}</div></div>
+          <div class="field"><div class="label">STUDENT NAME</div><div class="value">{escape(student_name)}</div></div>
+          <div class="field"><div class="label">STUDENT ID</div><div class="value">{escape(student_number)}</div></div>
+          <div class="field"><div class="label">COURSE</div><div class="value">{escape(course_name)}</div></div>
+          <div class="field"><div class="label">BRANCH</div><div class="value">{escape(branch_name)}</div></div>
+          <div class="field"><div class="label">PAYMENT MODE</div><div class="value">{escape(payment_mode)}</div></div>
+          <div class="field"><div class="label">REFERENCE NO</div><div class="value">{escape(reference_number)}</div></div>
+          <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(payment_date)}</div></div>
+          <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment_label)}</div></div>
+          <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {payment_amount:,.2f}</div></div>
+          <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {total_fees:,.2f}</div></div>
+          <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {paid_amount:,.2f}</div></div>
+          <div class="field"><div class="label">BALANCE</div><div class="value amount">Rs {balance:,.2f}</div></div>
         </div>
       </div>
       <div class="section">
-        <h2>Next Payment Schedule</h2>
+        <h2>{'Billed Payment Entry' if snapshot_rows else 'Next Payment Schedule'}</h2>
         <table>
           <thead>
             <tr>
@@ -6113,7 +6189,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       </div>
       <div class="generated-info">
         <p><span class="info-label">GENERATED BY:</span> <span class="info-value">Indra Institute of Education</span></p>
-        <p><span class="info-label">GENERATED ON:</span> <span class="info-value">{escape(receipt_date(installment.bill_generated_at))}</span></p>
+        <p><span class="info-label">GENERATED ON:</span> <span class="info-value">{escape(self._receipt_date(generated_at))}</span></p>
       </div>
       <div class="bottom">
         <div>Fees once paid cannot be refunded.</div>
@@ -6156,16 +6232,23 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment = self.get_object()
         if not request.user.is_super_admin:
             return Response({'detail': 'Only admin can generate bills.'}, status=403)
+        if installment.bill_number:
+            return Response({'detail': 'Official bill already generated for this payment entry.'}, status=400)
 
         installment_status = PaymentInstallmentSerializer(installment).data.get('installment_status')
         if installment_status != 'paid':
             return Response({'detail': 'Official bill can be generated only after the required installment amount is fully paid.'}, status=400)
-        if not installment.bill_number:
-            installment.bill_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
+        installment.bill_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
         installment.document_type = PaymentInstallment.DocumentType.BILL
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
-        installment.save(update_fields=['document_type', 'bill_number', 'bill_generated_at', 'bill_generated_by'])
+        installment.bill_total = installment.amount
+        installment.document_snapshot = self._build_document_snapshot(installment)
+        installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
+        installment.save(update_fields=[
+            'document_type', 'bill_number', 'bill_generated_at', 'bill_generated_by',
+            'bill_total', 'document_snapshot', 'document_html',
+        ])
         self._notify_collector_document_generated(installment)
         return Response(PaymentInstallmentSerializer(installment).data)
 
@@ -6181,9 +6264,27 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment.document_type = PaymentInstallment.DocumentType.RECEIPT
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
-        installment.save(update_fields=['document_type', 'receipt_number', 'bill_generated_at', 'bill_generated_by'])
+        installment.bill_total = installment.amount
+        installment.document_snapshot = self._build_document_snapshot(installment)
+        installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
+        installment.save(update_fields=[
+            'document_type', 'receipt_number', 'bill_generated_at', 'bill_generated_by',
+            'bill_total', 'document_snapshot', 'document_html',
+        ])
         self._notify_collector_document_generated(installment)
         return Response(PaymentInstallmentSerializer(installment).data)
+
+    def _immutable_document_html(self, installment):
+        if installment.document_html:
+            return installment.document_html
+        snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
+        html = self._build_bill_html(installment, snapshot)
+        installment.document_snapshot = snapshot
+        installment.document_html = html
+        if installment.bill_number and not installment.bill_total:
+            installment.bill_total = Decimal(str(snapshot.get('bill_total') or installment.amount or 0))
+        installment.save(update_fields=['document_snapshot', 'document_html', 'bill_total'])
+        return html
 
     @action(detail=True, methods=['get'], url_path='view-bill')
     def view_bill(self, request, pk=None):
@@ -6192,7 +6293,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if not document_number:
             return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
 
-        response = HttpResponse(self._build_bill_html(installment), content_type='text/html; charset=utf-8')
+        response = HttpResponse(self._immutable_document_html(installment), content_type='text/html; charset=utf-8')
         response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
         return response
 
@@ -6203,7 +6304,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if not document_number:
             return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
 
-        response = HttpResponse(self._build_bill_html(installment), content_type='text/html; charset=utf-8')
+        response = HttpResponse(self._immutable_document_html(installment), content_type='text/html; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{document_number}.html"'
         return response
 

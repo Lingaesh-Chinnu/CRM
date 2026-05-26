@@ -1455,8 +1455,14 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
         read_only_fields = [
             'collected_by', 'created_at', 'installment_index', 'installment_label',
             'document_type', 'receipt_number', 'bill_number', 'bill_generated_at',
-            'bill_generated_by',
+            'bill_generated_by', 'bill_total', 'document_snapshot', 'document_html',
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data.pop('document_snapshot', None)
+        data.pop('document_html', None)
+        return data
 
     def _next_cash_reference(self, payment):
         student_id = payment.enrollment.student_number or f'ENR{payment.enrollment_id}'
