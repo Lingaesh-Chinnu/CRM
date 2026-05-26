@@ -1,5 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useSelector } from 'react-redux'
+import { useEffect, useState } from 'react'
+import { api } from '../../services/api'
 import brandLogo from '../../assets/brand-logo.png'
 
 const navigation = [
@@ -10,6 +12,7 @@ const navigation = [
   { name: 'Students', href: '/students', short: 'ST' },
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
   { name: 'Payments', href: '/payments', short: 'PY' },
+  { name: 'Pending', href: '/pending/leads', short: 'PE', pending: true },
   { name: 'Team Board', href: '/team-board', short: 'TB' },
   { name: 'Counselor Requests', href: '/counselor-change-requests', short: 'CR' },
 ]
@@ -32,7 +35,7 @@ const adminNavigation = [
   { name: 'Lead Import History', href: '/admin/lead-import-history', short: 'LI' },
 ]
 
-function NavItem({ item, active, onNavigate }) {
+function NavItem({ item, active, onNavigate, badge }) {
   return (
     <Link
       to={item.href}
@@ -50,7 +53,10 @@ function NavItem({ item, active, onNavigate }) {
       >
         {item.short}
       </span>
-      <span>{item.name}</span>
+      <span className="min-w-0 flex-1 truncate">{item.name}</span>
+      {badge ? (
+        <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11px] font-black text-white">{badge}</span>
+      ) : null}
     </Link>
   )
 }
@@ -58,6 +64,14 @@ function NavItem({ item, active, onNavigate }) {
 function SidebarContent({ onNavigate }) {
   const location = useLocation()
   const { user } = useSelector((state) => state.auth)
+  const [pendingCounts, setPendingCounts] = useState({ total_pending: 0, lead_pending: 0, walkin_pending: 0, payment_pending: 0 })
+
+  useEffect(() => {
+    if (!user) return
+    api.get('/pending/summary/')
+      .then(({ data }) => setPendingCounts(data || {}))
+      .catch(() => setPendingCounts({ total_pending: 0, lead_pending: 0, walkin_pending: 0, payment_pending: 0 }))
+  }, [user, location.pathname])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-slate-950 text-white">
@@ -70,12 +84,42 @@ function SidebarContent({ onNavigate }) {
       <div className="flex-1 overflow-y-auto px-4 py-5">
         <nav className="space-y-2">
           {navigation.map((item) => (
-            <NavItem
-              key={item.name}
-              item={item}
-              active={location.pathname.startsWith(item.href)}
-              onNavigate={onNavigate}
-            />
+            item.pending ? (
+              <div key={item.name} className="space-y-1">
+                <NavItem
+                  item={item}
+                  active={location.pathname.startsWith('/pending')}
+                  onNavigate={onNavigate}
+                  badge={pendingCounts.total_pending}
+                />
+                {location.pathname.startsWith('/pending') && (
+                  <div className="ml-12 space-y-1">
+                    {[
+                      ['Lead Pending', '/pending/leads', pendingCounts.lead_pending],
+                      ['Walk-in Pending', '/pending/walkins', pendingCounts.walkin_pending],
+                      ['Payment Pending', '/pending/payments', pendingCounts.payment_pending],
+                    ].map(([name, href, count]) => (
+                      <Link
+                        key={href}
+                        to={href}
+                        onClick={onNavigate}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold transition ${location.pathname === href ? 'bg-white/12 text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
+                      >
+                        <span>{name}</span>
+                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-black">{count || 0}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <NavItem
+                key={item.name}
+                item={item}
+                active={location.pathname.startsWith(item.href)}
+                onNavigate={onNavigate}
+              />
+            )
           ))}
 
           {user?.role === 'super_admin' && (

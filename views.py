@@ -89,7 +89,7 @@ from serializers import (
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
-    CounselorChangeRequestSerializer,
+    CounselorChangeRequestSerializer, payment_installment_summary,
 )
 
 
@@ -1027,6 +1027,43 @@ def missed_walkin_follow_up_queryset(queryset, due_lookup, today):
         due_lookup,
         WALKIN_CLOSED_FOLLOW_UP_STATUSES,
     ).filter(**{f'{due_lookup}__lt': today})
+
+
+def pending_duration_bounds(request):
+    today = timezone.localdate()
+    duration = request.query_params.get('duration') or ''
+    if duration == 'today':
+        return today, today
+    if duration == 'yesterday':
+        yesterday = today - timedelta(days=1)
+        return yesterday, yesterday
+    if duration == 'last7':
+        return today - timedelta(days=6), today
+    if duration == 'month':
+        return today.replace(day=1), today
+    if duration == 'custom':
+        return (
+            parse_date(request.query_params.get('date_from') or '') or None,
+            parse_date(request.query_params.get('date_to') or '') or None,
+        )
+    return None, today
+
+
+def apply_pending_date_filter(queryset, field_name, request):
+    start, end = pending_duration_bounds(request)
+    if start:
+        queryset = queryset.filter(**{f'{field_name}__gte': start})
+    if end:
+        queryset = queryset.filter(**{f'{field_name}__lte': end})
+    return queryset
+
+
+def pending_staff_filter(request):
+    raw = request.query_params.get('user') or request.query_params.get('counselor') or ''
+    try:
+        return int(raw) if raw else None
+    except (TypeError, ValueError):
+        return None
 
 
 def prune_stale_follow_up_notifications(user, lead_due_ids, lead_missed_ids, walkin_due_ids, walkin_missed_ids):
@@ -4118,6 +4155,135 @@ class NotificationViewSet(viewsets.ModelViewSet):
             status=Notification.Status.READ,
         )
         return Response({'detail': 'Notifications marked as read.'})
+
+
+class PendingManagementView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def base_leads(self, request):
+        qs = visible_candidate_queryset(Lead.objects.select_related('branch', 'course', 'assigned_to'))
+        if not request.user.is_super_admin:
+            qs = qs.filter(branch=request.user.branch)
+        elif request.query_params.get('branch'):
+            qs = qs.filter(branch_id=request.query_params.get('branch'))
+        staff_id = pending_staff_filter(request)
+        if staff_id:
+            qs = qs.filter(assigned_to_id=staff_id)
+        qs = pending_follow_up_queryset(
+            qs,
+            FollowUp.RecordType.LEAD,
+            'next_follow_up_date',
+            LEAD_CLOSED_FOLLOW_UP_STATUSES,
+        ).exclude(next_follow_up_date__isnull=True)
+        return apply_pending_date_filter(qs, 'next_follow_up_date', request).order_by('next_follow_up_date', 'name')
+
+    def base_walkins(self, request):
+        qs = visible_candidate_queryset(WalkIn.objects.select_related('branch', 'course', 'assigned_to'))
+        if not request.user.is_super_admin:
+            qs = qs.filter(branch=request.user.branch)
+        elif request.query_params.get('branch'):
+            qs = qs.filter(branch_id=request.query_params.get('branch'))
+        staff_id = pending_staff_filter(request)
+        if staff_id:
+            qs = qs.filter(assigned_to_id=staff_id)
+        qs = pending_follow_up_queryset(
+            qs,
+            FollowUp.RecordType.WALKIN,
+            'follow_up_date',
+            WALKIN_CLOSED_FOLLOW_UP_STATUSES,
+        ).exclude(follow_up_date__isnull=True)
+        return apply_pending_date_filter(qs, 'follow_up_date', request).order_by('follow_up_date', 'name')
+
+    def base_payments(self, request):
+        qs = visible_payment_queryset(Payment.objects.select_related(
+            'enrollment__branch', 'enrollment__course', 'enrollment__enrolled_by', 'enrollment__created_by',
+        ).prefetch_related('installments').filter(
+            enrollment__status__in=Enrollment.FINAL_STATUSES,
+            status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+            paid_amount__lt=F('total_fees'),
+            next_payment_date__isnull=False,
+        ))
+        if not request.user.is_super_admin:
+            qs = qs.filter(enrollment__branch=request.user.branch)
+        elif request.query_params.get('branch'):
+            qs = qs.filter(enrollment__branch_id=request.query_params.get('branch'))
+        staff_id = pending_staff_filter(request)
+        if staff_id:
+            qs = qs.filter(Q(enrollment__enrolled_by_id=staff_id) | Q(enrollment__created_by_id=staff_id))
+        qs = apply_pending_date_filter(qs, 'next_payment_date', request)
+        return qs.order_by('next_payment_date', 'enrollment__name')
+
+    def lead_row(self, lead):
+        return {
+            'id': lead.id,
+            'name': lead.name,
+            'phone': lead.phone,
+            'course_name': lead.course.name if lead.course else '',
+            'branch_name': lead.branch.name if lead.branch else '',
+            'status': lead.status,
+            'status_display': lead.get_status_display(),
+            'due_date': lead.next_follow_up_date,
+            'remarks': lead.remarks,
+            'assigned_to_name': lead.assigned_to.full_name if lead.assigned_to else '',
+            'detail_url': f'/leads/{lead.id}',
+        }
+
+    def walkin_row(self, walkin):
+        return {
+            'id': walkin.id,
+            'name': walkin.name,
+            'phone': walkin.phone,
+            'course_name': walkin.course.name if walkin.course else '',
+            'branch_name': walkin.branch.name if walkin.branch else '',
+            'status': walkin.status,
+            'status_display': walkin.get_status_display(),
+            'due_date': walkin.follow_up_date,
+            'remarks': walkin.remarks,
+            'assigned_to_name': walkin.assigned_to.full_name if walkin.assigned_to else '',
+            'detail_url': f'/walkins/{walkin.id}',
+        }
+
+    def payment_row(self, payment):
+        summary = payment_installment_summary(payment)
+        due = next((item for item in summary if Decimal(str(item.get('pending_amount') or 0)) > 0), None)
+        enrollment = payment.enrollment
+        return {
+            'id': payment.id,
+            'student_name': enrollment.name,
+            'student_number': enrollment.student_number,
+            'phone': enrollment.phone,
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else '',
+            'due_date': payment.next_payment_date,
+            'due_amount': due.get('pending_amount') if due else payment.balance,
+            'pending_balance': payment.balance,
+            'installment_label': due.get('label') if due else 'Pending Payment',
+            'installment_status': due.get('status') if due else payment.status,
+            'payment_status': payment.status,
+            'counselor_name': enrollment.enrolled_by.full_name if enrollment.enrolled_by else (enrollment.created_by.full_name if enrollment.created_by else ''),
+            'detail_url': f'/payments/{payment.id}',
+        }
+
+    def get(self, request, section='summary'):
+        if section == 'summary':
+            leads = self.base_leads(request).count()
+            walkins = self.base_walkins(request).count()
+            payments = self.base_payments(request).count()
+            return Response({
+                'lead_pending': leads,
+                'walkin_pending': walkins,
+                'payment_pending': payments,
+                'total_pending': leads + walkins + payments,
+            })
+        if section == 'leads':
+            rows = [self.lead_row(lead) for lead in self.base_leads(request)[:500]]
+        elif section == 'walkins':
+            rows = [self.walkin_row(walkin) for walkin in self.base_walkins(request)[:500]]
+        elif section == 'payments':
+            rows = [self.payment_row(payment) for payment in self.base_payments(request)[:500]]
+        else:
+            return Response({'detail': 'Invalid pending module.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'results': rows, 'count': len(rows)})
 
 
 class TeamNoticeViewSet(viewsets.ModelViewSet):

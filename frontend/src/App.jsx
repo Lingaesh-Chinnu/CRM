@@ -38,6 +38,7 @@ import PaymentDetailPage from './pages/payments/PaymentDetailPage'
 import NotificationsPage from './pages/notifications/NotificationsPage'
 import TeamBoardPage from './pages/team/TeamBoardPage'
 import CounselorChangeRequestsPage from './pages/CounselorChangeRequestsPage'
+import PendingPage from './pages/pending/PendingPage'
 
 // Admin-only pages
 import CoursesPage   from './pages/admin/CoursesPage'
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="notifications"   element={<NotificationsPage />} />
         <Route path="team-board"      element={<TeamBoardPage />} />
         <Route path="counselor-change-requests" element={<CounselorChangeRequestsPage />} />
+        <Route path="pending/:module" element={<PendingPage />} />
 
         {/* Viewable by all logged-in users */}
         <Route path="courses"         element={<CoursesPage />} />

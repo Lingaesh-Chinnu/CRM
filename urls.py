@@ -21,6 +21,7 @@ from views import (
     AdminReceiptViewSet, LeadImportView, LeadImportTemplateView, LeadImportHistoryViewSet,
     AdminDataImportView, AdminDataImportTemplateView,
     ExternalLeadCaptureView, NotificationViewSet, TeamNoticeViewSet, WhatsAppTemplateViewSet,
+    PendingManagementView,
     DashboardSummaryView, DashboardBranchComparisonView, DashboardTrendView,
     DashboardHistoricalAnalyticsView, DashboardMyRatingView,
     DeleteCandidatesView,
@@ -70,6 +71,7 @@ api_urlpatterns = [
     path('students/', EnrollmentViewSet.as_view({'get': 'list'}), name='student-list'),
     path('students/<int:pk>/', EnrollmentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
     path('dashboard/', DashboardSummaryView.as_view(), name='dashboard-summary-alias'),
+    path('pending/<str:section>/', PendingManagementView.as_view(), name='pending-section'),
     path('', include(router.urls)),
 
     path('dashboard/summary/', DashboardSummaryView.as_view(), name='dashboard-summary'),

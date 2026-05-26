@@ -11,6 +11,7 @@ export default function QuickFollowUpEdit({
   recordId,
   remark = '',
   nextDate = '',
+  followUpDate = '',
   onSaved,
 }) {
   const [editing, setEditing] = useState(false)
@@ -37,7 +38,7 @@ export default function QuickFollowUpEdit({
     try {
       const { data } = await api.post(`/${endpoint}/${recordId}/follow-ups/`, {
         remarks: draftRemark.trim(),
-        follow_up_date: todayIso(),
+        follow_up_date: followUpDate || todayIso(),
         next_follow_up_date: draftDate,
       })
       setEditing(false)
