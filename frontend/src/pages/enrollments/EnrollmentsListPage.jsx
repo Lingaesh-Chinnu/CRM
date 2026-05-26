@@ -21,6 +21,36 @@ function formatDate(value) {
   })
 }
 
+function formatDateTimeCompact(dateValue, timeValue = dateValue) {
+  if (!dateValue) return null
+  const date = new Date(dateValue)
+  const time = timeValue ? new Date(timeValue) : null
+  return {
+    date: date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+    }),
+    time: time && !Number.isNaN(time.getTime())
+      ? time.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        })
+      : '-',
+  }
+}
+
+function CompactStamp({ dateValue, timeValue }) {
+  const stamp = formatDateTimeCompact(dateValue, timeValue)
+  if (!stamp) return <span className="text-xs text-slate-400">-</span>
+  return (
+    <div className="leading-tight">
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
+      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+    </div>
+  )
+}
+
 function getStatusLabel(value) {
   if (value === 'pending' || value === 'pending_enrollment' || value === 'pending_rules_form') return 'Pending'
   if (value === 'enrolled' || value === 'active') return 'Active'
@@ -276,13 +306,14 @@ export default function EnrollmentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'name', header: 'Student Name', width: 'minmax(150px,1.2fr)', render: (row) => <div><Link to={`/enrollments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
-                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || 'Course pending'}</span> },
-                { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> },
-                { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
-                { key: 'fees', header: 'Fees', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
-                { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.payment_balance)}</span> },
-                { key: 'counselor', header: 'Counselor', width: '140px', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
+                { key: 'enrollmentDate', header: 'Enrollment Date', width: '86px', className: 'flex items-center', render: (row) => <CompactStamp dateValue={row.enrollment_date || row.created_at} timeValue={row.created_at || row.enrollment_date} /> },
+                { key: 'name', header: 'Student', width: 'minmax(130px,1.1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><Link to={`/enrollments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'course', header: 'Course', width: 'minmax(120px,0.95fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.course_name || 'Course pending'}</span> },
+                ...(isSuperAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(90px,0.7fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> }] : []),
+                { key: 'status', header: 'Status', width: '104px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
+                { key: 'fees', header: 'Fees', width: '96px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
+                { key: 'balance', header: 'Balance', width: '96px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                { key: 'counselor', header: 'Counselor', width: 'minmax(110px,0.85fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
               ]}
             />
           </div>
