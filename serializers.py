@@ -1236,7 +1236,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','payment_balance','paid_amount','counselor_name',
-                  'net_payable_fee','source','source_display','preferred_timing',
+                  'custom_payable_fee','net_payable_fee','source','source_display','preferred_timing',
                   'preferred_timing_display','qualification','qualification_display','degree',
                   'demo_class','interested_global_certification']
 
@@ -1285,7 +1285,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         model  = Enrollment
         fields = '__all__'
         read_only_fields = [
-            'student_number', 'final_fees', 'net_payable_fee',
+            'student_number', 'final_fees', 'custom_payable_fee', 'net_payable_fee',
             'spot_conversion_discount_amount', 'enrolled_by', 'created_by',
         ]
 

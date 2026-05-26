@@ -770,6 +770,9 @@ def calculate_next_payment_date(enrollment, paid_amount, total_fees):
 
 
 def enrollment_payable_fee(enrollment):
+    override = getattr(enrollment, 'custom_payable_fee', None)
+    if override is not None:
+        return override
     return enrollment.net_payable_fee if enrollment.net_payable_fee is not None else enrollment.final_fees
 
 
@@ -879,6 +882,7 @@ class Enrollment(TimeStampedModel):
     final_fees       = models.DecimalField(max_digits=10, decimal_places=2)
     spot_conversion_discount_applied = models.BooleanField(default=False)
     spot_conversion_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    custom_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     net_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount          = models.ForeignKey(Discount, null=True, blank=True, on_delete=models.SET_NULL,
                                           related_name='enrollments')
@@ -910,7 +914,8 @@ class Enrollment(TimeStampedModel):
             self.spot_conversion_discount_amount = Decimal('2000')
         else:
             self.spot_conversion_discount_amount = Decimal('0')
-        self.net_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount, 0)
+        calculated_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount, 0)
+        self.net_payable_fee = self.custom_payable_fee if self.custom_payable_fee is not None else calculated_payable_fee
         super().save(*args, **kwargs)
 
     def __str__(self):

@@ -475,6 +475,51 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(history.reason, 'Student requested upgrade')
         self.assertEqual(str(history.effective_date), '2026-05-20')
 
+    def test_admin_schedule_override_updates_candidate_payable_fee_and_payment_totals(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.final_course,
+            name='Custom Schedule Student',
+            phone='9000000129',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=42900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            paid_amount=5000,
+            manual_installment_schedule=[
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '2nd Installment', 'amount': 18950, 'due_date': '2026-05-12'},
+                {'label': '3rd Installment', 'amount': 18950, 'due_date': '2026-06-12'},
+            ],
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/payments/{payment.id}/update-schedule/', {
+            'payment_schedule': [
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '2nd Installment', 'amount': 16950, 'due_date': '2026-05-12'},
+                {'label': '3rd Installment', 'amount': 16950, 'due_date': '2026-06-12'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        enrollment.refresh_from_db()
+        payment.refresh_from_db()
+        self.assertEqual(enrollment.actual_fees, Decimal('42900.00'))
+        self.assertEqual(enrollment.custom_payable_fee, Decimal('38900.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('38900.00'))
+        self.assertEqual(payment.total_fees, Decimal('38900.00'))
+        self.assertEqual(payment.balance, Decimal('33900.00'))
+        self.assertEqual(payment.status, Payment.Status.PARTIAL)
+        self.assertEqual(Decimal(str(response.data['total_fees'])), Decimal('38900.00'))
+        self.assertEqual(Decimal(str(response.data['balance'])), Decimal('33900.00'))
+
     def test_change_course_respects_branch_permissions(self):
         enrollment = Enrollment.objects.create(
             branch=self.other_branch,

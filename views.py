@@ -4740,9 +4740,10 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
     enrollment.final_enrollment_course = new_course
     enrollment.actual_fees = new_course.actual_fees
     enrollment.discount_amount = new_course.discount_amount
+    enrollment.custom_payable_fee = None
     enrollment.save(update_fields=[
         'course', 'final_enrollment_course', 'actual_fees', 'discount_amount',
-        'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
+        'custom_payable_fee', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
     ])
     new_fee = enrollment_payable_fee(enrollment)
 
@@ -5766,25 +5767,40 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if not isinstance(schedule, list) or not schedule:
             return Response({'detail': 'Payment schedule is required.'}, status=400)
         cleaned = []
+        total_fees = Decimal('0')
         for index, item in enumerate(schedule, start=1):
             amount = item.get('amount')
             due_date = item.get('due_date')
             if amount in (None, '') or not due_date:
                 return Response({'detail': 'Each installment needs amount and due date.'}, status=400)
             try:
-                amount = int(float(amount))
-            except (TypeError, ValueError):
+                amount = Decimal(str(amount))
+            except Exception:
                 return Response({'detail': 'Installment amount must be numeric.'}, status=400)
             if amount < 0:
                 return Response({'detail': 'Installment amount cannot be negative.'}, status=400)
+            amount = amount.quantize(Decimal('0.01'))
+            total_fees += amount
             cleaned.append({
                 'label': item.get('label') or f'{index} Installment',
-                'amount': amount,
+                'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
                 'due_date': due_date,
             })
-        payment.manual_installment_schedule = cleaned
-        payment.update_status()
-        payment.save(update_fields=['manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
+        if total_fees <= 0:
+            return Response({'detail': 'Payment schedule total must be greater than zero.'}, status=400)
+        with transaction.atomic():
+            payment = (
+                Payment.objects
+                .select_for_update()
+                .select_related('enrollment')
+                .get(pk=payment.pk)
+            )
+            payment.enrollment.custom_payable_fee = total_fees
+            payment.enrollment.net_payable_fee = total_fees
+            payment.enrollment.save(update_fields=['custom_payable_fee', 'net_payable_fee', 'updated_at'])
+            payment.total_fees = total_fees
+            payment.manual_installment_schedule = cleaned
+            payment.save(update_fields=['total_fees', 'manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
         resolve_payment_due_notifications_if_inactive(payment)
         return Response(PaymentSerializer(payment, context={'request': request}).data)
 
