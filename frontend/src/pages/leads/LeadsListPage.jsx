@@ -36,6 +36,8 @@ const statusFilters = [
   { value: 'future_lead', label: 'Future Lead' },
 ]
 
+const quickStatusOptions = statusFilters.filter((option) => option.value)
+
 function isoDate(value) {
   return value.toISOString().slice(0, 10)
 }
@@ -125,6 +127,7 @@ export default function LeadsListPage() {
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [statusSavingId, setStatusSavingId] = useState(null)
   const [importResult, setImportResult] = useState(null)
   const [importError, setImportError] = useState('')
   const { user } = useSelector((state) => state.auth)
@@ -342,6 +345,38 @@ export default function LeadsListPage() {
           }
         : lead
     )))
+  }
+
+  const updateLeadStatus = async (lead, status) => {
+    if (!lead || !status || lead.status === status || statusSavingId) return
+    const previousStatus = lead.status
+    setStatusSavingId(lead.id)
+    setLoadMessage('')
+    setLeads((current) => current.map((item) => (
+      item.id === lead.id ? { ...item, status, updated_at: new Date().toISOString() } : item
+    )))
+    try {
+      const { data } = await api.patch(`/leads/${lead.id}/`, { status })
+      setLeads((current) => current.map((item) => (
+        item.id === lead.id
+          ? {
+              ...item,
+              ...data,
+              course_name: data.course_name ?? item.course_name,
+              branch_name: data.branch_name ?? item.branch_name,
+              assigned_to_name: data.assigned_to_name ?? item.assigned_to_name,
+              assigned_user: data.assigned_user ?? item.assigned_user,
+            }
+          : item
+      )))
+    } catch (error) {
+      setLeads((current) => current.map((item) => (
+        item.id === lead.id ? { ...item, status: previousStatus } : item
+      )))
+      setLoadMessage(apiErrorMessage(error, 'Failed to update lead status.'))
+    } finally {
+      setStatusSavingId(null)
+    }
   }
 
   const updateFilter = (field, value) => {
@@ -723,7 +758,36 @@ export default function LeadsListPage() {
                     </div>
                   ),
                 },
-                { key: 'status', header: 'Status', width: '108px', className: 'flex items-center', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
+                {
+                  key: 'status',
+                  header: 'Status',
+                  width: '132px',
+                  className: 'flex items-center',
+                  render: (lead) => (
+                    <div className="relative w-full max-w-[132px]">
+                      <select
+                        value={lead.status || 'new'}
+                        onChange={(event) => updateLeadStatus(lead, event.target.value)}
+                        disabled={statusSavingId === lead.id}
+                        className={`w-full appearance-none rounded-full border px-3 py-1.5 pr-7 text-[11px] font-bold uppercase tracking-[0.08em] outline-none transition disabled:cursor-wait disabled:opacity-60 ${
+                          statusTone(lead.status) === 'green'
+                            ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+                            : statusTone(lead.status) === 'red'
+                              ? 'border-rose-100 bg-rose-50 text-rose-700'
+                              : statusTone(lead.status) === 'amber'
+                                ? 'border-amber-100 bg-amber-50 text-amber-700'
+                                : 'border-slate-200 bg-slate-100 text-slate-700'
+                        }`}
+                        title="Update lead status"
+                      >
+                        {quickStatusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-current">v</span>
+                    </div>
+                  ),
+                },
                 { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(100px,0.8fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
                 { key: 'nextFollowUp', header: 'Next Follow Up', width: '94px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
                 ...(isSuperAdmin ? [{
