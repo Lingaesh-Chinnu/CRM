@@ -85,6 +85,33 @@ function allocationPreview(installments, amount) {
   return rows
 }
 
+function validateSchedule(schedule) {
+  if (!Array.isArray(schedule) || schedule.length === 0) {
+    return 'Payment schedule is required.'
+  }
+  let total = 0
+  for (const item of schedule) {
+    if (item.amount === '' || item.amount === null || item.amount === undefined) {
+      return 'Each installment needs an amount.'
+    }
+    const amount = Number(item.amount)
+    if (!Number.isFinite(amount)) {
+      return 'Installment amounts must be numeric.'
+    }
+    if (amount < 0) {
+      return 'Installment amount cannot be negative.'
+    }
+    if (!item.due_date) {
+      return 'Each installment needs a due date.'
+    }
+    total += amount
+  }
+  if (total <= 0) {
+    return 'Payment schedule total must be greater than zero.'
+  }
+  return ''
+}
+
 export default function PaymentDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -207,6 +234,11 @@ export default function PaymentDetailPage() {
   }
 
   const updateSchedule = async () => {
+    const validationMessage = validateSchedule(schedule)
+    if (validationMessage) {
+      setMessage(validationMessage)
+      return
+    }
     setSaving(true)
     setMessage('')
     try {

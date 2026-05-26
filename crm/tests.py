@@ -15,6 +15,88 @@ User = get_user_model()
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
     SECURE_SSL_REDIRECT=False,
 )
+class PaymentScheduleSyncTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.course = Course.objects.create(name='Python Full Stack', actual_fees=42900)
+        self.admin = User.objects.create_superuser(
+            username='schedule-admin',
+            email='schedule-admin@example.com',
+            password='pass12345',
+        )
+        self.enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            actual_fees=Decimal('42900'),
+            discount_amount=Decimal('0'),
+            final_fees=Decimal('42900'),
+            net_payable_fee=Decimal('42900'),
+            name='Schedule Candidate',
+            phone='9000000200',
+            email='schedule@example.com',
+            enrollment_date='2026-05-01',
+            start_date='2026-05-15',
+            status=Enrollment.Status.ENROLLED,
+        )
+        self.payment = Payment.objects.create(
+            enrollment=self.enrollment,
+            total_fees=Decimal('42900'),
+        )
+        PaymentInstallment.objects.create(
+            payment=self.payment,
+            enrollment=self.enrollment,
+            amount=Decimal('15000'),
+            payment_mode=PaymentInstallment.Mode.CASH,
+            reference_number='CASH-001',
+            payment_date='2026-05-02',
+        )
+
+    def test_update_schedule_recalculates_candidate_fee_without_resetting_paid_amount(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/payments/{self.payment.id}/update-schedule/', {
+            'payment_schedule': [
+                {'label': '1st Installment', 'amount': '5000', 'due_date': '2026-05-01'},
+                {'label': '2nd Installment', 'amount': '16950', 'due_date': '2026-05-15'},
+                {'label': '3rd Installment', 'amount': '16950', 'due_date': '2026-06-15'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.payment.refresh_from_db()
+        self.enrollment.refresh_from_db()
+        self.course.refresh_from_db()
+        self.assertEqual(self.payment.total_fees, Decimal('38900.00'))
+        self.assertEqual(self.payment.paid_amount, Decimal('15000.00'))
+        self.assertEqual(self.payment.balance, Decimal('23900.00'))
+        self.assertEqual(self.payment.status, Payment.Status.PARTIAL)
+        self.assertEqual(self.enrollment.custom_payable_fee, Decimal('38900.00'))
+        self.assertEqual(self.enrollment.net_payable_fee, Decimal('38900.00'))
+        self.assertEqual(self.course.actual_fees, Decimal('42900.00'))
+        self.assertEqual(Enrollment.objects.count(), 1)
+        self.assertEqual(response.data['total_fees'], '38900.00')
+        self.assertEqual(response.data['paid_amount'], '15000.00')
+        self.assertEqual(response.data['balance'], '23900.00')
+        self.assertEqual(response.data['status'], Payment.Status.PARTIAL)
+
+    def test_update_schedule_rejects_negative_installment_amounts(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/payments/{self.payment.id}/update-schedule/', {
+            'payment_schedule': [
+                {'label': '1st Installment', 'amount': '-1', 'due_date': '2026-05-01'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.total_fees, Decimal('42900.00'))
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
 class PublicWalkInFormTests(APITestCase):
     def setUp(self):
         self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')

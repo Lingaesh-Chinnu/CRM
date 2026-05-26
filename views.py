@@ -58,7 +58,7 @@ from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import base64
 import io
@@ -6143,16 +6143,21 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 return Response({'detail': 'Each installment needs amount and due date.'}, status=400)
             try:
                 amount = Decimal(str(amount))
-            except Exception:
+            except (InvalidOperation, TypeError, ValueError):
+                return Response({'detail': 'Installment amount must be numeric.'}, status=400)
+            if not amount.is_finite():
                 return Response({'detail': 'Installment amount must be numeric.'}, status=400)
             if amount < 0:
                 return Response({'detail': 'Installment amount cannot be negative.'}, status=400)
             amount = amount.quantize(Decimal('0.01'))
+            parsed_due_date = parse_date(str(due_date))
+            if not parsed_due_date:
+                return Response({'detail': 'Each installment needs a valid due date.'}, status=400)
             total_fees += amount
             cleaned.append({
                 'label': item.get('label') or f'{index} Installment',
                 'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
-                'due_date': due_date,
+                'due_date': parsed_due_date.isoformat(),
             })
         if total_fees <= 0:
             return Response({'detail': 'Payment schedule total must be greater than zero.'}, status=400)
@@ -6166,6 +6171,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             payment.enrollment.custom_payable_fee = total_fees
             payment.enrollment.net_payable_fee = total_fees
             payment.enrollment.save(update_fields=['custom_payable_fee', 'net_payable_fee', 'updated_at'])
+            payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
             payment.total_fees = total_fees
             payment.manual_installment_schedule = cleaned
             payment.save(update_fields=['total_fees', 'manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
