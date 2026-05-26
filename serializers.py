@@ -1593,6 +1593,7 @@ class PaymentSerializer(serializers.ModelSerializer):
     first_class_date = serializers.DateField(source='enrollment.start_date', read_only=True)
     branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
     branch_name = serializers.SerializerMethodField()
+    counselor_name = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
     installment_summary = serializers.SerializerMethodField()
     active_reason_requests = serializers.SerializerMethodField()
@@ -1600,7 +1601,7 @@ class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
-                  'course_name','first_class_date','branch','branch_name',
+                  'course_name','first_class_date','branch','branch_name','counselor_name',
                   'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
                   'installments','active_reason_requests','updated_at']
@@ -1608,6 +1609,12 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     def get_branch_name(self, obj):
         return obj.enrollment.branch.name if obj.enrollment.branch else None
+
+    def get_counselor_name(self, obj):
+        user = obj.enrollment.enrolled_by or obj.enrollment.created_by
+        if not user:
+            return ''
+        return user.full_name or user.username
 
     def get_payment_schedule(self, obj):
         schedule = get_payment_installment_schedule(obj)

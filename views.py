@@ -5477,7 +5477,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = visible_payment_queryset(Payment.objects.select_related(
-            'enrollment__branch','enrollment__course'
+            'enrollment__branch','enrollment__course','enrollment__enrolled_by','enrollment__created_by'
         ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)

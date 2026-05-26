@@ -259,6 +259,14 @@ export default function PaymentDetailPage() {
   })
   const currentReferenceConfig = referenceConfig(form.payment_mode)
   const referenceValue = form.payment_mode === 'cash' ? nextCashReference(payment) : form.reference_number
+  const headerMeta = [
+    payment.student_number || 'Student ID pending',
+    payment.course_name || 'Course not set',
+    ...(isSuperAdmin ? [
+      payment.branch_name || 'Branch not set',
+      payment.counselor_name || 'Counselor not assigned',
+    ] : []),
+  ]
 
   return (
     <div className="space-y-6">
@@ -266,9 +274,14 @@ export default function PaymentDetailPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Payments</p>
           <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{payment.student_name}</h1>
-          <p className="mt-3 text-sm text-slate-500">
-            {payment.student_number} | {payment.course_name || 'Course not set'}
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-medium text-slate-500">
+            {headerMeta.map((item, index) => (
+              <span key={`${item}-${index}`} className="inline-flex items-center gap-2">
+                <span className={index === 0 ? 'font-semibold text-slate-700' : ''}>{item}</span>
+                {index < headerMeta.length - 1 && <span className="text-slate-300">•</span>}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           {isSuperAdmin && (
