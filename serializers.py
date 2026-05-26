@@ -802,7 +802,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
-                  'is_converted_to_enrollment','latest_remark']
+                  'is_converted_to_enrollment','latest_remark','created_at']
 
     def to_representation(self, instance):
         defaults = {

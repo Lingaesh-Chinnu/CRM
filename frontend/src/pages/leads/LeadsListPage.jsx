@@ -644,14 +644,14 @@ export default function LeadsListPage() {
                 {
                   key: 'created',
                   header: 'Created',
-                  width: '82px',
+                  width: '74px',
                   className: 'flex items-center',
                   render: (lead) => <CreatedStamp value={lead.created_at} />,
                 },
                 {
                   key: 'name',
                   header: 'Name',
-                  width: 'minmax(145px,1.15fr)',
+                  width: 'minmax(120px,1.1fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
@@ -661,9 +661,16 @@ export default function LeadsListPage() {
                   ),
                 },
                 {
+                  key: 'phone',
+                  header: 'Phone',
+                  width: '106px',
+                  className: 'flex items-center',
+                  render: (lead) => <span className="truncate text-sm font-semibold text-slate-800">{lead.phone || '-'}</span>,
+                },
+                {
                   key: 'source',
                   header: 'Source',
-                  width: 'minmax(120px,0.9fr)',
+                  width: 'minmax(96px,0.85fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
@@ -672,13 +679,20 @@ export default function LeadsListPage() {
                     </div>
                   ),
                 },
-                { key: 'status', header: 'Status', width: '118px', className: 'flex items-center', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
-                { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(118px,0.85fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
-                { key: 'nextFollowUp', header: 'Next Follow Up', width: '104px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
+                { key: 'status', header: 'Status', width: '108px', className: 'flex items-center', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
+                { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(100px,0.8fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
+                { key: 'nextFollowUp', header: 'Next Follow Up', width: '94px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
+                ...(isSuperAdmin ? [{
+                  key: 'branch',
+                  header: 'Branch',
+                  width: 'minmax(88px,0.75fr)',
+                  className: 'flex items-center',
+                  render: (lead) => <span className="truncate text-sm font-semibold text-slate-700">{lead.branch_name || '-'}</span>,
+                }] : []),
                 {
                   key: 'remark',
                   header: 'Latest Remark',
-                  width: 'minmax(210px,1.7fr)',
+                  width: 'minmax(150px,1.35fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <QuickFollowUpEdit

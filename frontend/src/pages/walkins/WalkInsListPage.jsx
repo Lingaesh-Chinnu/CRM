@@ -76,11 +76,41 @@ function formatDate(value) {
   })
 }
 
+function formatDateTimeCompact(dateValue, timeValue = dateValue) {
+  if (!dateValue) return null
+  const date = new Date(dateValue)
+  const time = timeValue ? new Date(timeValue) : null
+  return {
+    date: date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+    }),
+    time: time && !Number.isNaN(time.getTime())
+      ? time.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        })
+      : '-',
+  }
+}
+
+function CompactStamp({ dateValue, timeValue }) {
+  const stamp = formatDateTimeCompact(dateValue, timeValue)
+  if (!stamp) return <span className="text-xs text-slate-400">-</span>
+  return (
+    <div className="leading-tight">
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
+      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+    </div>
+  )
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, activeFilter, onStatusChange }) {
+function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, activeFilter, onStatusChange, canViewBranch }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
@@ -115,25 +145,40 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, a
             emptyMessage={emptyMessage}
             columns={[
               {
+                key: 'walkInDate',
+                header: 'Walk-in Date',
+                width: '78px',
+                className: 'flex items-center',
+                render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} timeValue={walkin.created_at || walkin.visit_date} />,
+              },
+              {
                 key: 'name',
                 header: 'Name',
-                width: 'minmax(150px,1.2fr)',
+                width: 'minmax(130px,1.15fr)',
+                className: 'flex items-center',
                 render: (walkin) => (
                   <div className="min-w-0">
                     <Link to={`/walkins/${walkin.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
-                    <p className="mt-1 truncate text-xs text-slate-500">{walkin.course_name || 'Course pending'}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{walkin.phone || 'Phone not set'}</p>
                   </div>
                 ),
               },
-              { key: 'phone', header: 'Phone', width: '120px', render: (walkin) => <span className="font-semibold text-slate-800">{walkin.phone || '-'}</span> },
-              { key: 'source', header: 'Source', width: '120px', render: (walkin) => <span className="truncate text-slate-600">{walkin.source_display || walkin.source || '-'}</span> },
-              { key: 'status', header: 'Status', width: '130px', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
-              { key: 'followUpBy', header: 'Follow Up By', width: '145px', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
-              { key: 'nextFollowUp', header: 'Next Follow Up', width: '130px', render: (walkin) => <span className="text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
+              { key: 'course', header: 'Course', width: 'minmax(110px,0.95fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-sm font-semibold text-slate-700">{walkin.course_name || 'Course pending'}</span> },
+              { key: 'status', header: 'Status', width: '112px', className: 'flex items-center', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
+              { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(104px,0.85fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
+              { key: 'nextFollowUp', header: 'Next Follow Up', width: '98px', className: 'flex items-center', render: (walkin) => <span className="whitespace-nowrap text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
+              ...(canViewBranch ? [{
+                key: 'branch',
+                header: 'Branch',
+                width: 'minmax(88px,0.75fr)',
+                className: 'flex items-center',
+                render: (walkin) => <span className="truncate text-sm font-semibold text-slate-700">{walkin.branch_name || '-'}</span>,
+              }] : []),
               {
                 key: 'remark',
                 header: 'Latest Remark',
-                width: 'minmax(180px,1.4fr)',
+                width: 'minmax(150px,1.35fr)',
+                className: 'flex items-center',
                 render: (walkin) => (
                   <QuickFollowUpEdit
                     type="walkin"
@@ -421,6 +466,7 @@ export default function WalkInsListPage() {
         onFollowUpSaved={updateWalkInFollowUp}
         activeFilter={activeSmartFilter}
         onStatusChange={applyStatusFilter}
+        canViewBranch={canFilterByBranch}
       />
 
       <div className="pt-2">
@@ -432,6 +478,7 @@ export default function WalkInsListPage() {
           onFollowUpSaved={updateWalkInFollowUp}
           activeFilter={activeSmartFilter}
           onStatusChange={applyStatusFilter}
+          canViewBranch={canFilterByBranch}
         />
       </div>
     </div>
