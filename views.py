@@ -77,6 +77,7 @@ from crm.models import (
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
+    CourseChangeRequest,
     get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
@@ -86,7 +87,7 @@ from serializers import (
     UserMonitoringSerializer, UserMonthlyRatingSerializer,
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
-    PaymentReasonRequestSerializer, CourseChangeHistorySerializer,
+    PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
 )
 
 
@@ -4713,6 +4714,45 @@ def rebuild_pending_installment_schedule(enrollment, payment):
     return locked_items + future_items
 
 
+def apply_enrollment_course_change(enrollment, new_course, user, reason='', effective_date=None):
+    effective_date = effective_date or timezone.localdate()
+    old_course = enrollment.course
+    old_fee = enrollment_payable_fee(enrollment)
+
+    enrollment.course = new_course
+    enrollment.final_enrollment_course = new_course
+    enrollment.actual_fees = new_course.actual_fees
+    enrollment.discount_amount = new_course.discount_amount
+    enrollment.save(update_fields=[
+        'course', 'final_enrollment_course', 'actual_fees', 'discount_amount',
+        'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
+    ])
+    new_fee = enrollment_payable_fee(enrollment)
+
+    CourseChangeHistory.objects.create(
+        enrollment=enrollment,
+        old_course=old_course,
+        new_course=new_course,
+        changed_by=user,
+        old_fee=old_fee,
+        new_fee=new_fee,
+        reason=reason,
+        effective_date=effective_date,
+    )
+
+    payment = getattr(enrollment, 'payment', None)
+    if payment:
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
+        payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        payment.total_fees = new_fee
+        payment.manual_installment_schedule = rebuild_pending_installment_schedule(enrollment, payment)
+        payment.save(update_fields=[
+            'total_fees', 'paid_amount', 'manual_installment_schedule',
+            'status', 'next_payment_date', 'updated_at',
+        ])
+    return old_course, old_fee, new_fee
+
+
 class EnrollmentViewSet(viewsets.ModelViewSet):
     """Enrollment records. Staff sees own branch."""
     permission_classes = [IsStaffOrAdmin]
@@ -4751,6 +4791,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path='change-course')
     def change_course(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can directly change course. Submit a course change request instead.'}, status=status.HTTP_403_FORBIDDEN)
         enrollment = self.get_object()
         course_id = request.data.get('course') or request.data.get('new_course')
         if not course_id:
@@ -4776,43 +4818,69 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 .select_related('course', 'branch')
                 .get(pk=enrollment.pk)
             )
-            old_course = enrollment.course
-            old_fee = enrollment_payable_fee(enrollment)
-
-            enrollment.course = new_course
-            enrollment.final_enrollment_course = new_course
-            enrollment.actual_fees = new_course.actual_fees
-            enrollment.discount_amount = new_course.discount_amount
-            enrollment.save(update_fields=[
-                'course', 'final_enrollment_course', 'actual_fees', 'discount_amount',
-                'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
-            ])
-            new_fee = enrollment_payable_fee(enrollment)
-
-            CourseChangeHistory.objects.create(
-                enrollment=enrollment,
-                old_course=old_course,
-                new_course=new_course,
-                changed_by=request.user,
-                old_fee=old_fee,
-                new_fee=new_fee,
-                reason=reason,
-                effective_date=effective_date,
-            )
-
-            payment = getattr(enrollment, 'payment', None)
-            if payment:
-                payment = Payment.objects.select_for_update().get(pk=payment.pk)
-                payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
-                payment.total_fees = new_fee
-                payment.manual_installment_schedule = rebuild_pending_installment_schedule(enrollment, payment)
-                payment.save(update_fields=[
-                    'total_fees', 'paid_amount', 'manual_installment_schedule',
-                    'status', 'next_payment_date', 'updated_at',
-                ])
+            apply_enrollment_course_change(enrollment, new_course, request.user, reason, effective_date)
 
         enrollment.refresh_from_db()
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
+
+    @action(detail=True, methods=['post'], url_path='request-course-change')
+    def request_course_change(self, request, pk=None):
+        enrollment = self.get_object()
+        course_id = request.data.get('requested_course') or request.data.get('course') or request.data.get('new_course')
+        if not course_id:
+            return Response({'requested_course': 'Select a new course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_course = Course.objects.filter(pk=course_id, is_active=True).first()
+        if not requested_course:
+            return Response({'requested_course': 'Select a valid active course.'}, status=status.HTTP_400_BAD_REQUEST)
+        if enrollment.course_id == requested_course.id:
+            return Response({'requested_course': 'Requested course must be different from the current course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        requested_batch_date_raw = request.data.get('requested_batch_date') or request.data.get('preferred_batch_start_date')
+        requested_batch_date = parse_date(requested_batch_date_raw) if requested_batch_date_raw else None
+        if requested_batch_date_raw and not requested_batch_date:
+            return Response({'requested_batch_date': 'Enter a valid preferred batch start date.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'reason': 'Reason for change is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        old_fee = enrollment_payable_fee(enrollment)
+        new_fee = max(Decimal(str(requested_course.actual_fees or 0)) - Decimal(str(requested_course.discount_amount or 0)), Decimal('0'))
+        if enrollment.spot_conversion_discount_applied:
+            new_fee = max(new_fee - Decimal('2000'), Decimal('0'))
+
+        with transaction.atomic():
+            existing = CourseChangeRequest.objects.select_for_update().filter(
+                enrollment=enrollment,
+                status=CourseChangeRequest.Status.PENDING,
+            ).first()
+            if existing:
+                return Response({'detail': 'This enrollment already has a pending course change request.'}, status=status.HTTP_400_BAD_REQUEST)
+            change_request = CourseChangeRequest.objects.create(
+                student=enrollment,
+                enrollment=enrollment,
+                old_course=enrollment.course,
+                requested_course=requested_course,
+                requested_batch_date=requested_batch_date,
+                reason=reason,
+                requested_by=request.user,
+                requested_at=timezone.now(),
+                status=CourseChangeRequest.Status.PENDING,
+                old_fee=old_fee,
+                new_fee=new_fee,
+            )
+            message = f'Course change request submitted for {enrollment.name}'
+            for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+                create_user_notification(
+                    admin_user,
+                    'Course Change Request',
+                    message,
+                    Notification.NType.INFO,
+                    f'/admin/course-change-requests?request={change_request.id}',
+                )
+
+        return Response(CourseChangeRequestSerializer(change_request, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
@@ -5006,6 +5074,115 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 )
             self.perform_destroy(enrollment)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CourseChangeRequestFilter(django_filters.FilterSet):
+    branch = django_filters.NumberFilter(field_name='enrollment__branch_id')
+    date = django_filters.DateFilter(field_name='requested_at', lookup_expr='date')
+
+    class Meta:
+        model = CourseChangeRequest
+        fields = ['status', 'branch', 'date']
+
+
+class CourseChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CourseChangeRequestSerializer
+    permission_classes = [IsStaffOrAdmin]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = CourseChangeRequestFilter
+    search_fields = ['enrollment__name', 'enrollment__phone', 'old_course__name', 'requested_course__name']
+    ordering_fields = ['requested_at', 'reviewed_at']
+    ordering = ['-requested_at']
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = CourseChangeRequest.objects.select_related(
+            'enrollment__branch', 'student', 'old_course', 'requested_course', 'requested_by', 'reviewed_by'
+        )
+        if self.request.user.is_super_admin:
+            return queryset
+        return queryset.filter(Q(requested_by=self.request.user) | Q(enrollment__branch=self.request.user.branch))
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can approve course change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status != CourseChangeRequest.Status.PENDING:
+            return Response({'detail': 'Only pending course change requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+
+        with transaction.atomic():
+            change_request = CourseChangeRequest.objects.select_for_update().select_related(
+                'enrollment', 'requested_course', 'requested_by',
+            ).get(pk=change_request.pk)
+            enrollment = Enrollment.objects.select_for_update().select_related('course', 'branch').get(pk=change_request.enrollment_id)
+            if enrollment.course_id == change_request.requested_course_id:
+                return Response({'detail': 'Enrollment is already in the requested course.'}, status=status.HTTP_400_BAD_REQUEST)
+            old_course, old_fee, new_fee = apply_enrollment_course_change(
+                enrollment,
+                change_request.requested_course,
+                request.user,
+                change_request.reason,
+                change_request.requested_batch_date or timezone.localdate(),
+            )
+            change_request.old_course = old_course
+            change_request.old_fee = old_fee
+            change_request.new_fee = new_fee
+            change_request.status = CourseChangeRequest.Status.APPROVED
+            change_request.reviewed_by = request.user
+            change_request.reviewed_at = timezone.now()
+            change_request.admin_remarks = remarks
+            change_request.save(update_fields=[
+                'old_course', 'old_fee', 'new_fee', 'status', 'reviewed_by',
+                'reviewed_at', 'admin_remarks', 'updated_at',
+            ])
+            mark_notifications_terminal(
+                Notification.objects.filter(
+                    title='Course Change Request',
+                    related_url=f'/admin/course-change-requests?request={change_request.id}',
+                ),
+                Notification.Status.APPROVED,
+            )
+            create_user_notification(
+                change_request.requested_by,
+                'Course Change Request Approved',
+                'Your course change request has been approved.',
+                Notification.NType.SUCCESS,
+                f'/enrollments/{change_request.enrollment_id}',
+            )
+
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can reject course change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status != CourseChangeRequest.Status.PENDING:
+            return Response({'detail': 'Only pending course change requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+        remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+
+        change_request.status = CourseChangeRequest.Status.REJECTED
+        change_request.reviewed_by = request.user
+        change_request.reviewed_at = timezone.now()
+        change_request.admin_remarks = remarks
+        change_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'admin_remarks', 'updated_at'])
+        mark_notifications_terminal(
+            Notification.objects.filter(
+                title='Course Change Request',
+                related_url=f'/admin/course-change-requests?request={change_request.id}',
+            ),
+            Notification.Status.REJECTED,
+        )
+        create_user_notification(
+            change_request.requested_by,
+            'Course Change Request Rejected',
+            'Your course change request has been rejected.',
+            Notification.NType.ERROR,
+            f'/enrollments/{change_request.enrollment_id}',
+        )
+        return Response(self.get_serializer(change_request).data)
 
 
 # ============================================================

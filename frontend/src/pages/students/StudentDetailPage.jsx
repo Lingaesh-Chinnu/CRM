@@ -97,16 +97,17 @@ export default function StudentDetailPage() {
     navigate('/students', { replace: true })
   }
 
-  const changeCourse = async (payload) => {
+  const submitCourseChange = async (payload) => {
     setStatusSaving(true)
     setMessage('')
     try {
-      const { data } = await api.post(`/enrollments/${row.id}/change-course/`, payload)
-      setRow(data)
+      const endpoint = isSuperAdmin ? `/enrollments/${row.id}/change-course/` : `/enrollments/${row.id}/request-course-change/`
+      const { data } = await api.post(endpoint, payload)
+      if (isSuperAdmin) setRow(data)
       setShowCourseChange(false)
-      setMessage('Course changed. Fees and pending installments were recalculated.')
+      setMessage(isSuperAdmin ? 'Course changed. Fees and pending installments were recalculated.' : 'Course change request submitted for admin approval.')
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to change course.'))
+      setMessage(apiErrorMessage(error, isSuperAdmin ? 'Failed to change course.' : 'Failed to submit course change request.'))
     } finally {
       setStatusSaving(false)
     }
@@ -120,7 +121,7 @@ export default function StudentDetailPage() {
           <h1 className="text-3xl font-black tracking-tight text-slate-950">{row.name}</h1>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => { setShowCourseChange(true); setMessage('') }} className="w-fit rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 hover:bg-cyan-100">
-              Change Course
+              {isSuperAdmin ? 'Change Course' : 'Request Course Change'}
             </button>
             {isSuperAdmin && <AdminDeleteButton label="student" onConfirm={deleteStudent} />}
           </div>
@@ -234,8 +235,9 @@ export default function StudentDetailPage() {
           enrollment={row}
           courses={courses}
           saving={statusSaving}
+          mode={isSuperAdmin ? 'direct' : 'request'}
           onCancel={() => setShowCourseChange(false)}
-          onSubmit={changeCourse}
+          onSubmit={submitCourseChange}
         />
       )}
     </div>

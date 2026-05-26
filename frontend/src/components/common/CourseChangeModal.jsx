@@ -48,11 +48,12 @@ export function CourseChangeHistorySection({ history = [] }) {
   )
 }
 
-export default function CourseChangeModal({ enrollment, courses, saving, onCancel, onSubmit }) {
+export default function CourseChangeModal({ enrollment, courses, saving, onCancel, onSubmit, mode = 'request' }) {
   const [courseId, setCourseId] = useState('')
   const [reason, setReason] = useState('')
-  const [effectiveDate, setEffectiveDate] = useState(today())
+  const [batchDate, setBatchDate] = useState(today())
   const [confirmed, setConfirmed] = useState(false)
+  const isDirectChange = mode === 'direct'
 
   const selectedCourse = useMemo(
     () => courses.find((course) => String(course.id) === String(courseId)),
@@ -67,9 +68,9 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
   const submit = () => {
     if (!courseId) return
     onSubmit({
-      course: Number(courseId),
+      [isDirectChange ? 'course' : 'requested_course']: Number(courseId),
       reason,
-      effective_date: effectiveDate,
+      [isDirectChange ? 'effective_date' : 'requested_batch_date']: batchDate,
     })
   }
 
@@ -79,9 +80,11 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
         <ModalCloseButton onClick={onCancel} disabled={saving} label="Close course change modal" />
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div className="pr-10">
-            <h3 className="text-xl font-black tracking-tight text-slate-950">Change Course</h3>
+            <h3 className="text-xl font-black tracking-tight text-slate-950">{isDirectChange ? 'Change Course' : 'Request Course Change'}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Changing course will recalculate remaining fees and installments. Existing payments will be preserved.
+              {isDirectChange
+                ? 'Changing course will recalculate remaining fees and installments. Existing payments will be preserved.'
+                : 'Submit this request for admin approval. Existing payments stay unchanged unless the request is approved.'}
             </p>
           </div>
         </div>
@@ -92,7 +95,7 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
             <p className="mt-2 font-semibold text-slate-950">{enrollment?.course_name || 'Not provided'}</p>
           </div>
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Select New Course</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Requested New Course</span>
             <select value={courseId} onChange={(event) => setCourseId(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" required>
               <option value="">Select course</option>
               {courses
@@ -105,12 +108,12 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
             </select>
           </label>
           <label className="block sm:col-span-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reason for change</span>
-            <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" placeholder="Optional" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reason for Change</span>
+            <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" placeholder="Enter reason" required />
           </label>
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Effective Date</span>
-            <input type="date" value={effectiveDate} onChange={(event) => setEffectiveDate(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Preferred Batch Start Date</span>
+            <input type="date" value={batchDate} onChange={(event) => setBatchDate(event.target.value)} className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
           </label>
         </div>
 
@@ -126,7 +129,9 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
 
         {confirmed && (
           <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
-            Changing course will recalculate remaining fees and installments. Existing payments will be preserved.
+            {isDirectChange
+              ? 'Changing course will recalculate remaining fees and installments. Existing payments will be preserved.'
+              : 'This will create a pending request for admin approval.'}
           </div>
         )}
 
@@ -135,12 +140,12 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
             Cancel
           </button>
           {!confirmed ? (
-            <button type="button" onClick={() => setConfirmed(true)} disabled={!courseId || saving} className="inline-flex min-w-[150px] justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
+            <button type="button" onClick={() => setConfirmed(true)} disabled={!courseId || !reason.trim() || saving} className="inline-flex min-w-[150px] justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
               Preview & Confirm
             </button>
           ) : (
-            <button type="button" onClick={submit} disabled={!courseId || saving} className="inline-flex min-w-[170px] justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
-              {saving ? 'Saving...' : 'Change Course'}
+            <button type="button" onClick={submit} disabled={!courseId || !reason.trim() || saving} className="inline-flex min-w-[170px] justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-50">
+              {saving ? 'Saving...' : (isDirectChange ? 'Change Course' : 'Submit Request')}
             </button>
           )}
         </div>

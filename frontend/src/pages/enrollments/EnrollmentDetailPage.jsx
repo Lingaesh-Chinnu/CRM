@@ -301,16 +301,17 @@ export default function EnrollmentDetailPage() {
     }
   }
 
-  const changeCourse = async (payload) => {
+  const submitCourseChange = async (payload) => {
     setSaving(true)
     setMessage('')
     try {
-      const { data } = await api.post(`/enrollments/${id}/change-course/`, payload)
-      setRow(data)
+      const endpoint = isSuperAdmin ? `/enrollments/${id}/change-course/` : `/enrollments/${id}/request-course-change/`
+      const { data } = await api.post(endpoint, payload)
+      if (isSuperAdmin) setRow(data)
       setShowCourseChange(false)
-      setMessage('Course changed. Fees and pending installments were recalculated.')
+      setMessage(isSuperAdmin ? 'Course changed. Fees and pending installments were recalculated.' : 'Course change request submitted for admin approval.')
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to change course.'))
+      setMessage(apiErrorMessage(error, isSuperAdmin ? 'Failed to change course.' : 'Failed to submit course change request.'))
     } finally {
       setSaving(false)
     }
@@ -339,7 +340,7 @@ export default function EnrollmentDetailPage() {
                 Edit
               </button>
               <button type="button" onClick={() => { setShowCourseChange(true); setMessage('') }} className="w-fit rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 hover:bg-cyan-100">
-                Change Course
+                {isSuperAdmin ? 'Change Course' : 'Request Course Change'}
               </button>
               {isSuperAdmin && <AdminDeleteButton label="enrollment" onConfirm={deleteEnrollment} />}
             </div>
@@ -556,8 +557,9 @@ export default function EnrollmentDetailPage() {
           enrollment={row}
           courses={courses}
           saving={saving}
+          mode={isSuperAdmin ? 'direct' : 'request'}
           onCancel={() => setShowCourseChange(false)}
-          onSubmit={changeCourse}
+          onSubmit={submitCourseChange}
         />
       )}
     </div>

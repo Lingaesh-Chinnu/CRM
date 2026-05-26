@@ -16,7 +16,7 @@ from views import (
     LoginView, LogoutView, MeView, ChangePasswordView,
     BranchViewSet, UserViewSet, UserTargetViewSet, BranchTargetViewSet,
     HistoricalAnalyticsEntryViewSet,
-    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet,
+    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet, CourseChangeRequestViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportTemplateView, LeadImportHistoryViewSet,
     AdminDataImportView, AdminDataImportTemplateView,
@@ -45,6 +45,7 @@ router.register(r'team-notices', TeamNoticeViewSet, basename='team-notice')
 router.register(r'whatsapp-templates', WhatsAppTemplateViewSet, basename='whatsapp-template')
 router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
+router.register(r'course-change-requests', CourseChangeRequestViewSet, basename='course-change-request')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'installments', PaymentInstallmentViewSet, basename='installment')
 router.register(r'payment-reason-requests', PaymentReasonRequestViewSet, basename='payment-reason-request')
@@ -96,7 +97,7 @@ urlpatterns = [
     path('rules-signed-pdf/<int:enrollment_id>/', RulesSignedPdfView.as_view(), name='rules_signed_pdf'),
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
-    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history|data-import)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
+    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),
 ]

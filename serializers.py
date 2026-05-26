@@ -1138,7 +1138,7 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import CourseChangeHistory, Enrollment, RulesSigningRequest, get_default_installment_schedule
+from crm.models import CourseChangeHistory, CourseChangeRequest, Enrollment, RulesSigningRequest, get_default_installment_schedule
 
 
 class CourseChangeHistorySerializer(serializers.ModelSerializer):
@@ -1152,6 +1152,35 @@ class CourseChangeHistorySerializer(serializers.ModelSerializer):
             'id', 'old_course', 'old_course_name', 'new_course', 'new_course_name',
             'changed_by', 'changed_by_name', 'old_fee', 'new_fee', 'reason',
             'effective_date', 'created_at',
+        ]
+
+
+class CourseChangeRequestSerializer(serializers.ModelSerializer):
+    student_name = serializers.CharField(source='enrollment.name', read_only=True)
+    student_phone = serializers.CharField(source='enrollment.phone', read_only=True)
+    student_number = serializers.CharField(source='enrollment.student_number', read_only=True)
+    branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
+    branch_name = serializers.CharField(source='enrollment.branch.name', read_only=True)
+    old_course_name = serializers.CharField(source='old_course.name', read_only=True)
+    requested_course_name = serializers.CharField(source='requested_course.name', read_only=True)
+    requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = CourseChangeRequest
+        fields = [
+            'id', 'student', 'enrollment', 'student_name', 'student_phone', 'student_number',
+            'branch', 'branch_name', 'old_course', 'old_course_name', 'requested_course',
+            'requested_course_name', 'requested_batch_date', 'reason', 'requested_by',
+            'requested_by_name', 'requested_at', 'status', 'status_display', 'reviewed_by',
+            'reviewed_by_name', 'reviewed_at', 'admin_remarks', 'old_fee', 'new_fee',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'student', 'enrollment', 'old_course', 'requested_by', 'requested_at',
+            'status', 'reviewed_by', 'reviewed_at', 'old_fee', 'new_fee',
+            'created_at', 'updated_at',
         ]
 
 

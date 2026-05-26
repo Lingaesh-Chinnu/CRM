@@ -936,6 +936,41 @@ class CourseChangeHistory(TimeStampedModel):
         return f'{self.enrollment_id}: {self.old_course} -> {self.new_course}'
 
 
+class CourseChangeRequest(TimeStampedModel):
+    """Approval workflow for staff-requested enrollment course changes."""
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    student = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='course_change_requests')
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='course_change_request_records')
+    old_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_change_requests_from')
+    requested_course = models.ForeignKey(Course, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_change_requests_to')
+    requested_batch_date = models.DateField(null=True, blank=True)
+    reason = models.TextField()
+    requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_change_requests_made')
+    requested_at = models.DateTimeField(default=timezone.now, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='course_change_requests_reviewed')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_remarks = models.TextField(blank=True)
+    old_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    new_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = 'course_change_requests'
+        ordering = ['-requested_at', '-created_at']
+        indexes = [
+            models.Index(fields=['status', 'requested_at']),
+            models.Index(fields=['enrollment', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.enrollment_id}: {self.old_course} -> {self.requested_course} ({self.status})'
+
+
 class RulesSigningRequest(TimeStampedModel):
     """Public token-based Rules & Regulation signing gate for an enrollment."""
 
