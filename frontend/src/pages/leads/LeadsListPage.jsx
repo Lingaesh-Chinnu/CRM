@@ -45,23 +45,38 @@ function addDays(value, days) {
   return next
 }
 
-function formatDate(value) {
+function formatDateTimeCompact(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  return {
+    date: date.toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+    }),
+    time: date.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }),
+  }
+}
+
+function CreatedStamp({ value }) {
+  const stamp = formatDateTimeCompact(value)
+  if (stamp === '-') return <span className="text-xs text-slate-400">-</span>
+  return (
+    <div className="leading-tight">
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
+      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+    </div>
+  )
+}
+
+function formatDateCompact(value) {
   if (!value) return 'Not set'
   return new Date(value).toLocaleDateString('en-IN', {
     day: '2-digit',
     month: 'short',
-    year: 'numeric',
-  })
-}
-
-function formatDateTimeCompact(value) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
   })
 }
 
@@ -627,9 +642,17 @@ export default function LeadsListPage() {
               emptyMessage="No matching leads."
               columns={[
                 {
+                  key: 'created',
+                  header: 'Created',
+                  width: '82px',
+                  className: 'flex items-center',
+                  render: (lead) => <CreatedStamp value={lead.created_at} />,
+                },
+                {
                   key: 'name',
                   header: 'Name',
-                  width: 'minmax(150px,1.2fr)',
+                  width: 'minmax(145px,1.15fr)',
+                  className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
                       <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
@@ -637,37 +660,26 @@ export default function LeadsListPage() {
                     </div>
                   ),
                 },
-                { key: 'phone', header: 'Phone', width: '120px', render: (lead) => <span className="font-semibold text-slate-800">{lead.phone || '-'}</span> },
                 {
                   key: 'source',
                   header: 'Source',
-                  width: 'minmax(130px,0.9fr)',
+                  width: 'minmax(120px,0.9fr)',
+                  className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
-                      <p className="truncate text-slate-700">{sourceLabel(lead)}</p>
+                      <p className="truncate text-sm font-semibold text-slate-700">{sourceLabel(lead)}</p>
                       {lead.source_description && <p className="mt-1 truncate text-xs text-slate-500">{lead.source_description}</p>}
                     </div>
                   ),
                 },
-                { key: 'status', header: 'Status', width: '135px', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
-                { key: 'followUpBy', header: 'Follow Up By', width: '150px', render: (lead) => <span className="truncate text-slate-700">{assignedUserName(lead)}</span> },
-                { key: 'nextFollowUp', header: 'Next Follow Up', width: '130px', render: (lead) => <span className="text-slate-700">{formatDate(lead.next_follow_up_date)}</span> },
-                {
-                  key: 'timeline',
-                  header: 'Timestamps',
-                  width: 'minmax(160px,1fr)',
-                  render: (lead) => (
-                    <div className="space-y-1 text-xs text-slate-500">
-                      <p className="truncate">Created: {formatDateTimeCompact(lead.created_at)}</p>
-                      <p className="truncate">Updated: {formatDateTimeCompact(lead.updated_at)}</p>
-                      <p className="truncate">Follow-up: {formatDateTimeCompact(lead.latest_follow_up_at)}</p>
-                    </div>
-                  ),
-                },
+                { key: 'status', header: 'Status', width: '118px', className: 'flex items-center', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
+                { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(118px,0.85fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
+                { key: 'nextFollowUp', header: 'Next Follow Up', width: '104px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
                 {
                   key: 'remark',
                   header: 'Latest Remark',
-                  width: 'minmax(180px,1.4fr)',
+                  width: 'minmax(210px,1.7fr)',
+                  className: 'flex items-center',
                   render: (lead) => (
                     <QuickFollowUpEdit
                       type="lead"

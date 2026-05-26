@@ -80,7 +80,7 @@ export default function QuickFollowUpEdit({
 
   return (
     <div className="min-w-0">
-      <p title={remark || 'No remarks'} className="truncate text-sm font-medium text-slate-800">
+      <p title={remark || 'No remarks'} className="line-clamp-2 min-h-[2.5rem] text-sm font-medium leading-5 text-slate-800">
         {remark || 'No remarks'}
       </p>
       <button type="button" onClick={startEdit} className="mt-1 text-xs font-bold text-cyan-700 hover:text-cyan-900">
