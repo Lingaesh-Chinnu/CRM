@@ -5,7 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
-import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 
 function statusLabel(status) {
@@ -51,6 +51,17 @@ function formatDate(value) {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+  })
+}
+
+function formatDateTimeCompact(value) {
+  if (!value) return '-'
+  return new Date(value).toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
   })
 }
 
@@ -267,6 +278,8 @@ export default function LeadsListPage() {
             ...lead,
             remarks: followUp.remarks || lead.remarks,
             next_follow_up_date: followUp.next_follow_up_date,
+            latest_follow_up_at: followUp.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
             status: lead.status === 'new' ? 'follow_up' : lead.status,
           }
         : lead
@@ -625,10 +638,32 @@ export default function LeadsListPage() {
                   ),
                 },
                 { key: 'phone', header: 'Phone', width: '120px', render: (lead) => <span className="font-semibold text-slate-800">{lead.phone || '-'}</span> },
-                { key: 'source', header: 'Source', width: '120px', render: (lead) => <span className="truncate text-slate-600">{sourceLabel(lead)}</span> },
+                {
+                  key: 'source',
+                  header: 'Source',
+                  width: 'minmax(130px,0.9fr)',
+                  render: (lead) => (
+                    <div className="min-w-0">
+                      <p className="truncate text-slate-700">{sourceLabel(lead)}</p>
+                      {lead.source_description && <p className="mt-1 truncate text-xs text-slate-500">{lead.source_description}</p>}
+                    </div>
+                  ),
+                },
                 { key: 'status', header: 'Status', width: '135px', render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{statusLabel(lead.status)}</StatusBadge> },
                 { key: 'followUpBy', header: 'Follow Up By', width: '150px', render: (lead) => <span className="truncate text-slate-700">{assignedUserName(lead)}</span> },
                 { key: 'nextFollowUp', header: 'Next Follow Up', width: '130px', render: (lead) => <span className="text-slate-700">{formatDate(lead.next_follow_up_date)}</span> },
+                {
+                  key: 'timeline',
+                  header: 'Timestamps',
+                  width: 'minmax(160px,1fr)',
+                  render: (lead) => (
+                    <div className="space-y-1 text-xs text-slate-500">
+                      <p className="truncate">Created: {formatDateTimeCompact(lead.created_at)}</p>
+                      <p className="truncate">Updated: {formatDateTimeCompact(lead.updated_at)}</p>
+                      <p className="truncate">Follow-up: {formatDateTimeCompact(lead.latest_follow_up_at)}</p>
+                    </div>
+                  ),
+                },
                 {
                   key: 'remark',
                   header: 'Latest Remark',
@@ -643,7 +678,6 @@ export default function LeadsListPage() {
                     />
                   ),
                 },
-                { key: 'actions', header: 'Actions', width: '88px', render: (lead) => <TableActionLink to={`/leads/${lead.id}`}>Open</TableActionLink> },
               ]}
             />
           </div>

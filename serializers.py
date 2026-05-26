@@ -450,13 +450,17 @@ class LeadListSerializer(serializers.ModelSerializer):
     branch_name  = serializers.CharField(source='branch.name', read_only=True)
     next_follow_up_date = serializers.SerializerMethodField()
     imported_via_csv = serializers.SerializerMethodField()
+    remarks = serializers.SerializerMethodField()
+    latest_follow_up_at = serializers.SerializerMethodField()
+    source_description = serializers.SerializerMethodField()
 
     class Meta:
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name','remarks',
+                  'source_description','latest_follow_up_at',
                   'status','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
-                  'branch_name','created_by','imported_via_csv','created_at']
+                  'branch_name','created_by','imported_via_csv','created_at','updated_at']
 
     def get_status(self, obj):
         return safe_deferred_value(obj, 'status', Lead.Status.NEW) or Lead.Status.NEW
@@ -480,6 +484,17 @@ class LeadListSerializer(serializers.ModelSerializer):
             return bool(safe_deferred_value(obj, 'imported_via_csv', False))
         except Exception:
             return False
+
+    def get_remarks(self, obj):
+        latest = getattr(obj, 'latest_follow_up_remark', None)
+        return latest if latest not in (None, '') else safe_deferred_value(obj, 'remarks', '') or ''
+
+    def get_latest_follow_up_at(self, obj):
+        value = getattr(obj, 'latest_follow_up_at', None)
+        return value.isoformat() if hasattr(value, 'isoformat') else value
+
+    def get_source_description(self, obj):
+        return safe_deferred_value(obj, 'source_description', '') or ''
 
     def get_assigned_to_name(self, obj):
         try:
@@ -557,6 +572,8 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
     follow_ups       = serializers.SerializerMethodField()
+    latest_follow_up_at = serializers.SerializerMethodField()
+    latest_remark = serializers.SerializerMethodField()
 
     class Meta:
         model  = Lead
@@ -602,6 +619,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             'next_follow_up_date': None,
             'external_course_interested': '',
             'external_message': '',
+            'source_description': '',
             'is_duplicate': False,
             'imported_via_csv': False,
             'converted_to_type': '',
@@ -653,6 +671,20 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             record_id=obj.id,
         ).order_by('-created_at', '-id')
         return FollowUpSerializer(follow_ups, many=True).data
+
+    def get_latest_follow_up_at(self, obj):
+        follow_up = FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=obj.id,
+        ).order_by('-created_at', '-id').first()
+        return follow_up.created_at.isoformat() if follow_up else None
+
+    def get_latest_remark(self, obj):
+        follow_up = FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=obj.id,
+        ).order_by('-created_at', '-id').first()
+        return follow_up.remarks if follow_up else obj.remarks
 
     def get_qualification_display(self, obj):
         return qualification_display_value(safe_deferred_value(obj, 'qualification', ''))

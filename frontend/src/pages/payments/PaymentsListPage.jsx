@@ -5,7 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
-import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 
 function statusLabel(status) {
@@ -560,7 +560,6 @@ export default function PaymentsListPage() {
                   width: 'minmax(120px,0.9fr)',
                   render: (row) => (
                     <div className="flex flex-wrap gap-2">
-                      <TableActionLink to={`/payments/${row.id}`}>Open</TableActionLink>
                       {actionControls(row)}
                     </div>
                   ),

@@ -385,6 +385,7 @@ class Lead(TimeStampedModel):
                                    related_name='deleted_leads')
     status      = models.CharField(max_length=40, choices=Status.choices, default=Status.NEW, db_index=True)
     source      = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
+    source_description = models.TextField(blank=True)
     converted_to_type = models.CharField(max_length=20, blank=True)
     converted_record_id = models.PositiveIntegerField(null=True, blank=True)
     converted_at = models.DateTimeField(null=True, blank=True)

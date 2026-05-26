@@ -4,7 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
-import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -144,7 +144,6 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, a
                   />
                 ),
               },
-              { key: 'actions', header: 'Actions', width: '88px', render: (walkin) => <TableActionLink to={`/walkins/${walkin.id}`}>Open</TableActionLink> },
             ]}
           />
         </div>

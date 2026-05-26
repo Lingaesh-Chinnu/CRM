@@ -130,6 +130,7 @@ function buildConversionForm(lead) {
     interested_global_certification: false,
     status: lead?.status || 'new',
     assigned_to: lead?.assigned_to || lead?.follow_up_by || lead?.assigned_user?.id || '',
+    source_description: lead?.source_description || '',
   }
 }
 
@@ -734,6 +735,7 @@ export default function LeadDetailPage() {
     { field: 'preferred_timing', label: 'Preferred Timing', value: lead.preferred_timing, displayValue: timingLabel(lead.preferred_timing), displayNew: timingLabel },
     { field: 'qualification', label: 'Qualification', value: lead.qualification, displayValue: lead.qualification_display || lead.qualification, displayNew: (value) => qualificationSelectOptions(value).find((option) => option.value === value)?.label || value },
     { field: 'degree', label: 'Degree', value: lead.degree },
+    { field: 'source_description', label: 'Source Description', value: lead.source_description },
   ]
 
   const detailChanges = () => detailFields
@@ -757,7 +759,7 @@ export default function LeadDetailPage() {
       setMessage('No changes to update.')
       return
     }
-    const optionalFields = new Set(['assigned_to'])
+    const optionalFields = new Set(['assigned_to', 'source_description'])
     const missing = changes.filter(({ field }) => !optionalFields.has(field) && !String(detailsForm[field] || '').trim())
     if (missing.length > 0) {
       setDetailErrors((current) => ({
@@ -893,6 +895,9 @@ export default function LeadDetailPage() {
               {detailErrorFor('location')}
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">Source</p><p className="mt-2 font-semibold text-slate-900">{lead.source_display || lead.source}</p></div>
+            <DetailField label="Source Description" value={lead.source_description} editing={editingDetails}>
+              <textarea value={detailsForm.source_description || ''} onChange={(event) => updateDetail('source_description', event.target.value)} placeholder="Example: Saw Instagram AI placement reel" className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+            </DetailField>
             <DetailField label="Visit Date" value={lead.walkin_date} editing={editingDetails}>
               <input type="date" value={detailsForm.conversion_date || ''} onChange={(event) => updateDetail('conversion_date', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('conversion_date')}

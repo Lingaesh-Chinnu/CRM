@@ -51,7 +51,7 @@ from django.http import HttpResponse
 from django.shortcuts import render
 from django.db import IntegrityError, connection, transaction
 from django.db.utils import OperationalError, ProgrammingError
-from django.db.models import Sum, Count, Q, F, Exists, OuterRef
+from django.db.models import Sum, Count, Q, F, Exists, OuterRef, Subquery
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.html import escape
@@ -1852,12 +1852,20 @@ class LeadViewSet(viewsets.ModelViewSet):
         missing_columns = missing_model_columns(Lead, [
             'qualification', 'degree', 'willing_to_join',
             'external_course_interested', 'external_message',
-            'is_duplicate', 'imported_via_csv', 'preferred_timing',
+            'source_description', 'is_duplicate', 'imported_via_csv', 'preferred_timing',
             'next_follow_up_date', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by',
         ])
         if self.action == 'list':
             qs = visible_candidate_queryset(Lead.objects.select_related('course', 'branch', 'assigned_to'))
+            latest_follow_up = FollowUp.objects.filter(
+                record_type=FollowUp.RecordType.LEAD,
+                record_id=OuterRef('pk'),
+            ).order_by('-created_at', '-id')
+            qs = qs.annotate(
+                latest_follow_up_remark=Subquery(latest_follow_up.values('remarks')[:1]),
+                latest_follow_up_at=Subquery(latest_follow_up.values('created_at')[:1]),
+            )
         else:
             related = ['course', 'branch', 'assigned_to', 'created_by']
             if 'converted_by' not in missing_columns:
@@ -2190,6 +2198,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'name', 'phone', 'dob', 'email', 'location', 'pincode',
                 'course', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
                 'next_follow_up_date', 'remarks', 'status', 'assigned_to', 'follow_up_by',
+                'source', 'source_description',
             }
             if set(request.data.keys()) - allowed:
                 return Response(
@@ -2339,12 +2348,13 @@ class LeadViewSet(viewsets.ModelViewSet):
             return response
 
         lead.next_follow_up_date = response.data['next_follow_up_date']
+        lead.remarks = response.data.get('remarks') or lead.remarks
         close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
         if close_follow_up:
             lead.status = Lead.Status.LOST
         elif lead.status == Lead.Status.NEW:
             lead.status = Lead.Status.FOLLOW_UP
-        lead.save(update_fields=['next_follow_up_date', 'status', 'updated_at'])
+        lead.save(update_fields=['next_follow_up_date', 'remarks', 'status', 'updated_at'])
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return response
 
@@ -2430,6 +2440,9 @@ REQUIRED_LEAD_IMPORT_HEADINGS = [
     'Follow-up Date',
     'Remarks',
 ]
+OPTIONAL_LEAD_IMPORT_HEADINGS = [
+    'Source Description',
+]
 
 
 def normalise_import_cell(value):
@@ -2509,7 +2522,8 @@ class LeadImportView(APIView):
             return Response({'detail': str(exc), 'history': LeadImportHistorySerializer(history).data}, status=400)
 
         missing = [heading for heading in REQUIRED_LEAD_IMPORT_HEADINGS if heading not in headings]
-        unexpected = [heading for heading in headings if heading and heading not in REQUIRED_LEAD_IMPORT_HEADINGS]
+        allowed_headings = [*REQUIRED_LEAD_IMPORT_HEADINGS, *OPTIONAL_LEAD_IMPORT_HEADINGS]
+        unexpected = [heading for heading in headings if heading and heading not in allowed_headings]
         if missing or unexpected:
             errors = []
             if missing:
@@ -2541,6 +2555,7 @@ class LeadImportView(APIView):
             course_name = normalise_import_cell(row.get('Course Interested'))
             branch_name = normalise_import_cell(row.get('Branch'))
             source_label = normalise_import_cell(row.get('How They Know IIE'))
+            source_description = normalise_import_cell(row.get('Source Description'))
             followup_raw = normalise_import_cell(row.get('Follow-up Date'))
             followup_date = parse_import_followup_date(followup_raw)
             remarks = normalise_import_cell(row.get('Remarks'))
@@ -2579,6 +2594,7 @@ class LeadImportView(APIView):
                 'course': course,
                 'branch': branch,
                 'source': source,
+                'source_description': source_description,
                 'next_follow_up_date': followup_date,
                 'remarks': remarks,
                 'created_by': request.user,
@@ -2741,6 +2757,7 @@ ADMIN_IMPORT_SPECS = {
             {'field': 'course', 'label': 'Course Interested'},
             {'field': 'branch', 'label': 'Branch'},
             {'field': 'source', 'label': 'How They Know IIE'},
+            {'field': 'source_description', 'label': 'Source Description'},
             {'field': 'next_follow_up_date', 'label': 'Follow-up Date'},
             {'field': 'remarks', 'label': 'Remarks'},
             {'field': 'assigned_to', 'label': 'Counsellor'},

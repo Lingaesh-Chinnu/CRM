@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
-import CRMTable, { StatusBadge, TableActionLink } from '../../components/common/CRMTable'
+import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -247,14 +248,13 @@ export default function EnrollmentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'name', header: 'Student Name', width: 'minmax(150px,1.2fr)', render: (row) => <div><p className="truncate font-bold text-slate-950">{row.name}</p><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'name', header: 'Student Name', width: 'minmax(150px,1.2fr)', render: (row) => <div><Link to={`/enrollments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
                 { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || 'Course pending'}</span> },
                 { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> },
                 { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
                 { key: 'fees', header: 'Fees', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
                 { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.payment_balance)}</span> },
                 { key: 'counselor', header: 'Counselor', width: '140px', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
-                { key: 'actions', header: 'Actions', width: '96px', render: (row) => <TableActionLink to={`/enrollments/${row.id}`}>Open</TableActionLink> },
               ]}
             />
           </div>
