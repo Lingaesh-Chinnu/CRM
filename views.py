@@ -77,7 +77,8 @@ from crm.models import (
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
-    CourseChangeRequest,
+    EnrollmentCounselorChangeHistory,
+    CounselorChangeRequest, CourseChangeRequest,
     get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
@@ -88,6 +89,7 @@ from serializers import (
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
+    CounselorChangeRequestSerializer,
 )
 
 
@@ -745,6 +747,127 @@ def create_notification_once(user, title, message, notification_type=Notificatio
         related_url=related_url,
     )
     return notification
+
+
+def counselor_request_url(request_id):
+    return f'/counselor-change-requests?request={request_id}'
+
+
+def candidate_url_for_counselor_request(change_request):
+    if change_request.record_type == CounselorChangeRequest.RecordType.LEAD:
+        return f'/leads/{change_request.lead_id}'
+    return f'/enrollments/{change_request.enrollment_id}'
+
+
+def active_admin_users():
+    return User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True)
+
+
+def notify_counselor_request_submitted(change_request):
+    url = counselor_request_url(change_request.id)
+    message = (
+        f'{change_request.candidate_name} counselor change requested: '
+        f'{change_request.current_counselor.full_name if change_request.current_counselor else "Unassigned"} to '
+        f'{change_request.requested_counselor.full_name if change_request.requested_counselor else "Unassigned"}.'
+    )
+    create_user_notification(change_request.current_counselor, 'Counselor Change Approval Needed', message, Notification.NType.WARNING, url)
+    for admin_user in active_admin_users():
+        create_user_notification(admin_user, 'Counselor Change Request', message, Notification.NType.INFO, url)
+
+
+def notify_counselor_decision(change_request, approved):
+    url = counselor_request_url(change_request.id)
+    state = 'approved' if approved else 'rejected'
+    title = f'Counselor Change {state.title()} by Counselor'
+    message = f'{change_request.current_counselor.full_name if change_request.current_counselor else "Current counselor"} {state} transfer for {change_request.candidate_name}.'
+    create_user_notification(change_request.requested_by, title, message, Notification.NType.SUCCESS if approved else Notification.NType.ERROR, url)
+    for admin_user in active_admin_users():
+        create_user_notification(admin_user, title, message, Notification.NType.SUCCESS if approved else Notification.NType.ERROR, url)
+
+
+def notify_admin_decision(change_request, approved):
+    url = candidate_url_for_counselor_request(change_request)
+    state = 'approved' if approved else 'rejected'
+    title = f'Counselor Change {state.title()}'
+    message = f'Counselor change for {change_request.candidate_name} was {state}.'
+    tone = Notification.NType.SUCCESS if approved else Notification.NType.ERROR
+    for user in {
+        change_request.requested_by,
+        change_request.current_counselor,
+        change_request.requested_counselor,
+    }:
+        create_user_notification(user, title, message, tone, url)
+
+
+def current_counselor_for_record(record):
+    if isinstance(record, Lead):
+        return record.assigned_to or record.created_by
+    return record.enrolled_by or record.created_by
+
+
+def create_counselor_change_request(record, record_type, requested_counselor, requested_by, reason):
+    current_counselor = current_counselor_for_record(record)
+    if current_counselor and current_counselor.id == requested_counselor.id:
+        raise ValueError('This counselor is already assigned.')
+    branch = getattr(record, 'branch', None)
+    if branch and requested_counselor.branch_id != branch.id:
+        raise ValueError('Select a counselor from the candidate branch.')
+    if not str(reason or '').strip():
+        raise ValueError('Reason for transfer is required.')
+    filter_kwargs = {
+        'record_type': record_type,
+        'status__in': [
+            CounselorChangeRequest.Status.PENDING_COUNSELOR,
+            CounselorChangeRequest.Status.PENDING_ADMIN,
+        ],
+    }
+    if record_type == CounselorChangeRequest.RecordType.LEAD:
+        filter_kwargs['lead'] = record
+    else:
+        filter_kwargs['enrollment'] = record
+    if CounselorChangeRequest.objects.filter(**filter_kwargs).exists():
+        raise ValueError('This candidate already has a pending counselor change request.')
+
+    change_request = CounselorChangeRequest.objects.create(
+        record_type=record_type,
+        lead=record if record_type == CounselorChangeRequest.RecordType.LEAD else None,
+        enrollment=record if record_type == CounselorChangeRequest.RecordType.ENROLLMENT else None,
+        branch=branch,
+        candidate_name=record.name,
+        candidate_phone=getattr(record, 'phone', '') or '',
+        current_counselor=current_counselor,
+        requested_counselor=requested_counselor,
+        requested_by=requested_by,
+        reason=str(reason or '').strip(),
+    )
+    notify_counselor_request_submitted(change_request)
+    return change_request
+
+
+def apply_counselor_change(change_request, admin_user, force=False):
+    if change_request.record_type == CounselorChangeRequest.RecordType.LEAD:
+        record = Lead.objects.select_for_update().get(pk=change_request.lead_id)
+        record.assigned_to = change_request.requested_counselor
+        record.created_by = change_request.requested_counselor
+        record.save(update_fields=['assigned_to', 'created_by', 'updated_at'])
+    else:
+        record = Enrollment.objects.select_for_update().get(pk=change_request.enrollment_id)
+        old_counselor = record.enrolled_by or record.created_by
+        record.enrolled_by = change_request.requested_counselor
+        record.created_by = change_request.requested_counselor
+        record.save(update_fields=['enrolled_by', 'created_by', 'updated_at'])
+        EnrollmentCounselorChangeHistory.objects.create(
+            enrollment=record,
+            old_counselor=old_counselor,
+            new_counselor=change_request.requested_counselor,
+            changed_by=admin_user,
+            reason=change_request.reason,
+        )
+    change_request.status = CounselorChangeRequest.Status.APPROVED
+    change_request.admin_decision_by = admin_user
+    change_request.admin_decision_at = timezone.now()
+    change_request.force_transfer = force
+    return record
 
 
 def resolve_notifications(queryset):
@@ -1902,6 +2025,27 @@ class LeadViewSet(viewsets.ModelViewSet):
         if self.action in ('partial_update',) and not self.request.user.is_super_admin:
             return LeadDetailSerializer
         return LeadDetailSerializer
+
+    @action(detail=True, methods=['post'], url_path='request-counselor-change')
+    def request_counselor_change(self, request, pk=None):
+        lead = self.get_object()
+        counselor_id = request.data.get('counselor') or request.data.get('new_counselor') or request.data.get('user')
+        if not counselor_id:
+            return Response({'counselor': 'Select a counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+        counselor = User.objects.filter(pk=counselor_id, role=User.Role.STAFF, is_active=True).first()
+        if not counselor:
+            return Response({'counselor': 'Select an active staff counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            change_request = create_counselor_change_request(
+                lead,
+                CounselorChangeRequest.RecordType.LEAD,
+                counselor,
+                request.user,
+                request.data.get('reason'),
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CounselorChangeRequestSerializer(change_request, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
     @staticmethod
     def _lead_source_to_walkin_source(lead_source):
@@ -4784,7 +4928,13 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = visible_candidate_queryset(Enrollment.objects.select_related(
             'course','branch','enrolled_by','created_by'
-        ).prefetch_related('payment__installments'))
+        ).prefetch_related(
+            'payment__installments',
+            'course_change_history',
+            'counselor_change_history__old_counselor',
+            'counselor_change_history__new_counselor',
+            'counselor_change_history__changed_by',
+        ))
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
         if getattr(self, 'action', None) == 'list':
@@ -4899,6 +5049,109 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 )
 
         return Response(CourseChangeRequestSerializer(change_request, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='reassign-counselor')
+    def reassign_counselor(self, request, pk=None):
+        enrollment = self.get_object()
+        counselor_id = request.data.get('counselor') or request.data.get('new_counselor') or request.data.get('user')
+        if not counselor_id:
+            return Response({'counselor': 'Select a counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        counselor = User.objects.filter(
+            pk=counselor_id,
+            role=User.Role.STAFF,
+            is_active=True,
+        ).select_related('branch').first()
+        if not counselor:
+            return Response({'counselor': 'Select an active staff counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+        if enrollment.branch_id and counselor.branch_id != enrollment.branch_id:
+            return Response({'counselor': 'Select a counselor from the enrollment branch.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.data.get('force_transfer'):
+            if not request.user.is_super_admin:
+                return Response({'detail': 'Only admin can force transfer counselors.'}, status=status.HTTP_403_FORBIDDEN)
+            reason = str(request.data.get('reason') or '').strip()
+            if not reason:
+                return Response({'reason': 'Reason for transfer is required.'}, status=status.HTTP_400_BAD_REQUEST)
+            with transaction.atomic():
+                change_request = CounselorChangeRequest.objects.create(
+                    record_type=CounselorChangeRequest.RecordType.ENROLLMENT,
+                    enrollment=enrollment,
+                    branch=enrollment.branch,
+                    candidate_name=enrollment.name,
+                    candidate_phone=enrollment.phone,
+                    current_counselor=enrollment.enrolled_by or enrollment.created_by,
+                    requested_counselor=counselor,
+                    requested_by=request.user,
+                    reason=reason,
+                    status=CounselorChangeRequest.Status.APPROVED,
+                    counselor_decision_by=request.user,
+                    counselor_decision_at=timezone.now(),
+                    counselor_remarks='Super admin force transfer.',
+                    admin_remarks=str(request.data.get('admin_remarks') or '').strip(),
+                )
+                apply_counselor_change(change_request, request.user, force=True)
+                change_request.save(update_fields=[
+                    'status', 'counselor_decision_by', 'counselor_decision_at',
+                    'counselor_remarks', 'admin_decision_by', 'admin_decision_at',
+                    'admin_remarks', 'force_transfer',
+                ])
+            enrollment.refresh_from_db()
+            notify_admin_decision(change_request, True)
+            return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
+
+        try:
+            change_request = create_counselor_change_request(
+                enrollment,
+                CounselorChangeRequest.RecordType.ENROLLMENT,
+                counselor,
+                request.user,
+                request.data.get('reason'),
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(CounselorChangeRequestSerializer(change_request, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='request-counselor-change')
+    def request_counselor_change(self, request, pk=None):
+        return self.reassign_counselor(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='force-counselor-transfer')
+    def force_counselor_transfer(self, request, pk=None):
+        data = request.data.copy()
+        data['force_transfer'] = True
+        request._full_data = data
+        return self.reassign_counselor(request, pk)
+
+    @action(detail=True, methods=['post'], url_path='direct-reassign-counselor-disabled')
+    def direct_reassign_counselor_disabled(self, request, pk=None):
+        return Response({'detail': 'Use counselor change request workflow.'}, status=status.HTTP_405_METHOD_NOT_ALLOWED)
+
+    def _legacy_direct_reassign_removed(self, request, enrollment, counselor):
+        reason = str(request.data.get('reason') or '').strip()
+        with transaction.atomic():
+            enrollment = (
+                Enrollment.objects
+                .select_for_update()
+                .get(pk=enrollment.pk)
+            )
+            old_counselor = enrollment.enrolled_by or enrollment.created_by
+            if old_counselor and old_counselor.id == counselor.id:
+                return Response({'detail': 'This counselor is already assigned.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            EnrollmentCounselorChangeHistory.objects.create(
+                enrollment=enrollment,
+                old_counselor=old_counselor,
+                new_counselor=counselor,
+                changed_by=request.user,
+                reason=reason,
+            )
+            enrollment.enrolled_by = counselor
+            enrollment.created_by = counselor
+            enrollment.save(update_fields=['enrolled_by', 'created_by', 'updated_at'])
+
+        enrollment.refresh_from_db()
+        return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
@@ -5200,6 +5453,121 @@ class CourseChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
             Notification.NType.ERROR,
             f'/enrollments/{change_request.enrollment_id}',
         )
+        return Response(self.get_serializer(change_request).data)
+
+
+class CounselorChangeRequestFilter(django_filters.FilterSet):
+    branch = django_filters.NumberFilter(field_name='branch_id')
+    date = django_filters.DateFilter(field_name='requested_at', lookup_expr='date')
+
+    class Meta:
+        model = CounselorChangeRequest
+        fields = ['status', 'branch', 'date', 'record_type']
+
+
+class CounselorChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CounselorChangeRequestSerializer
+    permission_classes = [IsStaffOrAdmin]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = CounselorChangeRequestFilter
+    search_fields = ['candidate_name', 'candidate_phone', 'current_counselor__username', 'requested_counselor__username']
+    ordering_fields = ['requested_at', 'counselor_decision_at', 'admin_decision_at']
+    ordering = ['-requested_at']
+    pagination_class = None
+
+    def get_queryset(self):
+        queryset = CounselorChangeRequest.objects.select_related(
+            'lead', 'enrollment', 'branch', 'current_counselor',
+            'requested_counselor', 'requested_by', 'counselor_decision_by',
+            'admin_decision_by',
+        )
+        if self.request.user.is_super_admin:
+            return queryset
+        return queryset.filter(
+            Q(requested_by=self.request.user)
+            | Q(current_counselor=self.request.user)
+            | Q(requested_counselor=self.request.user)
+        )
+
+    @action(detail=True, methods=['post'], url_path='counselor-approve')
+    def counselor_approve(self, request, pk=None):
+        change_request = self.get_object()
+        if change_request.current_counselor_id != request.user.id:
+            return Response({'detail': 'Only the current counselor can approve this request.'}, status=status.HTTP_403_FORBIDDEN)
+        if change_request.status != CounselorChangeRequest.Status.PENDING_COUNSELOR:
+            return Response({'detail': 'Only requests pending counselor approval can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.status = CounselorChangeRequest.Status.PENDING_ADMIN
+        change_request.counselor_decision_by = request.user
+        change_request.counselor_decision_at = timezone.now()
+        change_request.counselor_remarks = str(request.data.get('remarks') or '').strip()
+        change_request.save(update_fields=['status', 'counselor_decision_by', 'counselor_decision_at', 'counselor_remarks'])
+        notify_counselor_decision(change_request, True)
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='counselor-reject')
+    def counselor_reject(self, request, pk=None):
+        change_request = self.get_object()
+        if change_request.current_counselor_id != request.user.id:
+            return Response({'detail': 'Only the current counselor can reject this request.'}, status=status.HTTP_403_FORBIDDEN)
+        if change_request.status != CounselorChangeRequest.Status.PENDING_COUNSELOR:
+            return Response({'detail': 'Only requests pending counselor approval can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.status = CounselorChangeRequest.Status.REJECTED
+        change_request.counselor_decision_by = request.user
+        change_request.counselor_decision_at = timezone.now()
+        change_request.counselor_remarks = str(request.data.get('remarks') or '').strip()
+        change_request.save(update_fields=['status', 'counselor_decision_by', 'counselor_decision_at', 'counselor_remarks'])
+        notify_counselor_decision(change_request, False)
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can approve counselor change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status != CounselorChangeRequest.Status.PENDING_ADMIN:
+            return Response({'detail': 'Counselor approval is required before admin approval.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            change_request = CounselorChangeRequest.objects.select_for_update().get(pk=change_request.pk)
+            apply_counselor_change(change_request, request.user)
+            change_request.admin_remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+            change_request.save(update_fields=['status', 'admin_decision_by', 'admin_decision_at', 'admin_remarks', 'force_transfer'])
+        notify_admin_decision(change_request, True)
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can reject counselor change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status not in [
+            CounselorChangeRequest.Status.PENDING_COUNSELOR,
+            CounselorChangeRequest.Status.PENDING_ADMIN,
+        ]:
+            return Response({'detail': 'Only pending counselor change requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.status = CounselorChangeRequest.Status.REJECTED
+        change_request.admin_decision_by = request.user
+        change_request.admin_decision_at = timezone.now()
+        change_request.admin_remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+        change_request.save(update_fields=['status', 'admin_decision_by', 'admin_decision_at', 'admin_remarks'])
+        notify_admin_decision(change_request, False)
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='force-approve')
+    def force_approve(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can force transfer counselors.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status not in [
+            CounselorChangeRequest.Status.PENDING_COUNSELOR,
+            CounselorChangeRequest.Status.PENDING_ADMIN,
+        ]:
+            return Response({'detail': 'Only pending requests can be force transferred.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            change_request = CounselorChangeRequest.objects.select_for_update().get(pk=change_request.pk)
+            apply_counselor_change(change_request, request.user, force=True)
+            change_request.admin_remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+            change_request.save(update_fields=['status', 'admin_decision_by', 'admin_decision_at', 'admin_remarks', 'force_transfer'])
+        notify_admin_decision(change_request, True)
         return Response(self.get_serializer(change_request).data)
 
 

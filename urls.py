@@ -16,7 +16,7 @@ from views import (
     LoginView, LogoutView, MeView, ChangePasswordView,
     BranchViewSet, UserViewSet, UserTargetViewSet, BranchTargetViewSet,
     HistoricalAnalyticsEntryViewSet,
-    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet, CourseChangeRequestViewSet,
+    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet, CourseChangeRequestViewSet, CounselorChangeRequestViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportTemplateView, LeadImportHistoryViewSet,
     AdminDataImportView, AdminDataImportTemplateView,
@@ -46,6 +46,7 @@ router.register(r'whatsapp-templates', WhatsAppTemplateViewSet, basename='whatsa
 router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
 router.register(r'course-change-requests', CourseChangeRequestViewSet, basename='course-change-request')
+router.register(r'counselor-change-requests', CounselorChangeRequestViewSet, basename='counselor-change-request')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'installments', PaymentInstallmentViewSet, basename='installment')
 router.register(r'payment-reason-requests', PaymentReasonRequestViewSet, basename='payment-reason-request')

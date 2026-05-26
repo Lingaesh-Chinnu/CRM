@@ -5,7 +5,7 @@ from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
 
-from crm.models import Branch, Course, CourseChangeHistory, Enrollment, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
@@ -519,6 +519,108 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(payment.status, Payment.Status.PARTIAL)
         self.assertEqual(Decimal(str(response.data['total_fees'])), Decimal('38900.00'))
         self.assertEqual(Decimal(str(response.data['balance'])), Decimal('33900.00'))
+
+    def test_counselor_change_requires_counselor_and_admin_approval(self):
+        new_counselor = User.objects.create_user(
+            username='new-counselor',
+            email='new-counselor@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Counselor Reassign Student',
+            phone='9000000130',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            enrolled_by=self.staff,
+            created_by=self.staff,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/request-counselor-change/', {
+            'counselor': new_counselor.id,
+            'reason': 'Balancing counselor workload',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.enrolled_by, self.staff)
+        change_request = CounselorChangeRequest.objects.get(enrollment=enrollment)
+        self.assertEqual(change_request.status, CounselorChangeRequest.Status.PENDING_COUNSELOR)
+
+        admin_early = self.client.post(f'/api/counselor-change-requests/{change_request.id}/approve/', format='json')
+        self.assertEqual(admin_early.status_code, 400)
+
+        self.client.force_authenticate(self.staff)
+        counselor_response = self.client.post(f'/api/counselor-change-requests/{change_request.id}/counselor-approve/', {
+            'remarks': 'Approved',
+        }, format='json')
+        self.assertEqual(counselor_response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, CounselorChangeRequest.Status.PENDING_ADMIN)
+
+        self.client.force_authenticate(self.admin)
+        admin_response = self.client.post(f'/api/counselor-change-requests/{change_request.id}/approve/', {
+            'admin_remarks': 'Approved by admin',
+        }, format='json')
+        self.assertEqual(admin_response.status_code, 200)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.enrolled_by, new_counselor)
+        self.assertEqual(enrollment.created_by, new_counselor)
+        history = EnrollmentCounselorChangeHistory.objects.get(enrollment=enrollment)
+        self.assertEqual(history.old_counselor, self.staff)
+        self.assertEqual(history.new_counselor, new_counselor)
+
+    def test_counselor_reject_blocks_admin_approval(self):
+        new_counselor = User.objects.create_user(
+            username='blocked-counselor',
+            email='blocked-counselor@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Blocked Counselor Student',
+            phone='9000000131',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            enrolled_by=self.staff,
+            created_by=self.staff,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/request-counselor-change/', {
+            'counselor': new_counselor.id,
+            'reason': 'Transfer request',
+        }, format='json')
+        self.assertEqual(response.status_code, 201)
+        change_request = CounselorChangeRequest.objects.get(enrollment=enrollment)
+
+        self.client.force_authenticate(self.staff)
+        reject_response = self.client.post(f'/api/counselor-change-requests/{change_request.id}/counselor-reject/', {
+            'remarks': 'Do not transfer',
+        }, format='json')
+        self.assertEqual(reject_response.status_code, 200)
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, CounselorChangeRequest.Status.REJECTED)
+
+        self.client.force_authenticate(self.admin)
+        admin_response = self.client.post(f'/api/counselor-change-requests/{change_request.id}/approve/', format='json')
+        self.assertEqual(admin_response.status_code, 400)
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.created_by, self.staff)
+        self.assertFalse(EnrollmentCounselorChangeHistory.objects.filter(enrollment=enrollment).exists())
 
     def test_change_course_respects_branch_permissions(self):
         enrollment = Enrollment.objects.create(

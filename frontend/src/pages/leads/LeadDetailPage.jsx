@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
+import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -715,6 +716,20 @@ export default function LeadDetailPage() {
     setMessage('Follow-up saved.')
   }
 
+  const requestCounselorChange = async (payload) => {
+    setSavingDetails(true)
+    setMessage('')
+    try {
+      await api.post(`/leads/${lead.id}/request-counselor-change/`, payload)
+      setMessage('Counselor change request submitted for current counselor approval.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to submit counselor change request.'))
+      throw error
+    } finally {
+      setSavingDetails(false)
+    }
+  }
+
   const updateDetail = (field, value) => {
     setDetailsForm((current) => ({ ...current, [field]: value }))
     setDetailErrors((current) => ({ ...current, [field]: '' }))
@@ -831,6 +846,18 @@ export default function LeadDetailPage() {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-6">
+        <CounselorReassignmentPanel
+          enrollment={{
+            counselor_id: lead.assigned_to || lead.follow_up_by || lead.assigned_user?.id,
+            counselor_name: lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned',
+            counselor_change_history: [],
+          }}
+          counselors={lead.branch ? staffUsers.filter((item) => String(item.branch_id || item.branch || '') === String(lead.branch)) : staffUsers}
+          isAdmin
+          saving={savingDetails}
+          onReassign={requestCounselorChange}
+        />
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-black tracking-tight text-slate-950">Lead details</h2>
@@ -940,6 +967,7 @@ export default function LeadDetailPage() {
             followUps={lead.follow_ups || []}
             onSave={saveFollowUp}
           />
+        </div>
         </div>
 
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">

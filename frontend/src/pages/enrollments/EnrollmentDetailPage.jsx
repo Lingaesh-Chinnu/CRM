@@ -8,6 +8,7 @@ import { openProtectedFile } from '../../utils/protectedFiles'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
+import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -121,6 +122,7 @@ export default function EnrollmentDetailPage() {
   const [row, setRow] = useState(null)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
+  const [counselors, setCounselors] = useState([])
   const [startDate, setStartDate] = useState('')
   const [batchTiming, setBatchTiming] = useState('')
   const [phone, setPhone] = useState('')
@@ -140,12 +142,15 @@ export default function EnrollmentDetailPage() {
       api.get(`/enrollments/${id}/`),
       isSuperAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
       api.get('/courses/'),
+      isSuperAdmin ? api.get('/users/', { params: { role: 'staff', is_active: true } }) : api.get('/leads/staff-options/'),
     ])
-      .then(([enrollmentRes, branchesRes, coursesRes]) => {
+      .then(([enrollmentRes, branchesRes, coursesRes, usersRes]) => {
         const data = enrollmentRes.data
         setRow(data)
         setBranches(branchesRes.data.results || branchesRes.data)
         setCourses(coursesRes.data.results || coursesRes.data)
+        const users = usersRes.data.results || usersRes.data || []
+        setCounselors(data.branch ? users.filter((item) => String(item.branch_id || item.branch || '') === String(data.branch)) : users)
         setBranch(data.branch || '')
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
@@ -317,6 +322,20 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const reassignCounselor = async (payload) => {
+    setSaving(true)
+    setMessage('')
+    try {
+      await api.post(`/enrollments/${id}/request-counselor-change/`, payload)
+      setMessage('Counselor change request submitted for current counselor approval.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to submit counselor change request.'))
+      throw error
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const deleteEnrollment = async () => {
     await api.delete(`/enrollments/${id}/`)
     navigate('/enrollments', { replace: true })
@@ -357,6 +376,13 @@ export default function EnrollmentDetailPage() {
           )}
         </div>
       </section>
+      <CounselorReassignmentPanel
+        enrollment={row}
+        counselors={counselors}
+        isAdmin
+        saving={saving}
+        onReassign={reassignCounselor}
+      />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">

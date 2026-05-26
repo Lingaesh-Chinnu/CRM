@@ -1170,7 +1170,7 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import CourseChangeHistory, CourseChangeRequest, Enrollment, RulesSigningRequest, get_default_installment_schedule
+from crm.models import CounselorChangeRequest, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, RulesSigningRequest, get_default_installment_schedule
 
 
 class CourseChangeHistorySerializer(serializers.ModelSerializer):
@@ -1213,6 +1213,42 @@ class CourseChangeRequestSerializer(serializers.ModelSerializer):
             'student', 'enrollment', 'old_course', 'requested_by', 'requested_at',
             'status', 'reviewed_by', 'reviewed_at', 'old_fee', 'new_fee',
             'created_at', 'updated_at',
+        ]
+
+
+class EnrollmentCounselorChangeHistorySerializer(serializers.ModelSerializer):
+    old_counselor_name = serializers.CharField(source='old_counselor.full_name', read_only=True)
+    new_counselor_name = serializers.CharField(source='new_counselor.full_name', read_only=True)
+    changed_by_name = serializers.CharField(source='changed_by.full_name', read_only=True)
+
+    class Meta:
+        model = EnrollmentCounselorChangeHistory
+        fields = [
+            'id', 'old_counselor', 'old_counselor_name', 'new_counselor',
+            'new_counselor_name', 'changed_by', 'changed_by_name', 'reason',
+            'changed_at',
+        ]
+
+
+class CounselorChangeRequestSerializer(serializers.ModelSerializer):
+    current_counselor_name = serializers.CharField(source='current_counselor.full_name', read_only=True)
+    requested_counselor_name = serializers.CharField(source='requested_counselor.full_name', read_only=True)
+    requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
+    counselor_decision_by_name = serializers.CharField(source='counselor_decision_by.full_name', read_only=True)
+    admin_decision_by_name = serializers.CharField(source='admin_decision_by.full_name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = CounselorChangeRequest
+        fields = [
+            'id', 'record_type', 'lead', 'enrollment', 'candidate_name', 'candidate_phone',
+            'branch', 'branch_name', 'current_counselor', 'current_counselor_name',
+            'requested_counselor', 'requested_counselor_name', 'requested_by',
+            'requested_by_name', 'requested_at', 'reason', 'status', 'status_display',
+            'counselor_decision_by', 'counselor_decision_by_name', 'counselor_decision_at',
+            'counselor_remarks', 'admin_decision_by', 'admin_decision_by_name',
+            'admin_decision_at', 'admin_remarks', 'force_transfer',
         ]
 
 
@@ -1280,6 +1316,10 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     rules_submitted_at = serializers.SerializerMethodField()
     installment_schedule = serializers.SerializerMethodField()
     course_change_history = CourseChangeHistorySerializer(many=True, read_only=True)
+    counselor_change_history = EnrollmentCounselorChangeHistorySerializer(many=True, read_only=True)
+    counselor_change_requests = CounselorChangeRequestSerializer(many=True, read_only=True)
+    counselor_id = serializers.SerializerMethodField()
+    counselor_name = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1353,6 +1393,14 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         if hasattr(obj, 'payment'):
             return PaymentSerializer(obj.payment).data
         return None
+
+    def get_counselor_id(self, obj):
+        user = obj.enrolled_by or obj.created_by
+        return user.id if user else None
+
+    def get_counselor_name(self, obj):
+        user = obj.enrolled_by or obj.created_by
+        return user.full_name if user else ''
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)

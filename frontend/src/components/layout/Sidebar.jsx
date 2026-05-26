@@ -11,6 +11,7 @@ const navigation = [
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
   { name: 'Payments', href: '/payments', short: 'PY' },
   { name: 'Team Board', href: '/team-board', short: 'TB' },
+  { name: 'Counselor Requests', href: '/counselor-change-requests', short: 'CR' },
 ]
 
 const adminNavigation = [

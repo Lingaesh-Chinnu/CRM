@@ -942,6 +942,74 @@ class CourseChangeHistory(TimeStampedModel):
         return f'{self.enrollment_id}: {self.old_course} -> {self.new_course}'
 
 
+class EnrollmentCounselorChangeHistory(models.Model):
+    """Audit trail for admin enrollment counselor reassignments."""
+
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='counselor_change_history')
+    old_counselor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_changes_from')
+    new_counselor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_changes_to')
+    changed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_changes_made')
+    reason = models.TextField(blank=True)
+    changed_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = 'enrollment_counselor_change_history'
+        ordering = ['-changed_at', '-id']
+        indexes = [
+            models.Index(fields=['enrollment', 'changed_at'], name='enr_coun_hist_enr_chg_idx'),
+            models.Index(fields=['new_counselor', 'changed_at'], name='enr_coun_hist_new_chg_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.enrollment_id}: {self.old_counselor} -> {self.new_counselor}'
+
+
+class CounselorChangeRequest(models.Model):
+    """Two-stage approval workflow for lead/enrollment counselor transfers."""
+
+    class RecordType(models.TextChoices):
+        LEAD = 'lead', 'Lead'
+        ENROLLMENT = 'enrollment', 'Enrollment'
+
+    class Status(models.TextChoices):
+        PENDING_COUNSELOR = 'pending_counselor_approval', 'Pending Counselor Approval'
+        PENDING_ADMIN = 'pending_admin_approval', 'Pending Admin Approval'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    record_type = models.CharField(max_length=20, choices=RecordType.choices, db_index=True)
+    lead = models.ForeignKey(Lead, null=True, blank=True, on_delete=models.CASCADE, related_name='counselor_change_requests')
+    enrollment = models.ForeignKey(Enrollment, null=True, blank=True, on_delete=models.CASCADE, related_name='counselor_change_requests')
+    branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_change_requests')
+    candidate_name = models.CharField(max_length=200)
+    candidate_phone = models.CharField(max_length=20, blank=True)
+    current_counselor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_transfer_requests_from')
+    requested_counselor = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_transfer_requests_to')
+    requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_transfer_requests_made')
+    requested_at = models.DateTimeField(default=timezone.now, db_index=True)
+    reason = models.TextField()
+    status = models.CharField(max_length=40, choices=Status.choices, default=Status.PENDING_COUNSELOR, db_index=True)
+    counselor_decision_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_transfer_decisions')
+    counselor_decision_at = models.DateTimeField(null=True, blank=True)
+    counselor_remarks = models.TextField(blank=True)
+    admin_decision_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='counselor_transfer_admin_decisions')
+    admin_decision_at = models.DateTimeField(null=True, blank=True)
+    admin_remarks = models.TextField(blank=True)
+    force_transfer = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'counselor_change_requests'
+        ordering = ['-requested_at', '-id']
+        indexes = [
+            models.Index(fields=['status', 'requested_at'], name='coun_req_status_req_idx'),
+            models.Index(fields=['current_counselor', 'status'], name='coun_req_current_status_idx'),
+            models.Index(fields=['requested_counselor', 'status'], name='coun_req_new_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.candidate_name}: {self.current_counselor} -> {self.requested_counselor}'
+
+
 class CourseChangeRequest(TimeStampedModel):
     """Approval workflow for staff-requested enrollment course changes."""
 

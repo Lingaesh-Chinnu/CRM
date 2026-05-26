@@ -7,6 +7,7 @@ import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
+import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 
 const studentStatusOptions = [
   { value: 'active', label: 'Active' },
@@ -55,6 +56,7 @@ export default function StudentDetailPage() {
   const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
   const [courses, setCourses] = useState([])
+  const [counselors, setCounselors] = useState([])
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
@@ -66,13 +68,16 @@ export default function StudentDetailPage() {
     Promise.all([
       api.get(`/enrollments/${id}/`),
       api.get('/courses/'),
+      isSuperAdmin ? api.get('/users/', { params: { role: 'staff', is_active: true } }) : api.get('/leads/staff-options/'),
     ])
-      .then(([enrollmentRes, coursesRes]) => {
+      .then(([enrollmentRes, coursesRes, usersRes]) => {
         setRow(enrollmentRes.data)
         setCourses(coursesRes.data.results || coursesRes.data)
+        const users = usersRes.data.results || usersRes.data || []
+        setCounselors(enrollmentRes.data.branch ? users.filter((item) => String(item.branch_id || item.branch || '') === String(enrollmentRes.data.branch)) : users)
       })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load student profile.')))
-  }, [id])
+  }, [id, isSuperAdmin])
 
   if (!row) {
     return <div className="p-6 text-slate-500">{loadError || 'Loading student profile...'}</div>
@@ -108,6 +113,20 @@ export default function StudentDetailPage() {
       setMessage(isSuperAdmin ? 'Course changed. Fees and pending installments were recalculated.' : 'Course change request submitted for admin approval.')
     } catch (error) {
       setMessage(apiErrorMessage(error, isSuperAdmin ? 'Failed to change course.' : 'Failed to submit course change request.'))
+    } finally {
+      setStatusSaving(false)
+    }
+  }
+
+  const reassignCounselor = async (payload) => {
+    setStatusSaving(true)
+    setMessage('')
+    try {
+      await api.post(`/enrollments/${row.id}/request-counselor-change/`, payload)
+      setMessage('Counselor change request submitted for current counselor approval.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to submit counselor change request.'))
+      throw error
     } finally {
       setStatusSaving(false)
     }
@@ -163,6 +182,13 @@ export default function StudentDetailPage() {
         </div>
         {message && <p className="mt-4 text-sm font-semibold text-slate-600">{message}</p>}
       </section>
+      <CounselorReassignmentPanel
+        enrollment={row}
+        counselors={counselors}
+        isAdmin
+        saving={statusSaving}
+        onReassign={reassignCounselor}
+      />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-slate-50 p-4">
