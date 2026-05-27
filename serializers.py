@@ -208,6 +208,8 @@ class UserPerformanceReportSerializer(serializers.Serializer):
     revenue_target = serializers.DecimalField(max_digits=12, decimal_places=2)
     value_target = serializers.DecimalField(max_digits=12, decimal_places=2)
     leads = serializers.IntegerField()
+    transferred_leads = serializers.IntegerField()
+    received_leads = serializers.IntegerField()
     walkins = serializers.IntegerField()
     enrollments = serializers.IntegerField()
     revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
@@ -580,6 +582,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
     follow_ups       = serializers.SerializerMethodField()
+    transfer_history = serializers.SerializerMethodField()
     latest_follow_up_at = serializers.SerializerMethodField()
     latest_remark = serializers.SerializerMethodField()
 
@@ -591,6 +594,8 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     def to_internal_value(self, data):
         if hasattr(data, 'copy'):
             data = data.copy()
+            data.pop('transfer_to', None)
+            data.pop('transfer_to_user', None)
             for field in ('follow_up_by', 'assigned_to', 'branch', 'course', 'dob', 'walkin_date', 'next_follow_up_date'):
                 if data.get(field) == '':
                     data[field] = None
@@ -674,6 +679,29 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             record_id=obj.id,
         ).order_by('-created_at', '-id')
         return FollowUpSerializer(follow_ups, many=True).data
+
+    def get_transfer_history(self, obj):
+        rows = obj.transfer_history.select_related(
+            'from_user', 'to_user', 'transferred_by', 'from_branch', 'to_branch'
+        ).order_by('-created_at')
+        return [
+            {
+                'id': row.id,
+                'from_user': row.from_user_id,
+                'from_user_name': row.from_user.full_name if row.from_user else '',
+                'to_user': row.to_user_id,
+                'to_user_name': row.to_user.full_name if row.to_user else '',
+                'transferred_by': row.transferred_by_id,
+                'transferred_by_name': row.transferred_by.full_name if row.transferred_by else '',
+                'from_branch': row.from_branch_id,
+                'from_branch_name': row.from_branch.name if row.from_branch else '',
+                'to_branch': row.to_branch_id,
+                'to_branch_name': row.to_branch.name if row.to_branch else '',
+                'note': row.note,
+                'created_at': row.created_at,
+            }
+            for row in rows
+        ]
 
     def get_latest_follow_up_at(self, obj):
         follow_up = FollowUp.objects.filter(

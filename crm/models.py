@@ -465,6 +465,32 @@ class LeadImportHistory(TimeStampedModel):
         return f'{self.file_name} - {self.get_status_display()}'
 
 
+class LeadTransferHistory(TimeStampedModel):
+    """Audit trail for direct lead ownership transfers."""
+
+    lead = models.ForeignKey(Lead, on_delete=models.CASCADE, related_name='transfer_history')
+    from_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='lead_transfers_sent')
+    to_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='lead_transfers_received')
+    transferred_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='lead_transfers_made')
+    from_branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL, related_name='lead_transfers_out')
+    to_branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL, related_name='lead_transfers_in')
+    note = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        db_table = 'lead_transfer_history'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['lead', '-created_at'], name='lead_transfer_lead_time_idx'),
+            models.Index(fields=['from_user', 'created_at'], name='lead_transfer_from_idx'),
+            models.Index(fields=['to_user', 'created_at'], name='lead_transfer_to_idx'),
+            models.Index(fields=['from_branch', 'created_at'], name='lead_transfer_from_branch_idx'),
+            models.Index(fields=['to_branch', 'created_at'], name='lead_transfer_to_branch_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.lead_id}: {self.from_user} -> {self.to_user}'
+
+
 class DataImportHistory(TimeStampedModel):
     """Admin audit log for Excel imports across CRM modules."""
 

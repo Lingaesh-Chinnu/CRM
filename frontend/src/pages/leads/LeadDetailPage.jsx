@@ -5,7 +5,6 @@ import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
-import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const todayIso = () => new Date().toISOString().slice(0, 10)
@@ -165,6 +164,7 @@ function conversionStatusLabel(lead) {
   if (lead?.converted_to_type === 'enrollment') return 'Converted to Enrollment'
   if (lead?.status === 'walk_in' || lead?.status === 'converted_to_walkin') return 'Converted to Walk-in'
   if (lead?.status === 'enrolled' || lead?.status === 'converted') return 'Converted to Enrollment'
+  if (lead?.source === 'manual' && lead?.status === 'new') return 'Internal Lead'
   return statusLabel(lead?.status)
 }
 
@@ -628,6 +628,7 @@ export default function LeadDetailPage() {
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
+  const [transferTo, setTransferTo] = useState('')
   const [conversionType, setConversionType] = useState('')
   const [converting, setConverting] = useState(false)
   const [conversionError, setConversionError] = useState('')
@@ -652,7 +653,7 @@ export default function LeadDetailPage() {
   }, [id])
 
   useEffect(() => {
-    api.get('/leads/staff-options/')
+    api.get('/leads/transfer-options/')
       .then(({ data }) => setStaffUsers(data || []))
       .catch(() => setStaffUsers([]))
   }, [])
@@ -716,15 +717,21 @@ export default function LeadDetailPage() {
     setMessage('Follow-up saved.')
   }
 
-  const requestCounselorChange = async (payload) => {
+  const transferLead = async () => {
+    if (!transferTo) {
+      setMessage('Select a counselor to transfer this lead.')
+      return
+    }
     setSavingDetails(true)
     setMessage('')
     try {
-      await api.post(`/leads/${lead.id}/request-counselor-change/`, payload)
-      setMessage('Counselor change request submitted for current counselor approval.')
+      const { data } = await api.post(`/leads/${lead.id}/transfer/`, { transfer_to: transferTo })
+      setLead(data)
+      setDetailsForm(buildConversionForm(data))
+      setTransferTo('')
+      setMessage(data.detail || 'Lead transferred successfully.')
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to submit counselor change request.'))
-      throw error
+      setMessage(apiErrorMessage(error, 'Failed to transfer lead.'))
     } finally {
       setSavingDetails(false)
     }
@@ -736,8 +743,6 @@ export default function LeadDetailPage() {
   }
 
   const detailFields = [
-    { field: 'status', label: 'Lead Status', value: lead.status || 'new', displayValue: statusLabel(lead.status), displayNew: statusLabel },
-    { field: 'assigned_to', payloadField: 'follow_up_by', label: 'Follow-up By', value: lead.assigned_to || lead.follow_up_by || lead.assigned_user?.id || '', displayValue: lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned', displayNew: (value) => staffUsers.find((staff) => String(staff.id) === String(value))?.name || 'Unassigned' },
     { field: 'name', label: 'Name', value: lead.name },
     { field: 'phone', label: 'Phone Number', value: lead.phone },
     { field: 'dob', label: 'Date of Birth', value: lead.dob },
@@ -774,7 +779,7 @@ export default function LeadDetailPage() {
       setMessage('No changes to update.')
       return
     }
-    const optionalFields = new Set(['assigned_to', 'source_description'])
+    const optionalFields = new Set(['source_description'])
     const missing = changes.filter(({ field }) => !optionalFields.has(field) && !String(detailsForm[field] || '').trim())
     if (missing.length > 0) {
       setDetailErrors((current) => ({
@@ -847,17 +852,59 @@ export default function LeadDetailPage() {
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-6">
-        <CounselorReassignmentPanel
-          enrollment={{
-            counselor_id: lead.assigned_to || lead.follow_up_by || lead.assigned_user?.id,
-            counselor_name: lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned',
-            counselor_change_history: [],
-          }}
-          counselors={lead.branch ? staffUsers.filter((item) => String(item.branch_id || item.branch || '') === String(lead.branch)) : staffUsers}
-          isAdmin
-          saving={savingDetails}
-          onReassign={requestCounselorChange}
-        />
+        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Ownership</p>
+              <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned'}</h2>
+              <p className="mt-2 text-sm text-slate-500">Created by {lead.created_by_name || 'Not recorded'}</p>
+            </div>
+            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(220px,1fr)_auto]">
+              <select
+                value={transferTo}
+                onChange={(event) => setTransferTo(event.target.value)}
+                className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+              >
+                <option value="">Transfer to counselor</option>
+                {staffUsers.map((staff) => (
+                  <option key={staff.id} value={staff.id} disabled={String(staff.id) === String(lead.assigned_to || lead.follow_up_by || '')}>
+                    {staff.name}{staff.branch_name ? ` - ${staff.branch_name}` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={transferLead}
+                disabled={savingDetails || !transferTo}
+                className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                Transfer
+              </button>
+            </div>
+          </div>
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Transfer Timeline</p>
+            <div className="mt-3 space-y-3">
+              <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <span className="font-bold text-slate-950">Created by {lead.created_by_name || 'Not recorded'}</span>
+                <span className="ml-2 text-slate-500">{formatDateTime(lead.created_at)}</span>
+              </div>
+              {(lead.transfer_history || []).length === 0 ? (
+                <p className="text-sm font-medium text-slate-500">No transfers recorded.</p>
+              ) : lead.transfer_history.map((item) => (
+                <div key={item.id} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <p className="font-bold text-slate-950">
+                    {item.from_user_name || 'Unassigned'} to {item.to_user_name || 'Unassigned'}
+                  </p>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                    {formatDateTime(item.created_at)} by {item.transferred_by_name || 'Unknown'}
+                    {item.from_branch_name || item.to_branch_name ? ` | ${item.from_branch_name || 'No branch'} to ${item.to_branch_name || 'No branch'}` : ''}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-black tracking-tight text-slate-950">Lead details</h2>
@@ -873,23 +920,9 @@ export default function LeadDetailPage() {
             )}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <DetailField label="Lead Status" value={statusLabel(lead.status)} editing={editingDetails}>
-              <select value={detailsForm.status || 'new'} onChange={(event) => updateDetail('status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                {leadStatusSelectOptions(detailsForm.status || lead.status || 'new').map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              {detailErrorFor('status')}
-            </DetailField>
-            <DetailField label="Follow-up By" value={lead.assigned_to_name || lead.assigned_user?.name || 'Unassigned'} editing={editingDetails}>
-              <select value={detailsForm.assigned_to || ''} onChange={(event) => updateDetail('assigned_to', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <option value="">Unassigned</option>
-                {staffUsers.map((staff) => (
-                  <option key={staff.id} value={staff.id}>{staff.name}</option>
-                ))}
-              </select>
-              {detailErrorFor('assigned_to')}
-            </DetailField>
+            {lead.source !== 'manual' && (
+              <DetailField label="Lead Status" value={statusLabel(lead.status)} />
+            )}
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}

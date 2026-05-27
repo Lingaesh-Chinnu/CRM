@@ -74,6 +74,8 @@ export default function ReportsPage() {
         ...accumulator,
         branchTargets: nextTargets,
         leads: accumulator.leads + Number(row.leads || 0),
+        transferredLeads: accumulator.transferredLeads + Number(row.transferred_leads || 0),
+        receivedLeads: accumulator.receivedLeads + Number(row.received_leads || 0),
         walkins: accumulator.walkins + Number(row.walkins || 0),
         enrollments: accumulator.enrollments + Number(row.enrollments || 0),
         value: accumulator.value + Number(row.value ?? row.revenue ?? 0),
@@ -82,6 +84,8 @@ export default function ReportsPage() {
     {
       branchTargets: {},
       leads: 0,
+      transferredLeads: 0,
+      receivedLeads: 0,
       walkins: 0,
       enrollments: 0,
       value: 0,
@@ -138,6 +142,17 @@ export default function ReportsPage() {
         </div>
       </section>
 
+      <section className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Transferred Leads</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-950">{totals.transferredLeads}</p>
+        </div>
+        <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Received Leads</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-950">{totals.receivedLeads}</p>
+        </div>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[420px_minmax(0,1fr)]">
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Conversion Funnel</p>
@@ -160,13 +175,13 @@ export default function ReportsPage() {
             <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Branch comparison</h2>
           </div>
           <div className="overflow-x-auto">
-            <div className="grid min-w-[1040px] grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              <div>Branch</div><div>Leads</div><div>Walk-ins</div><div>Enrolls</div><div>Value</div><div>Target</div><div>Follow-up</div><div>Pending</div><div>Missed</div>
+            <div className="grid min-w-[1220px] grid-cols-[1.2fr_0.6fr_0.6fr_0.6fr_0.6fr_0.75fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div>Branch</div><div>Leads</div><div>Sent</div><div>Received</div><div>Walk-ins</div><div>Enrolls</div><div>Value</div><div>Target</div><div>Follow-up</div><div>Pending</div><div>Missed</div>
             </div>
             {branchRows.map((row) => (
-              <div key={row.branch_id} className="grid min-w-[1040px] grid-cols-[1.2fr_0.7fr_0.7fr_0.8fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-100 px-6 py-4 text-sm text-slate-700">
+              <div key={row.branch_id} className="grid min-w-[1220px] grid-cols-[1.2fr_0.6fr_0.6fr_0.6fr_0.6fr_0.75fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-100 px-6 py-4 text-sm text-slate-700">
                 <div className="font-bold text-slate-950">{row.branch_name}</div>
-                <div>{row.leads}</div><div>{row.walkins}</div><div>{row.enrollments}</div>
+                <div>{row.leads}</div><div>{row.transferred_leads || 0}</div><div>{row.received_leads || 0}</div><div>{row.walkins}</div><div>{row.enrollments}</div>
                 <div>{currency(row.value)}</div><div>{percentage(row.target_achievement)}</div><div>{percentage(row.follow_up_completion)}</div><div>{currency(row.payment_pending)}</div><div>{row.missed_followups}</div>
               </div>
             ))}
@@ -205,11 +220,13 @@ export default function ReportsPage() {
 
       <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="overflow-x-auto">
-          <div className="grid min-w-[1180px] grid-cols-[0.7fr_1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_1fr_1.1fr_1.1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="grid min-w-[1320px] grid-cols-[0.7fr_1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_1fr_1.1fr_1.1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
             <div>Pos</div>
             <div>User</div>
             <div>Lead T</div>
             <div>Leads</div>
+            <div>Sent</div>
+            <div>Received</div>
             <div>Walk T</div>
             <div>Walk-ins</div>
             <div>Enroll T</div>
@@ -220,7 +237,7 @@ export default function ReportsPage() {
           </div>
           <div className="divide-y divide-slate-200">
             {rows.map((row) => (
-              <div key={row.user_id} className="grid min-w-[1180px] grid-cols-[0.7fr_1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_1fr_1.1fr_1.1fr] gap-4 px-6 py-5 text-sm text-slate-700">
+              <div key={row.user_id} className="grid min-w-[1320px] grid-cols-[0.7fr_1.6fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.8fr_0.9fr_1fr_1.1fr_1.1fr] gap-4 px-6 py-5 text-sm text-slate-700">
                 <div className="flex items-center">
                   <span className="inline-flex min-w-12 items-center justify-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
                     #{row.position}
@@ -232,6 +249,8 @@ export default function ReportsPage() {
                 </div>
                 <div>{row.lead_target}</div>
                 <div>{row.leads}</div>
+                <div>{row.transferred_leads || 0}</div>
+                <div>{row.received_leads || 0}</div>
                 <div>{row.walkin_target}</div>
                 <div>{row.walkins}</div>
                 <div>{row.enroll_target}</div>

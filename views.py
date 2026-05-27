@@ -78,7 +78,7 @@ from crm.models import (
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory,
-    CounselorChangeRequest, CourseChangeRequest,
+    CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
     get_default_installment_schedule, enrollment_payable_fee,
 )
 from serializers import (
@@ -1683,6 +1683,12 @@ class UserPerformanceReportView(APIView):
             leads_count = Lead.objects.filter(
                 created_by=user, created_at__year=year, created_at__month=month
             ).count()
+            transferred_leads_count = LeadTransferHistory.objects.filter(
+                from_user=user, created_at__year=year, created_at__month=month
+            ).count()
+            received_leads_count = LeadTransferHistory.objects.filter(
+                to_user=user, created_at__year=year, created_at__month=month
+            ).count()
             walkins_count = WalkIn.objects.filter(
                 created_by=user, visit_date__year=year, visit_date__month=month
             ).count()
@@ -1722,6 +1728,8 @@ class UserPerformanceReportView(APIView):
                 'revenue_target': value_target,
                 'value_target': value_target,
                 'leads': leads_count,
+                'transferred_leads': transferred_leads_count,
+                'received_leads': received_leads_count,
                 'walkins': walkins_count,
                 'enrollments': enrollments_count,
                 'revenue': value_total,
@@ -2049,7 +2057,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             'converted_record_id', 'converted_at', 'converted_by',
         ])
         if self.action == 'list':
-            qs = visible_candidate_queryset(Lead.objects.select_related('course', 'branch', 'assigned_to'))
+            qs = visible_candidate_queryset(Lead.objects.select_related('course', 'branch', 'assigned_to', 'created_by'))
             latest_follow_up = FollowUp.objects.filter(
                 record_type=FollowUp.RecordType.LEAD,
                 record_id=OuterRef('pk'),
@@ -2062,7 +2070,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             related = ['course', 'branch', 'assigned_to', 'created_by']
             if 'converted_by' not in missing_columns:
                 related.append('converted_by')
-            qs = visible_candidate_queryset(Lead.objects.select_related(*related))
+            qs = visible_candidate_queryset(Lead.objects.select_related(*related).prefetch_related('transfer_history'))
         if missing_columns:
             qs = qs.defer(*missing_columns)
         if self.action != 'list':
@@ -2073,7 +2081,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                     *[f'created_by__{field}' for field in missing_user_columns],
                     *[f'converted_by__{field}' for field in missing_user_columns],
                 )
-        # Staff can only see their branch's leads
+        # Staff can only see leads currently owned by their branch.
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
         if (
@@ -2095,12 +2103,58 @@ class LeadViewSet(viewsets.ModelViewSet):
         lead.save(update_fields=['is_important', 'updated_at'])
         return Response({'id': lead.id, 'is_important': lead.is_important})
 
+    def _transfer_lead(self, lead, target_user, transferred_by, note=''):
+        if lead.assigned_to_id == target_user.id and lead.branch_id == target_user.branch_id:
+            return None
+        from_user = lead.assigned_to or lead.created_by
+        from_branch = lead.branch
+        lead.assigned_to = target_user
+        if target_user.branch_id:
+            lead.branch = target_user.branch
+        lead.save(update_fields=['assigned_to', 'branch', 'updated_at'])
+        history = LeadTransferHistory.objects.create(
+            lead=lead,
+            from_user=from_user,
+            to_user=target_user,
+            transferred_by=transferred_by,
+            from_branch=from_branch,
+            to_branch=lead.branch,
+            note=str(note or '').strip(),
+        )
+        if target_user.id != transferred_by.id:
+            create_user_notification(
+                target_user,
+                'Lead Transferred To You',
+                f'{lead.name} was transferred to you by {transferred_by.full_name}.',
+                Notification.NType.INFO,
+                f'/leads/{lead.id}',
+            )
+        return history
+
+    @action(detail=True, methods=['post'], url_path='transfer')
+    def transfer(self, request, pk=None):
+        lead = self.get_object()
+        target_id = request.data.get('transfer_to') or request.data.get('to_user') or request.data.get('user')
+        if not target_id:
+            return Response({'transfer_to': 'Select a counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+        target_user = User.objects.filter(pk=target_id, is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch').first()
+        if not target_user:
+            return Response({'transfer_to': 'Select an active counselor.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            lead = Lead.objects.select_for_update().select_related('assigned_to', 'created_by', 'branch').get(pk=lead.pk)
+            history = self._transfer_lead(lead, target_user, request.user, request.data.get('note'))
+        lead.refresh_from_db()
+        data = self.get_serializer(lead).data
+        data['transfer_created'] = bool(history)
+        data['detail'] = f'Lead transferred to {target_user.full_name}.'
+        return Response(data)
+
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset())
         headers = [
             'Lead Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
-            'Follow Up Date', 'Walkin Date', 'Remarks', 'Assigned Counselor',
+            'Source Description', 'Follow Up Date', 'Walkin Date', 'Remarks', 'Assigned Counselor', 'Created By',
             'Email', 'Location', 'Created At',
         ]
         rows = [
@@ -2112,10 +2166,12 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.branch.name if lead.branch else '',
                 lead.get_source_display() if getattr(lead, 'source', '') else '',
                 lead.get_status_display(),
+                getattr(lead, 'source_description', ''),
                 getattr(lead, 'next_follow_up_date', None),
                 lead.walkin_date,
                 lead.remarks,
                 lead.assigned_to.full_name if lead.assigned_to else '',
+                lead.created_by.full_name if lead.created_by else '',
                 lead.email,
                 lead.location,
                 lead.created_at,
@@ -2368,13 +2424,42 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         # Auto-set branch + created_by for staff
-        branch = self.request.user.branch if not self.request.user.is_super_admin else None
-        assigned_to = serializer.validated_data.get('assigned_to')
-        serializer.save(
+        transfer_to_id = self.request.data.get('transfer_to') or self.request.data.get('transfer_to_user')
+        transfer_user = None
+        if transfer_to_id:
+            transfer_user = User.objects.filter(
+                pk=transfer_to_id,
+                is_active=True,
+                role=User.Role.STAFF,
+            ).select_related('branch').first()
+            if not transfer_user:
+                raise DRFValidationError({'transfer_to': 'Select an active counselor.'})
+        branch = self.request.user.branch if not self.request.user.is_super_admin else serializer.validated_data.get('branch')
+        assigned_to = transfer_user or serializer.validated_data.get('assigned_to') or self.request.user
+        if transfer_user and transfer_user.branch_id:
+            branch = transfer_user.branch
+        lead = serializer.save(
             created_by=self.request.user,
-            branch=branch or serializer.validated_data.get('branch'),
-            assigned_to=assigned_to or self.request.user,
+            branch=branch,
+            assigned_to=assigned_to,
         )
+        if transfer_user and transfer_user.id != self.request.user.id:
+            LeadTransferHistory.objects.create(
+                lead=lead,
+                from_user=self.request.user,
+                to_user=transfer_user,
+                transferred_by=self.request.user,
+                from_branch=self.request.user.branch,
+                to_branch=lead.branch,
+                note='Transferred during lead creation.',
+            )
+            create_user_notification(
+                transfer_user,
+                'Lead Transferred To You',
+                f'New lead {lead.name} transferred to you by {self.request.user.full_name}.',
+                Notification.NType.INFO,
+                f'/leads/{lead.id}',
+            )
 
     def create(self, request, *args, **kwargs):
         try:
@@ -2416,6 +2501,25 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'identity_color': user.identity_color or '',
             })
         return Response(rows)
+
+    @action(detail=False, methods=['get'], url_path='transfer-options')
+    def transfer_options(self, request):
+        users = User.objects.filter(
+            is_active=True,
+            role=User.Role.STAFF,
+        ).select_related('branch').order_by('branch__name', 'first_name', 'last_name', 'username')
+        return Response([
+            {
+                'id': user.id,
+                'name': user.full_name or user.username,
+                'full_name': user.full_name,
+                'username': user.username,
+                'branch_id': user.branch_id,
+                'branch_name': user.branch.name if user.branch else '',
+                'identity_color': user.identity_color or '',
+            }
+            for user in users
+        ])
 
     @action(detail=False, methods=['get'], url_path='source-options')
     def source_options(self, request):
@@ -8263,6 +8367,8 @@ class BranchPerformanceComparisonReportView(APIView):
             walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, visit_date__year=year, visit_date__month=month))
             enrollments = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(branch=branch)), year, month)
             payments = visible_payment_queryset(Payment.objects.filter(enrollment__branch=branch))
+            transfers_out = LeadTransferHistory.objects.filter(from_branch=branch, created_at__year=year, created_at__month=month).count()
+            transfers_in = LeadTransferHistory.objects.filter(to_branch=branch, created_at__year=year, created_at__month=month).count()
             target = BranchTarget.objects.filter(branch=branch, year=year, month=month).first()
             missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.DROPPED, Lead.Status.LOST]).count()
             missed_walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, follow_up_date__lt=today)).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).count()
@@ -8288,6 +8394,8 @@ class BranchPerformanceComparisonReportView(APIView):
                 'branch_id': branch.id,
                 'branch_name': branch.name,
                 'leads': leads.count(),
+                'transferred_leads': transfers_out,
+                'received_leads': transfers_in,
                 'walkins': walkins.count(),
                 'enrollments': enrollments.count(),
                 'value': value,
@@ -8320,7 +8428,7 @@ class ExportLeadsExcelView(APIView):
         ws = wb.active
         ws.title = 'Leads'
         headers = ['Lead No','Name','Phone','Location','Course',
-                   'Status','Source','Walk-in Date','Branch','Assigned To','Created']
+                   'Status','Source','Source Description','Walk-in Date','Branch','Assigned To','Created By','Created']
         ws.append(headers)
 
         for lead in qs:
@@ -8328,9 +8436,11 @@ class ExportLeadsExcelView(APIView):
                 lead.lead_number, lead.name, lead.phone, lead.location,
                 lead.course.name if lead.course else '',
                 lead.get_status_display(), lead.get_source_display(),
+                getattr(lead, 'source_description', ''),
                 str(lead.walkin_date) if lead.walkin_date else '',
                 lead.branch.name if lead.branch else '',
                 lead.assigned_to.full_name if lead.assigned_to else '',
+                lead.created_by.full_name if lead.created_by else '',
                 lead.created_at.strftime('%Y-%m-%d %H:%M'),
             ])
 

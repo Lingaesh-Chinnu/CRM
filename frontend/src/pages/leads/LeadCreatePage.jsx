@@ -19,7 +19,8 @@ const initialForm = {
   branch: '',
   course: '',
   source: 'manual',
-  assigned_to: '',
+  source_description: '',
+  transfer_to: '',
   qualification: '',
   degree: '',
   next_follow_up_date: '',
@@ -43,7 +44,7 @@ export default function LeadCreatePage() {
   const { user } = useSelector((state) => state.auth)
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
-  const [staffUsers, setStaffUsers] = useState([])
+  const [transferUsers, setTransferUsers] = useState([])
   const [form, setForm] = useState(initialForm)
   const [duplicateInfo, setDuplicateInfo] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -61,22 +62,10 @@ export default function LeadCreatePage() {
   }, [isSuperAdmin])
 
   useEffect(() => {
-    const params = isSuperAdmin && form.branch ? { branch: form.branch } : undefined
-    api.get('/leads/staff-options/', { params })
-      .then(({ data }) => {
-        const rows = data || []
-        setStaffUsers(rows)
-        setForm((current) => {
-          const defaultUser = rows.find((staff) => String(staff.id) === String(user?.id)) ? String(user.id) : ''
-          const currentExists = rows.some((staff) => String(staff.id) === String(current.assigned_to))
-          return {
-            ...current,
-            assigned_to: current.assigned_to && currentExists ? current.assigned_to : defaultUser,
-          }
-        })
-      })
-      .catch(() => setStaffUsers([]))
-  }, [isSuperAdmin, user?.id, form.branch])
+    api.get('/leads/transfer-options/')
+      .then(({ data }) => setTransferUsers(data || []))
+      .catch(() => setTransferUsers([]))
+  }, [])
 
   const submit = async (e) => {
     e.preventDefault()
@@ -92,10 +81,9 @@ export default function LeadCreatePage() {
       name: form.name,
       phone: form.phone,
       course: form.course ? Number(form.course) : null,
-      status: 'new',
-      lead_status: 'new',
       source: form.source || 'manual',
-      follow_up_by: form.assigned_to ? Number(form.assigned_to) : null,
+      source_description: form.source_description.trim(),
+      transfer_to: form.transfer_to ? Number(form.transfer_to) : null,
       qualification: form.qualification.trim(),
       degree: form.degree.trim(),
       branch: isSuperAdmin ? Number(form.branch) || null : null,
@@ -209,15 +197,27 @@ export default function LeadCreatePage() {
           </div>
 
           <div>
-            <FieldLabel>Follow-up By</FieldLabel>
+            <FieldLabel>Source Description</FieldLabel>
+            <input
+              value={form.source_description}
+              onChange={(e) => setForm({ ...form, source_description: e.target.value })}
+              placeholder="Instagram Reel, Meta Ad Campaign, Referral Details"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Transfer To</FieldLabel>
             <select
-              value={form.assigned_to}
-              onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}
+              value={form.transfer_to}
+              onChange={(e) => setForm({ ...form, transfer_to: e.target.value })}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             >
-              <option value="">Unassigned</option>
-              {staffUsers.map((staff) => (
-                <option key={staff.id} value={staff.id}>{staff.name}</option>
+              <option value="">Keep with me</option>
+              {transferUsers.map((staff) => (
+                <option key={staff.id} value={staff.id}>
+                  {staff.name}{staff.branch_name ? ` - ${staff.branch_name}` : ''}
+                </option>
               ))}
             </select>
           </div>

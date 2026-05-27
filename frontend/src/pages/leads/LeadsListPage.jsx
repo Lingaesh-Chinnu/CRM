@@ -797,6 +797,9 @@ export default function LeadsListPage() {
                   width: '132px',
                   className: 'flex items-center',
                   render: (lead) => (
+                    lead.source === 'manual' && lead.status === 'new' ? (
+                      <StatusBadge>Internal</StatusBadge>
+                    ) : (
                     <div className="relative w-full max-w-[132px]">
                       <select
                         value={lead.status || 'new'}
@@ -819,6 +822,7 @@ export default function LeadsListPage() {
                       </select>
                       <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-current">v</span>
                     </div>
+                    )
                   ),
                 },
                 { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(100px,0.8fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
