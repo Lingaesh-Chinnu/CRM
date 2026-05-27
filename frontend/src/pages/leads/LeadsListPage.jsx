@@ -9,6 +9,7 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
+import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -97,8 +98,7 @@ export default function LeadsListPage() {
   const [branches, setBranches] = useState([])
   const [sourceOptions, setSourceOptions] = useState([])
   const [filters, setFilters] = useState({
-    name: '',
-    phone: '',
+    search: '',
     status: '',
     source: '',
     followUp: '',
@@ -126,17 +126,14 @@ export default function LeadsListPage() {
   const nextFollowUpDateFrom = searchParams.get('next_follow_up_date_from') || ''
   const nextFollowUpDateTo = searchParams.get('next_follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
+  const debouncedSearch = useDebouncedValue(filters.search.trim())
 
   const filteredLeads = useMemo(() => {
-    const nameQuery = filters.name.trim().toLowerCase()
-    const phoneQuery = filters.phone.trim()
     const today = new Date()
     const todayValue = isoDate(today)
     const tomorrowValue = isoDate(addDays(today, 1))
     const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
-      const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
-      const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
       const matchesStatus = !filters.status
         || lead.status === filters.status
         || (filters.status === 'converted' && lead.status === 'converted_to_walkin')
@@ -157,20 +154,16 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
+      return matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
   }, [filters, leads])
 
   const statusSummaryBaseLeads = useMemo(() => {
-    const nameQuery = filters.name.trim().toLowerCase()
-    const phoneQuery = filters.phone.trim()
     const today = new Date()
     const todayValue = isoDate(today)
     const tomorrowValue = isoDate(addDays(today, 1))
     const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
-      const matchesName = !nameQuery || String(lead.name || '').toLowerCase().includes(nameQuery)
-      const matchesPhone = !phoneQuery || String(lead.phone || '').includes(phoneQuery)
       const leadSource = String(lead.source || '').toLowerCase()
       const filterSource = String(filters.source || '').toLowerCase()
       const matchesSource = !filterSource
@@ -188,13 +181,12 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
+      return matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
   }, [filters, leads])
 
   const hasFilters = Boolean(
-    filters.name
-    || filters.phone
+    filters.search
     || filters.status
     || filters.source
     || filters.followUp
@@ -224,9 +216,12 @@ export default function LeadsListPage() {
     isSuperAdmin,
     filters.branch,
     filters.source,
+    filters.followUp,
+    filters.followUpBy,
     filters.createdFrom,
     filters.createdTo,
     filters.importantOnly,
+    debouncedSearch,
   ])
 
   useEffect(() => {
@@ -268,9 +263,23 @@ export default function LeadsListPage() {
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
       if (isSuperAdmin && filters.branch) params.branch = filters.branch
       if (filters.source) params.source = filters.source
+      if (filters.followUpBy) params.follow_up_by = filters.followUpBy
+      if (debouncedSearch) params.search = debouncedSearch
       if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
       if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
+      const today = new Date()
+      if (filters.followUp === 'today') {
+        params.next_follow_up_date_from = isoDate(today)
+        params.next_follow_up_date_to = isoDate(today)
+      } else if (filters.followUp === 'tomorrow') {
+        const tomorrow = isoDate(addDays(today, 1))
+        params.next_follow_up_date_from = tomorrow
+        params.next_follow_up_date_to = tomorrow
+      } else if (filters.followUp === 'next7') {
+        params.next_follow_up_date_from = isoDate(today)
+        params.next_follow_up_date_to = isoDate(addDays(today, 7))
+      }
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
       setLoadMessage('')
@@ -289,8 +298,7 @@ export default function LeadsListPage() {
     if (walkinDateTo) params.walkin_date_to = walkinDateTo
     if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
     if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
-    if (filters.name.trim()) params.name = filters.name.trim()
-    if (filters.phone.trim()) params.phone = filters.phone.trim()
+    if (debouncedSearch) params.search = debouncedSearch
     if (filters.followUpBy) params.follow_up_by = filters.followUpBy
     if (isSuperAdmin && filters.branch) params.branch = filters.branch
     if (filters.source) params.source = filters.source
@@ -362,8 +370,7 @@ export default function LeadsListPage() {
 
   const clearFilters = () => {
     setFilters({
-      name: '',
-      phone: '',
+      search: '',
       status: '',
       source: '',
       followUp: '',
@@ -517,20 +524,12 @@ export default function LeadsListPage() {
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] 2xl:items-end">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
+          <label className="block md:col-span-2">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search</span>
             <input
-              value={filters.name}
-              onChange={(event) => updateFilter('name', event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Phone Number</span>
-            <input
-              value={filters.phone}
-              onChange={(event) => updateFilter('phone', event.target.value)}
-              inputMode="numeric"
+              value={filters.search}
+              onChange={(event) => updateFilter('search', event.target.value)}
+              placeholder="Name, phone, lead ID, course, counselor, source"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>

@@ -8,12 +8,12 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
 const emptyFilters = {
-  name: '',
-  phone: '',
+  search: '',
   branch: '',
   assigned_to: '',
   course: '',
@@ -40,8 +40,7 @@ function statusTone(walkin) {
 
 function readFilters(searchParams, canFilterByBranch) {
   return {
-    name: searchParams.get('name') || '',
-    phone: searchParams.get('phone') || '',
+    search: searchParams.get('search') || '',
     branch: canFilterByBranch ? searchParams.get('branch') || '' : '',
     assigned_to: searchParams.get('assigned_to') || searchParams.get('created_by') || '',
     course: searchParams.get('course') || '',
@@ -218,6 +217,7 @@ export default function WalkInsListPage() {
   const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = searchParams.get('follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
+  const debouncedSearch = useDebouncedValue(filters.search.trim())
   const publicWalkInPath = `${appBasePath}/public/walk-in${!canFilterByBranch && user?.branch_id ? `?branch=${user.branch_id}` : ''}`
   const publicWalkInLink = `${window.location.origin}${publicWalkInPath}`
 
@@ -233,8 +233,10 @@ export default function WalkInsListPage() {
   const walkinQueryParams = (format) => {
     const params = { format }
     Object.entries(appliedFilters).forEach(([key, value]) => {
+      if (key === 'search') return
       if (value) params[key] = value
     })
+    if (debouncedSearch) params.search = debouncedSearch
     if (visitDateFrom) params.visit_date_from = visitDateFrom
     if (visitDateTo) params.visit_date_to = visitDateTo
     if (followUpDateFrom) params.follow_up_date_from = followUpDateFrom
@@ -291,8 +293,10 @@ export default function WalkInsListPage() {
       try {
         const params = { sectioned: 1 }
         Object.entries(appliedFilters).forEach(([key, value]) => {
+          if (key === 'search') return
           if (value) params[key] = value
         })
+        if (debouncedSearch) params.search = debouncedSearch
         if (visitDateFrom) params.visit_date_from = visitDateFrom
         if (visitDateTo) params.visit_date_to = visitDateTo
         if (followUpDateFrom) params.follow_up_date_from = followUpDateFrom
@@ -316,7 +320,7 @@ export default function WalkInsListPage() {
     }
 
     fetchWalkins()
-  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus])
+  }, [appliedFilters, debouncedSearch, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus])
 
   const updateFilter = (key, value) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -419,13 +423,9 @@ export default function WalkInsListPage() {
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Name</span>
-            <input value={filters.name} onChange={(event) => updateFilter('name', event.target.value)} name="name" placeholder="Candidate name" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Phone</span>
-            <input value={filters.phone} onChange={(event) => updateFilter('phone', event.target.value)} name="phone" placeholder="Phone number" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
+          <label className="block md:col-span-2">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Search</span>
+            <input value={filters.search} onChange={(event) => updateFilter('search', event.target.value)} name="search" placeholder="Name, phone, walk-in ID, course, counselor, source" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
           </label>
           {canFilterByBranch && (
             <label className="block">

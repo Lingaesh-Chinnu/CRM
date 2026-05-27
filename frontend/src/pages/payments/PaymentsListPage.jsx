@@ -9,6 +9,7 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function statusLabel(status) {
   if (!status) return 'Unknown'
@@ -149,6 +150,7 @@ export default function PaymentsListPage() {
   const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '')
   const [importantOnly, setImportantOnly] = useState(searchParams.get('important_only') === 'true')
   const dueThisWeek = searchParams.get('due_this_week') || ''
+  const debouncedSearch = useDebouncedValue(search.trim())
   const duePaymentsFilter = paymentStatus === 'due' || paymentStatus === 'pending_today'
   const weeklyPendingFilter = paymentStatus === 'weekly_pending'
   const reasonRequestId = searchParams.get('reason_request') || ''
@@ -208,7 +210,7 @@ export default function PaymentsListPage() {
       if (dateTo) params.date_to = dateTo
     }
     if (importantOnly) params.important_only = true
-    if (search.trim()) params.search = search.trim()
+    if (debouncedSearch) params.search = debouncedSearch
 
     setLoading(true)
     if (!navigationMessage) setMessage('')
@@ -230,7 +232,7 @@ export default function PaymentsListPage() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, counselor, search, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, importantOnly, dueThisWeek, navigationMessage])
+  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, importantOnly, dueThisWeek, navigationMessage])
 
   useEffect(() => {
     if (!reasonRequestId) return
@@ -253,7 +255,7 @@ export default function PaymentsListPage() {
     if (month) nextParams.set('month', month)
     if (isSuperAdmin && branch) nextParams.set('branch', branch)
     if (counselor) nextParams.set('user', counselor)
-    if (search.trim()) nextParams.set('search', search.trim())
+    if (debouncedSearch) nextParams.set('search', debouncedSearch)
     if (duration) nextParams.set('duration', duration)
     if (duration === 'custom') {
       if (dateFrom) nextParams.set('date_from', dateFrom)
@@ -372,7 +374,7 @@ export default function PaymentsListPage() {
             ...(duration === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
             ...(duration === 'custom' && dateTo ? { date_to: dateTo } : {}),
             ...(importantOnly ? { important_only: true } : {}),
-            ...(search.trim() ? { search: search.trim() } : {}),
+            ...(debouncedSearch ? { search: debouncedSearch } : {}),
           },
         })
         setRows(refreshed.data.results || refreshed.data)
@@ -424,7 +426,7 @@ export default function PaymentsListPage() {
         if (dateTo) params.date_to = dateTo
       }
       if (importantOnly) params.important_only = true
-      if (search.trim()) params.search = search.trim()
+      if (debouncedSearch) params.search = debouncedSearch
       await downloadExport('/payments/export/', params, `payment-worksheet-${month}.${format === 'csv' ? 'csv' : 'xlsx'}`)
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to export payment worksheet.'))
@@ -590,7 +592,7 @@ export default function PaymentsListPage() {
           <input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search student, phone, or ID"
+            placeholder="Name, phone, payment ID, student ID, course, counselor"
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
           />
           {isSuperAdmin ? (

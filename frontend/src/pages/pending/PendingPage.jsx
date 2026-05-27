@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 const moduleConfig = {
   leads: { title: 'Lead Pending', endpoint: '/pending/leads/', detailPrefix: '/leads', followType: 'lead' },
@@ -55,8 +56,10 @@ export default function PendingPage() {
     date_from: '',
     date_to: '',
     status: '',
+    search: '',
     importantOnly: false,
   })
+  const debouncedSearch = useDebouncedValue(filters.search.trim())
 
   const params = useMemo(() => {
     const next = {}
@@ -68,9 +71,21 @@ export default function PendingPage() {
       if (filters.date_to) next.date_to = filters.date_to
     }
     if (module === 'payments' && filters.status) next.status = filters.status
+    if (debouncedSearch) next.search = debouncedSearch
     if (filters.importantOnly) next.important_only = true
     return next
-  }, [filters, isAdmin, module])
+  }, [
+    filters.branch,
+    filters.user,
+    filters.duration,
+    filters.date_from,
+    filters.date_to,
+    filters.status,
+    filters.importantOnly,
+    debouncedSearch,
+    isAdmin,
+    module,
+  ])
 
   const loadRows = async () => {
     setLoading(true)
@@ -151,6 +166,12 @@ export default function PendingPage() {
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <input
+            value={filters.search}
+            onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
+            placeholder={module === 'payments' ? 'Name, phone, payment ID, course, counselor' : 'Name, phone, ID, course, counselor'}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold"
+          />
           {isAdmin && (
             <select value={filters.branch} onChange={(event) => setFilters((current) => ({ ...current, branch: event.target.value, user: '' }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold">
               <option value="">All branches</option>

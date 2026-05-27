@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -52,6 +53,7 @@ export default function StudentsListPage() {
   const [message, setMessage] = useState('')
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
+  const debouncedSearch = useDebouncedValue(filters.search.trim())
 
   useEffect(() => {
     loadFilterOptions()
@@ -59,7 +61,7 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
-  }, [filters.branch, filters.course, filters.status, filters.search, filters.enrolledFrom, filters.enrolledTo, filters.importantOnly, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, filters.importantOnly, isSuperAdmin])
 
   const loadFilterOptions = async () => {
     try {
@@ -90,8 +92,8 @@ export default function StudentsListPage() {
       if (filters.status) {
         params.status = filters.status
       }
-      if (filters.search.trim()) {
-        params.search = filters.search.trim()
+      if (debouncedSearch) {
+        params.search = debouncedSearch
       }
       if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
       if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
@@ -113,7 +115,7 @@ export default function StudentsListPage() {
     if (isSuperAdmin && filters.branch) params.branch = filters.branch
     if (filters.course) params.course = filters.course
     if (filters.status) params.status = filters.status
-    if (filters.search.trim()) params.search = filters.search.trim()
+    if (debouncedSearch) params.search = debouncedSearch
     if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
     if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
     if (filters.importantOnly) params.important_only = true
@@ -226,7 +228,7 @@ export default function StudentsListPage() {
             <input
               value={filters.search}
               onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-              placeholder="Student name, phone, number, email"
+              placeholder="Name, phone, student ID, course, counselor"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>

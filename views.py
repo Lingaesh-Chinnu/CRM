@@ -1081,6 +1081,38 @@ def apply_pending_date_filter(queryset, field_name, request):
     return queryset
 
 
+class CRMSearchFilter(SearchFilter):
+    def filter_queryset(self, request, queryset, view):
+        search_terms = self.get_search_terms(request)
+        if not search_terms:
+            return queryset
+
+        search_fields = self.get_search_fields(view, request)
+        id_search_fields = getattr(view, 'id_search_fields', [])
+        for term in search_terms:
+            term_query = Q()
+            for field in search_fields:
+                term_query |= Q(**{f'{field}__icontains': term})
+            if term.isdigit():
+                for field in id_search_fields:
+                    term_query |= Q(**{field: int(term)})
+            queryset = queryset.filter(term_query)
+        return queryset.distinct()
+
+
+def apply_text_search(queryset, search, fields, id_fields=None):
+    search = (search or '').strip()
+    if not search:
+        return queryset
+    query = Q()
+    for field in fields:
+        query |= Q(**{f'{field}__icontains': search})
+    if search.isdigit():
+        for field in id_fields or []:
+            query |= Q(**{field: int(search)})
+    return queryset.filter(query).distinct()
+
+
 def pending_staff_filter(request):
     raw = request.query_params.get('user') or request.query_params.get('counselor') or ''
     try:
@@ -2057,10 +2089,16 @@ class LeadViewSet(viewsets.ModelViewSet):
     - Branch-level data isolation for staff
     """
     permission_classes = [IsStaffOrAdmin]
-    filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = LeadFilter
     pagination_class   = None
-    search_fields      = ['name', 'phone', 'lead_number']
+    search_fields      = [
+        'name', 'phone', 'lead_number', 'email', 'source', 'source_description',
+        'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
+        'assigned_to__username', 'created_by__first_name', 'created_by__last_name',
+        'created_by__username',
+    ]
+    id_search_fields   = ['id']
     ordering_fields    = ['created_at', 'walkin_date', 'name']
     ordering           = ['-created_at']
 
@@ -4320,6 +4358,11 @@ class PendingManagementView(APIView):
             qs = qs.filter(assigned_to_id=staff_id)
         if truthy_query_param(request.query_params.get('important_only')):
             qs = qs.filter(is_important=True)
+        qs = apply_text_search(qs, request.query_params.get('search'), [
+            'lead_number', 'name', 'phone', 'email', 'source', 'source_description',
+            'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
+            'assigned_to__username',
+        ], id_fields=['id'])
         qs = pending_follow_up_queryset(
             qs,
             FollowUp.RecordType.LEAD,
@@ -4339,6 +4382,11 @@ class PendingManagementView(APIView):
             qs = qs.filter(assigned_to_id=staff_id)
         if truthy_query_param(request.query_params.get('important_only')):
             qs = qs.filter(is_important=True)
+        qs = apply_text_search(qs, request.query_params.get('search'), [
+            'candidate_number', 'name', 'phone', 'email', 'source',
+            'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
+            'assigned_to__username',
+        ], id_fields=['id'])
         qs = pending_follow_up_queryset(
             qs,
             FollowUp.RecordType.WALKIN,
@@ -4371,6 +4419,14 @@ class PendingManagementView(APIView):
                 qs = qs.filter(status=status_filter)
         if truthy_query_param(request.query_params.get('important_only')):
             qs = qs.filter(enrollment__is_important=True)
+        qs = apply_text_search(qs, request.query_params.get('search'), [
+            'enrollment__student_number', 'enrollment__name',
+            'enrollment__phone', 'enrollment__email', 'enrollment__source',
+            'enrollment__course__name', 'enrollment__enrolled_by__first_name',
+            'enrollment__enrolled_by__last_name', 'enrollment__enrolled_by__username',
+            'enrollment__created_by__first_name', 'enrollment__created_by__last_name',
+            'enrollment__created_by__username',
+        ], id_fields=['id', 'enrollment__id'])
         qs = apply_pending_date_filter(qs, 'next_payment_date', request)
         return qs.order_by('next_payment_date', 'enrollment__name')
 
@@ -4672,10 +4728,16 @@ class WalkInFilter(django_filters.FilterSet):
 class WalkInViewSet(viewsets.ModelViewSet):
     """Walk-in management. Staff sees own branch; admin sees all."""
     permission_classes = [IsStaffOrAdmin]
-    filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = WalkInFilter
     pagination_class   = None
-    search_fields      = ['name', 'phone', 'candidate_number', 'email']
+    search_fields      = [
+        'name', 'phone', 'candidate_number', 'email', 'source',
+        'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
+        'assigned_to__username', 'created_by__first_name', 'created_by__last_name',
+        'created_by__username',
+    ]
+    id_search_fields   = ['id']
     ordering_fields    = ['visit_date', 'created_at']
     ordering           = ['-visit_date']
 
@@ -5617,10 +5679,16 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
 class EnrollmentViewSet(viewsets.ModelViewSet):
     """Enrollment records. Staff sees own branch."""
     permission_classes = [IsStaffOrAdmin]
-    filter_backends    = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = EnrollmentFilter
     pagination_class   = None
-    search_fields      = ['name', 'phone', 'student_number', 'email']
+    search_fields      = [
+        'name', 'phone', 'student_number', 'email', 'source',
+        'course__name', 'enrolled_by__first_name', 'enrolled_by__last_name',
+        'enrolled_by__username', 'created_by__first_name', 'created_by__last_name',
+        'created_by__username',
+    ]
+    id_search_fields   = ['id']
     ordering_fields    = ['enrollment_date', 'name']
     ordering           = ['-enrollment_date']
 
@@ -6621,10 +6689,18 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     """Read payment records (aggregate)."""
     permission_classes = [IsStaffOrAdmin]
     serializer_class   = PaymentSerializer
-    filter_backends    = [DjangoFilterBackend, SearchFilter]
+    filter_backends    = [DjangoFilterBackend, CRMSearchFilter]
     filterset_class    = PaymentFilter
     pagination_class   = None
-    search_fields      = ['enrollment__name', 'enrollment__student_number', 'enrollment__phone']
+    search_fields      = [
+        'enrollment__name', 'enrollment__student_number',
+        'enrollment__phone', 'enrollment__email', 'enrollment__source',
+        'enrollment__course__name', 'enrollment__enrolled_by__first_name',
+        'enrollment__enrolled_by__last_name', 'enrollment__enrolled_by__username',
+        'enrollment__created_by__first_name', 'enrollment__created_by__last_name',
+        'enrollment__created_by__username',
+    ]
+    id_search_fields   = ['id', 'enrollment__id']
 
     def _month_bounds(self):
         raw_month = self.request.query_params.get('month')

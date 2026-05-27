@@ -896,7 +896,7 @@ export default function LeadDetailPage() {
             )}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <DetailField label="Lifecycle Status" value={conversionStatusLabel(lead)} />
+            <DetailField label="Lead Status" value={conversionStatusLabel(lead)} />
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
