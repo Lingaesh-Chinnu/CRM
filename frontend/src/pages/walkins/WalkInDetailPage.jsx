@@ -372,7 +372,7 @@ export default function WalkInDetailPage() {
     const { data } = await api.post(`/walkins/${id}/follow-ups/`, payload)
     setWalkin((current) => ({
       ...current,
-      status: payload.close_follow_up ? 'not_interested' : current.status === 'new' ? 'follow_up' : current.status,
+      status: payload.close_follow_up ? 'not_interested' : ['converted', 'not_interested', 'transferred'].includes(current.status) ? current.status : 'follow_up',
       follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(current.follow_ups || [])],
     }))
@@ -776,7 +776,7 @@ export default function WalkInDetailPage() {
                 Enrolled
               </span>
               <p className="mt-3 text-sm font-semibold text-emerald-950">
-                {walkin.converted_at ? `Converted on ${formatDateTime(walkin.converted_at)}` : 'Converted record available.'}
+                {walkin.converted_at ? `Enrolled on ${formatDateTime(walkin.converted_at)}` : 'Enrollment record available.'}
               </p>
               {convertedLink && (
                 <Link to={convertedLink} className="mt-4 inline-flex rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">

@@ -69,35 +69,9 @@ const qualificationOptions = [
   { value: 'housewife', label: 'Housewife' },
 ]
 
-const leadStatusOptions = [
-  { value: 'new', label: 'New Lead' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'will_walk_in', label: 'Will Walk-in' },
-  { value: 'walk_in', label: 'Walked-in' },
-  { value: 'counseling_completed', label: 'Counseling Completed' },
-  { value: 'interested', label: 'Interested' },
-  { value: 'follow_up', label: 'Follow-up' },
-  { value: 'demo_attended', label: 'Demo Attended' },
-  { value: 'will_enroll', label: 'Will Enroll' },
-  { value: 'enrolled', label: 'Enrolled' },
-  { value: 'not_answering', label: 'Not Answering (NA)' },
-  { value: 'call_not_attended', label: 'Call Not Attended (CNA)' },
-  { value: 'switched_off', label: 'Switched Off' },
-  { value: 'wrong_number', label: 'Wrong Number' },
-  { value: 'not_interested', label: 'Not Interested' },
-  { value: 'joined_other_institute', label: 'Joined Other Institute' },
-  { value: 'callback_later', label: 'Callback Later' },
-  { value: 'future_lead', label: 'Future Lead' },
-]
-
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
   return [{ value, label: value }, ...qualificationOptions]
-}
-
-function leadStatusSelectOptions(value) {
-  if (!value || leadStatusOptions.some((option) => option.value === value)) return leadStatusOptions
-  return [{ value, label: statusLabel(value) }, ...leadStatusOptions]
 }
 
 function statusLabel(status) {
@@ -161,10 +135,11 @@ function formatDateTime(value) {
 
 function conversionStatusLabel(lead) {
   if (lead?.converted_to_type === 'walkin') return 'Converted to Walk-in'
-  if (lead?.converted_to_type === 'enrollment') return 'Converted to Enrollment'
+  if (lead?.converted_to_type === 'enrollment') return 'Enrolled'
   if (lead?.status === 'walk_in' || lead?.status === 'converted_to_walkin') return 'Converted to Walk-in'
-  if (lead?.status === 'enrolled' || lead?.status === 'converted') return 'Converted to Enrollment'
-  if (lead?.source === 'manual' && lead?.status === 'new') return 'Internal Lead'
+  if (lead?.status === 'enrolled' || lead?.status === 'converted') return 'Enrolled'
+  if (lead?.status === 'not_interested') return 'Not Interested'
+  if (lead?.source === 'manual' && lead?.status === 'new') return 'Follow-up'
   return statusLabel(lead?.status)
 }
 
@@ -708,9 +683,10 @@ export default function LeadDetailPage() {
 
   const saveFollowUp = async (payload) => {
     const { data } = await api.post(`/leads/${id}/follow-ups/`, payload)
+    const closedStatuses = ['converted', 'converted_to_walkin', 'enrolled', 'not_interested']
     setLead((prev) => ({
       ...prev,
-      status: payload.close_follow_up ? 'lost' : prev.status === 'new' ? 'follow_up' : prev.status,
+      status: payload.close_follow_up ? 'not_interested' : closedStatuses.includes(prev.status) ? prev.status : 'follow_up',
       next_follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(prev.follow_ups || [])],
     }))
@@ -823,7 +799,7 @@ export default function LeadDetailPage() {
 
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
   const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
-  const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Converted to Enrollment' : ''
+  const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Enrolled' : ''
   const convertedLink = convertedType === 'walkin'
     ? `/walkins/${lead.converted_record_id}`
     : convertedType === 'enrollment'
@@ -920,9 +896,7 @@ export default function LeadDetailPage() {
             )}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            {lead.source !== 'manual' && (
-              <DetailField label="Lead Status" value={statusLabel(lead.status)} />
-            )}
+            <DetailField label="Lifecycle Status" value={conversionStatusLabel(lead)} />
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
@@ -1011,7 +985,9 @@ export default function LeadDetailPage() {
                 {convertedLabel}
               </span>
               <p className="mt-3 text-sm font-semibold text-emerald-950">
-                {lead.converted_at ? `Converted on ${formatDateTime(lead.converted_at)}` : 'Converted record available.'}
+                {lead.converted_at
+                  ? `${convertedType === 'enrollment' ? 'Enrolled' : 'Converted'} on ${formatDateTime(lead.converted_at)}`
+                  : `${convertedType === 'enrollment' ? 'Enrollment' : 'Converted'} record available.`}
               </p>
               {convertedLink && lead.converted_record_id && (
                 <Link to={convertedLink} className="mt-4 inline-flex rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">

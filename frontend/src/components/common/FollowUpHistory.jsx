@@ -150,7 +150,7 @@ export default function FollowUpHistory({ followUps = [], onSave, readOnly = fal
               }))}
               className="h-4 w-4 accent-slate-950"
             />
-            No next follow-up needed
+            No follow-up required - mark Not Interested
           </label>
           {error && <p className="text-sm font-medium text-rose-600">{error}</p>}
           <button

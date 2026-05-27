@@ -11,15 +11,6 @@ import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/com
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
-const statusOptions = [
-  { value: 'new', label: 'New' },
-  { value: 'follow_up', label: 'Follow Up' },
-  { value: 'demo_attended', label: 'Demo Attended' },
-  { value: 'converted', label: 'Converted' },
-  { value: 'not_interested', label: 'Not Interested' },
-  { value: 'transferred', label: 'Transferred' },
-]
-
 const emptyFilters = {
   name: '',
   phone: '',
@@ -34,7 +25,7 @@ const emptyFilters = {
 }
 
 function statusLabel(walkin) {
-  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Converted'
+  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Enrolled'
   const status = walkin?.status
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
@@ -123,7 +114,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
     { label: 'Total', value: '', count },
     { label: 'Today Walk-in', value: '__today_walkin', count: todayWalkInCount },
     { label: 'Demo Attended', value: 'demo_attended', count: statusCount('demo_attended') },
-    { label: 'Converted', value: 'converted', count: statusCount('converted') },
+    { label: 'Enrolled', value: 'converted', count: statusCount('converted') },
   ]
 
   return (
@@ -339,7 +330,7 @@ export default function WalkInsListPage() {
             latest_remark: followUp.remarks || walkin.latest_remark,
             remarks: followUp.remarks || walkin.remarks,
             follow_up_date: followUp.next_follow_up_date,
-            status: walkin.status === 'new' ? 'follow_up' : walkin.status,
+            status: ['converted', 'not_interested', 'transferred'].includes(walkin.status) ? walkin.status : 'follow_up',
           }
         : walkin
     ))
@@ -457,13 +448,6 @@ export default function WalkInsListPage() {
             <select value={filters.course} onChange={(event) => updateFilter('course', event.target.value)} name="course" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
               <option value="">All courses</option>
               {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Status</span>
-            <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} name="status" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
-              <option value="">All statuses</option>
-              {statusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
             </select>
           </label>
           <label className="block">

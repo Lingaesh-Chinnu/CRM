@@ -979,6 +979,22 @@ WALKIN_CLOSED_FOLLOW_UP_STATUSES = [
 ]
 
 
+def automated_lead_status_display(lead):
+    if lead.converted_to_type == 'walkin' or lead.status == Lead.Status.CONVERTED_TO_WALKIN:
+        return 'Converted to Walk-in'
+    if lead.converted_to_type == 'enrollment' or lead.status in (Lead.Status.CONVERTED, Lead.Status.ENROLLED):
+        return 'Enrolled'
+    if lead.status == Lead.Status.NEW and lead.source == Lead.Source.MANUAL:
+        return 'Follow-up'
+    return lead.get_status_display()
+
+
+def automated_walkin_status_display(walkin):
+    if walkin.converted_to_type == 'enrollment' or walkin.status == WalkIn.Status.CONVERTED:
+        return 'Enrolled'
+    return walkin.get_status_display()
+
+
 def pending_follow_up_queryset(queryset, record_type, due_lookup, closed_statuses):
     completed_current_due = FollowUp.objects.filter(
         record_type=record_type,
@@ -2154,8 +2170,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         headers = [
             'Lead Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
-            'Source Description', 'Follow Up Date', 'Walkin Date', 'Remarks', 'Assigned Counselor', 'Created By',
-            'Email', 'Location', 'Created At',
+            'Source Description', 'Follow Up Date', 'Walkin Date', 'Converted At', 'Remarks',
+            'Assigned Counselor', 'Created By', 'Email', 'Location', 'Created At',
         ]
         rows = [
             [
@@ -2165,10 +2181,11 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.course.name if lead.course else '',
                 lead.branch.name if lead.branch else '',
                 lead.get_source_display() if getattr(lead, 'source', '') else '',
-                lead.get_status_display(),
+                automated_lead_status_display(lead),
                 getattr(lead, 'source_description', ''),
                 getattr(lead, 'next_follow_up_date', None),
                 lead.walkin_date,
+                lead.converted_at,
                 lead.remarks,
                 lead.assigned_to.full_name if lead.assigned_to else '',
                 lead.created_by.full_name if lead.created_by else '',
@@ -2442,6 +2459,7 @@ class LeadViewSet(viewsets.ModelViewSet):
             created_by=self.request.user,
             branch=branch,
             assigned_to=assigned_to,
+            status=Lead.Status.FOLLOW_UP,
         )
         if transfer_user and transfer_user.id != self.request.user.id:
             LeadTransferHistory.objects.create(
@@ -2711,8 +2729,9 @@ class LeadViewSet(viewsets.ModelViewSet):
         lead.remarks = response.data.get('remarks') or lead.remarks
         close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
         if close_follow_up:
-            lead.status = Lead.Status.LOST
-        elif lead.status == Lead.Status.NEW:
+            lead.status = Lead.Status.NOT_INTERESTED
+            lead.next_follow_up_date = None
+        elif lead.status not in LEAD_CLOSED_FOLLOW_UP_STATUSES:
             lead.status = Lead.Status.FOLLOW_UP
         lead.save(update_fields=['next_follow_up_date', 'remarks', 'status', 'updated_at'])
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
@@ -2756,7 +2775,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'phone': lead.phone,
                 'branch_name': lead.branch.name if lead.branch else 'Unassigned',
                 'course_name': lead.course.name if lead.course else '',
-                'status': lead.get_status_display(),
+                'status': automated_lead_status_display(lead),
                 'url': f'/leads/{lead.id}',
             })
         for walkin in WalkIn.objects.filter(phone=phone).select_related('branch', 'course')[:10]:
@@ -2767,7 +2786,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'phone': walkin.phone,
                 'branch_name': walkin.branch.name if walkin.branch else '',
                 'course_name': walkin.course.name if walkin.course else '',
-                'status': walkin.get_status_display(),
+                'status': automated_walkin_status_display(walkin),
                 'url': f'/walkins/{walkin.id}',
             })
         for enrollment in Enrollment.objects.filter(phone=phone).select_related('branch', 'course')[:10]:
@@ -4363,7 +4382,7 @@ class PendingManagementView(APIView):
             'course_name': lead.course.name if lead.course else '',
             'branch_name': lead.branch.name if lead.branch else '',
             'status': lead.status,
-            'status_display': lead.get_status_display(),
+            'status_display': automated_lead_status_display(lead),
             'due_date': lead.next_follow_up_date,
             'remarks': lead.remarks,
             'assigned_to_name': lead.assigned_to.full_name if lead.assigned_to else '',
@@ -4380,7 +4399,7 @@ class PendingManagementView(APIView):
             'course_name': walkin.course.name if walkin.course else '',
             'branch_name': walkin.branch.name if walkin.branch else '',
             'status': walkin.status,
-            'status_display': walkin.get_status_display(),
+            'status_display': automated_walkin_status_display(walkin),
             'due_date': walkin.follow_up_date,
             'remarks': walkin.remarks,
             'assigned_to_name': walkin.assigned_to.full_name if walkin.assigned_to else '',
@@ -4696,7 +4715,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         headers = [
             'Walk-in Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
-            'Walk-in Date', 'Follow Up Date', 'Remarks', 'Assigned Counselor',
+            'Walk-in Date', 'Follow Up Date', 'Converted At', 'Remarks', 'Assigned Counselor',
             'Demo Class', 'Email', 'Location', 'Created At',
         ]
         rows = [
@@ -4707,9 +4726,10 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 walkin.course.name if walkin.course else '',
                 walkin.branch.name if walkin.branch else '',
                 walkin.get_source_display() if getattr(walkin, 'source', '') else '',
-                walkin.get_status_display(),
+                automated_walkin_status_display(walkin),
                 walkin.visit_date,
                 getattr(walkin, 'follow_up_date', None),
+                walkin.converted_at,
                 walkin.remarks,
                 walkin.assigned_to.full_name if walkin.assigned_to else '',
                 'Yes' if walkin.demo_class else 'No',
@@ -4928,7 +4948,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
         if close_follow_up:
             walkin.status = WalkIn.Status.NOT_INTERESTED
-        elif walkin.status == WalkIn.Status.NEW:
+            walkin.follow_up_date = None
+        elif walkin.status not in WALKIN_CLOSED_FOLLOW_UP_STATUSES:
             walkin.status = WalkIn.Status.FOLLOW_UP
         walkin.save(update_fields=['follow_up_date', 'status', 'updated_at'])
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
@@ -7940,7 +7961,7 @@ def calculate_user_monthly_rating(user, year=None, month=None):
         created_by=user,
         next_follow_up_date__gte=start,
         next_follow_up_date__lt=effective_end,
-    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
+    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.NOT_INTERESTED, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
     if missed_lead_followups:
         deduct('lead_followups', 10, 'Lead follow-up due date was missed.')
     else:
@@ -8370,7 +8391,7 @@ class BranchPerformanceComparisonReportView(APIView):
             transfers_out = LeadTransferHistory.objects.filter(from_branch=branch, created_at__year=year, created_at__month=month).count()
             transfers_in = LeadTransferHistory.objects.filter(to_branch=branch, created_at__year=year, created_at__month=month).count()
             target = BranchTarget.objects.filter(branch=branch, year=year, month=month).first()
-            missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.DROPPED, Lead.Status.LOST]).count()
+            missed_leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, next_follow_up_date__lt=today)).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.NOT_INTERESTED, Lead.Status.DROPPED, Lead.Status.LOST]).count()
             missed_walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, follow_up_date__lt=today)).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).count()
             completed_followups = FollowUp.objects.filter(created_at__year=year, created_at__month=month).filter(
                 Q(record_type=FollowUp.RecordType.LEAD, record_id__in=leads.values('id')) |
@@ -8428,16 +8449,17 @@ class ExportLeadsExcelView(APIView):
         ws = wb.active
         ws.title = 'Leads'
         headers = ['Lead No','Name','Phone','Location','Course',
-                   'Status','Source','Source Description','Walk-in Date','Branch','Assigned To','Created By','Created']
+                   'Status','Source','Source Description','Walk-in Date','Converted At','Branch','Assigned To','Created By','Created']
         ws.append(headers)
 
         for lead in qs:
             ws.append([
                 lead.lead_number, lead.name, lead.phone, lead.location,
                 lead.course.name if lead.course else '',
-                lead.get_status_display(), lead.get_source_display(),
+                automated_lead_status_display(lead), lead.get_source_display(),
                 getattr(lead, 'source_description', ''),
                 str(lead.walkin_date) if lead.walkin_date else '',
+                lead.converted_at.strftime('%Y-%m-%d %H:%M') if lead.converted_at else '',
                 lead.branch.name if lead.branch else '',
                 lead.assigned_to.full_name if lead.assigned_to else '',
                 lead.created_by.full_name if lead.created_by else '',

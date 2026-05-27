@@ -15,30 +15,6 @@ function statusLabel(status) {
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
-const statusFilters = [
-  { value: '', label: 'All Status' },
-  { value: 'new', label: 'New Lead' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'will_walk_in', label: 'Will Walk-in' },
-  { value: 'walk_in', label: 'Walked-in' },
-  { value: 'counseling_completed', label: 'Counseling Completed' },
-  { value: 'interested', label: 'Interested' },
-  { value: 'follow_up', label: 'Follow-up' },
-  { value: 'demo_attended', label: 'Demo Attended' },
-  { value: 'will_enroll', label: 'Will Enroll' },
-  { value: 'enrolled', label: 'Enrolled' },
-  { value: 'not_answering', label: 'Not Answering (NA)' },
-  { value: 'call_not_attended', label: 'Call Not Attended (CNA)' },
-  { value: 'switched_off', label: 'Switched Off' },
-  { value: 'wrong_number', label: 'Wrong Number' },
-  { value: 'not_interested', label: 'Not Interested' },
-  { value: 'joined_other_institute', label: 'Joined Other Institute' },
-  { value: 'callback_later', label: 'Callback Later' },
-  { value: 'future_lead', label: 'Future Lead' },
-]
-
-const quickStatusOptions = statusFilters.filter((option) => option.value)
-
 function isoDate(value) {
   return value.toISOString().slice(0, 10)
 }
@@ -99,6 +75,15 @@ function statusTone(status) {
   return 'slate'
 }
 
+function lifecycleStatusLabel(lead) {
+  if (lead?.converted_to_type === 'walkin' || lead?.status === 'converted_to_walkin' || lead?.status === 'walk_in') return 'Converted to Walk-in'
+  if (lead?.converted_to_type === 'enrollment' || lead?.status === 'converted' || lead?.status === 'enrolled') return 'Enrolled'
+  if (lead?.status === 'not_interested') return 'Not Interested'
+  if (lead?.status === 'new' && lead?.source !== 'manual') return 'New Lead'
+  if (lead?.status === 'new' && lead?.source === 'manual') return 'Follow-up'
+  return statusLabel(lead?.status || 'follow_up')
+}
+
 const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
 
 function statusCount(rows, status) {
@@ -129,7 +114,6 @@ export default function LeadsListPage() {
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
   const [exporting, setExporting] = useState(false)
-  const [statusSavingId, setStatusSavingId] = useState(null)
   const [importResult, setImportResult] = useState(null)
   const [importError, setImportError] = useState('')
   const { user } = useSelector((state) => state.auth)
@@ -222,10 +206,10 @@ export default function LeadsListPage() {
   )
   const leadSummary = [
     { label: 'Total', value: '', count: statusSummaryBaseLeads.length },
-    { label: 'New', value: 'new', count: statusCount(statusSummaryBaseLeads, 'new') },
-    { label: 'Follow Up', value: 'follow_up', count: statusCount(statusSummaryBaseLeads, 'follow_up') },
-    { label: 'Will Walk-in', value: 'will_walk_in', count: statusCount(statusSummaryBaseLeads, 'will_walk_in') },
+    { label: 'New Lead', value: 'new', count: statusSummaryBaseLeads.filter((lead) => lead.status === 'new' && lead.source !== 'manual').length },
+    { label: 'Follow-up', value: 'follow_up', count: statusCount(statusSummaryBaseLeads, 'follow_up') },
     { label: 'Converted', value: 'converted', count: statusCount(statusSummaryBaseLeads, ['converted', 'converted_to_walkin']) },
+    { label: 'Not Interested', value: 'not_interested', count: statusCount(statusSummaryBaseLeads, 'not_interested') },
   ]
 
   useEffect(() => {
@@ -349,42 +333,10 @@ export default function LeadsListPage() {
             next_follow_up_date: followUp.next_follow_up_date,
             latest_follow_up_at: followUp.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            status: lead.status === 'new' ? 'follow_up' : lead.status,
+            status: ['converted', 'converted_to_walkin', 'enrolled', 'not_interested'].includes(lead.status) ? lead.status : 'follow_up',
           }
         : lead
     )))
-  }
-
-  const updateLeadStatus = async (lead, status) => {
-    if (!lead || !status || lead.status === status || statusSavingId) return
-    const previousStatus = lead.status
-    setStatusSavingId(lead.id)
-    setLoadMessage('')
-    setLeads((current) => current.map((item) => (
-      item.id === lead.id ? { ...item, status, updated_at: new Date().toISOString() } : item
-    )))
-    try {
-      const { data } = await api.patch(`/leads/${lead.id}/`, { status })
-      setLeads((current) => current.map((item) => (
-        item.id === lead.id
-          ? {
-              ...item,
-              ...data,
-              course_name: data.course_name ?? item.course_name,
-              branch_name: data.branch_name ?? item.branch_name,
-              assigned_to_name: data.assigned_to_name ?? item.assigned_to_name,
-              assigned_user: data.assigned_user ?? item.assigned_user,
-            }
-          : item
-      )))
-    } catch (error) {
-      setLeads((current) => current.map((item) => (
-        item.id === lead.id ? { ...item, status: previousStatus } : item
-      )))
-      setLoadMessage(apiErrorMessage(error, 'Failed to update lead status.'))
-    } finally {
-      setStatusSavingId(null)
-    }
   }
 
   const toggleLeadImportant = async (lead, nextValue) => {
@@ -581,18 +533,6 @@ export default function LeadsListPage() {
               inputMode="numeric"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
-          </label>
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Search by Status</span>
-            <select
-              value={filters.status}
-              onChange={(event) => updateFilter('status', event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            >
-              {statusFilters.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>{option.label}</option>
-              ))}
-            </select>
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Source</span>
@@ -796,34 +736,7 @@ export default function LeadsListPage() {
                   header: 'Status',
                   width: '132px',
                   className: 'flex items-center',
-                  render: (lead) => (
-                    lead.source === 'manual' && lead.status === 'new' ? (
-                      <StatusBadge>Internal</StatusBadge>
-                    ) : (
-                    <div className="relative w-full max-w-[132px]">
-                      <select
-                        value={lead.status || 'new'}
-                        onChange={(event) => updateLeadStatus(lead, event.target.value)}
-                        disabled={statusSavingId === lead.id}
-                        className={`w-full appearance-none rounded-full border px-3 py-1.5 pr-7 text-[11px] font-bold uppercase tracking-[0.08em] outline-none transition disabled:cursor-wait disabled:opacity-60 ${
-                          statusTone(lead.status) === 'green'
-                            ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
-                            : statusTone(lead.status) === 'red'
-                              ? 'border-rose-100 bg-rose-50 text-rose-700'
-                              : statusTone(lead.status) === 'amber'
-                                ? 'border-amber-100 bg-amber-50 text-amber-700'
-                                : 'border-slate-200 bg-slate-100 text-slate-700'
-                        }`}
-                        title="Update lead status"
-                      >
-                        {quickStatusOptions.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </select>
-                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-current">v</span>
-                    </div>
-                    )
-                  ),
+                  render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{lifecycleStatusLabel(lead)}</StatusBadge>,
                 },
                 { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(100px,0.8fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
                 { key: 'nextFollowUp', header: 'Next Follow Up', width: '94px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
