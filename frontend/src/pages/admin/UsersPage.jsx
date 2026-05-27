@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
+import { USER_COLOR_OPTIONS, OwnerDot } from '../../components/common/CandidateIdentity'
 
 const initialForm = {
   username: '',
@@ -9,6 +10,7 @@ const initialForm = {
   phone: '',
   role: 'staff',
   branch: '',
+  identity_color: '',
   password: '',
 }
 
@@ -141,6 +143,7 @@ export default function UsersPage() {
         role: user.role,
         branch: user.branch || null,
         is_active: !!user.is_active,
+        identity_color: user.identity_color || '',
       })
       setMessage(`Updated ${user.username}.`)
       await loadPage()
@@ -231,6 +234,16 @@ export default function UsersPage() {
                 </option>
               ))}
             </select>
+
+            <select
+              value={form.identity_color}
+              onChange={(event) => setForm({ ...form, identity_color: event.target.value })}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              {USER_COLOR_OPTIONS.map((option) => (
+                <option key={option.value || 'neutral'} value={option.value}>{option.label}</option>
+              ))}
+            </select>
           </div>
 
           {message && <p className="mt-4 text-sm font-medium text-slate-600">{message}</p>}
@@ -258,12 +271,13 @@ export default function UsersPage() {
             <div className="p-6 text-slate-500">No users found.</div>
           ) : (
             <div className="overflow-x-auto">
-              <div className="min-w-[1100px]">
-                <div className="grid grid-cols-[1.4fr_1.3fr_1fr_0.9fr_1fr_0.8fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              <div className="min-w-[1250px]">
+                <div className="grid grid-cols-[1.4fr_1.3fr_1fr_0.9fr_1fr_0.9fr_0.8fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   <div>User</div>
                   <div>Contact</div>
                   <div>Role</div>
                   <div>Branch</div>
+                  <div>Color</div>
                   <div>Status</div>
                   <div>Password</div>
                   <div>Actions</div>
@@ -271,7 +285,7 @@ export default function UsersPage() {
 
                 <div className="divide-y divide-slate-200">
                   {users.map((user, index) => (
-                    <div key={user.id} className="grid grid-cols-[1.4fr_1.3fr_1fr_0.9fr_1fr_0.8fr_1fr] gap-4 px-6 py-5">
+                    <div key={user.id} className="grid grid-cols-[1.4fr_1.3fr_1fr_0.9fr_1fr_0.9fr_0.8fr_1fr] gap-4 px-6 py-5">
                       <div className="space-y-3">
                         <input
                           value={user.first_name || ''}
@@ -327,6 +341,21 @@ export default function UsersPage() {
                             </option>
                           ))}
                         </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <OwnerDot user={{ ...user, name: user.full_name || user.username }} />
+                          <select
+                            value={user.identity_color || ''}
+                            onChange={(event) => updateUserField(index, 'identity_color', event.target.value)}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
+                          >
+                            {USER_COLOR_OPTIONS.map((option) => (
+                              <option key={option.value || 'neutral'} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
 
                       <div>

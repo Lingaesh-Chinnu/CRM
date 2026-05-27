@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
+import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
@@ -29,6 +30,7 @@ const emptyFilters = {
   source: '',
   date_from: '',
   date_to: '',
+  important_only: '',
 }
 
 function statusLabel(walkin) {
@@ -56,6 +58,7 @@ function readFilters(searchParams, canFilterByBranch) {
     source: searchParams.get('source') || '',
     date_from: canFilterByBranch ? searchParams.get('date_from') || '' : '',
     date_to: canFilterByBranch ? searchParams.get('date_to') || '' : '',
+    important_only: searchParams.get('important_only') || '',
   }
 }
 
@@ -111,7 +114,7 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, activeFilter, onStatusChange, canViewBranch }) {
+function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
@@ -159,7 +162,11 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, a
                 className: 'flex items-center',
                 render: (walkin) => (
                   <div className="min-w-0">
-                    <Link to={`/walkins/${walkin.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <ImportantToggle active={!!walkin.is_important} onToggle={(nextValue) => onImportantToggle(walkin, nextValue)} />
+                      <OwnerDot user={walkin.assigned_user} />
+                      <Link to={`/walkins/${walkin.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
+                    </div>
                     <p className="mt-1 truncate text-xs text-slate-500">{walkin.phone || 'Phone not set'}</p>
                   </div>
                 ),
@@ -340,6 +347,23 @@ export default function WalkInsListPage() {
     setOtherWalkins(updateRows)
   }
 
+  const toggleWalkInImportant = async (walkin, nextValue) => {
+    const updateRows = (rows, value) => rows.map((item) => (
+      item.id === walkin.id ? { ...item, is_important: value } : item
+    ))
+    setCurrentMonthWalkins((rows) => updateRows(rows, nextValue))
+    setOtherWalkins((rows) => updateRows(rows, nextValue))
+    try {
+      const { data } = await api.post(`/walkins/${walkin.id}/toggle-important/`, { is_important: nextValue })
+      setCurrentMonthWalkins((rows) => updateRows(rows, data.is_important))
+      setOtherWalkins((rows) => updateRows(rows, data.is_important))
+    } catch (error) {
+      setCurrentMonthWalkins((rows) => updateRows(rows, !nextValue))
+      setOtherWalkins((rows) => updateRows(rows, !nextValue))
+      setLoadMessage(apiErrorMessage(error, 'Failed to update important flag.'))
+    }
+  }
+
   const applyStatusFilter = (value) => {
     const nextParams = new URLSearchParams(searchParams)
     nextParams.delete('visit_date_from')
@@ -468,6 +492,9 @@ export default function WalkInsListPage() {
               </label>
             </>
           )}
+          <div className="flex items-end">
+            <ImportantFilter checked={filters.important_only === 'true'} onChange={(checked) => updateFilter('important_only', checked ? 'true' : '')} />
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-3 sm:justify-end">
             <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
@@ -491,6 +518,7 @@ export default function WalkInsListPage() {
         count={currentMonthCount}
         emptyMessage="No current month walk-ins found."
         onFollowUpSaved={updateWalkInFollowUp}
+        onImportantToggle={toggleWalkInImportant}
         activeFilter={activeSmartFilter}
         onStatusChange={applyStatusFilter}
         canViewBranch={canFilterByBranch}
@@ -503,6 +531,7 @@ export default function WalkInsListPage() {
           count={otherWalkinsCount}
           emptyMessage="No older walk-ins found."
           onFollowUpSaved={updateWalkInFollowUp}
+          onImportantToggle={toggleWalkInImportant}
           activeFilter={activeSmartFilter}
           onStatusChange={applyStatusFilter}
           canViewBranch={canFilterByBranch}

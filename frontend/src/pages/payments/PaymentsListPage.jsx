@@ -8,6 +8,7 @@ import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
+import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 
 function statusLabel(status) {
   if (!status) return 'Unknown'
@@ -46,6 +47,26 @@ function monthOptions() {
   return options
 }
 
+const durationOptions = [
+  { value: '', label: 'Month view' },
+  { value: 'today', label: 'Today' },
+  { value: 'tomorrow', label: 'Tomorrow' },
+  { value: 'overdue', label: 'Overdue' },
+  { value: 'this_week', label: 'This Week' },
+  { value: 'yesterday', label: 'Yesterday' },
+  { value: 'last7', label: 'Last 7 Days' },
+  { value: 'month', label: 'This Month' },
+  { value: 'custom', label: 'Custom Range' },
+]
+
+const smartFilters = [
+  { value: 'today', label: 'Today Payments' },
+  { value: 'tomorrow', label: 'Tomorrow Payments' },
+  { value: 'overdue', label: 'Overdue' },
+  { value: 'this_week', label: 'This Week' },
+  { value: 'month', label: 'This Month' },
+]
+
 function orderedInstallments(row) {
   return [...(row.installments || [])].sort((a, b) => {
     const dateCompare = String(a.payment_date || '').localeCompare(String(b.payment_date || ''))
@@ -60,6 +81,17 @@ function lastPaidInstallment(row) {
 
 function nextPendingInstallment(row) {
   return (row.installment_summary || []).find((item) => Number(item.pending_amount || 0) > 0) || null
+}
+
+function nextDueAmount(row) {
+  const nextPending = nextPendingInstallment(row)
+  return Number(nextPending?.pending_amount || row.balance || 0)
+}
+
+function isOverduePayment(row) {
+  const nextPending = nextPendingInstallment(row)
+  const dueDate = nextPending?.due_date || row.next_payment_date
+  return ['unpaid', 'partial'].includes(row.status) && dueDate && dueDate < new Date().toISOString().slice(0, 10)
 }
 
 function activeReasonRequestFor(row, installmentIndex) {
@@ -94,6 +126,7 @@ export default function PaymentsListPage() {
     next_month_pending: 0,
   })
   const [branches, setBranches] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [loading, setLoading] = useState(true)
@@ -109,22 +142,25 @@ export default function PaymentsListPage() {
   const [month, setMonth] = useState(searchParams.get('month') || options[0]?.value || monthValue(new Date()))
   const [branch, setBranch] = useState(searchParams.get('branch') || '')
   const [search, setSearch] = useState(searchParams.get('search') || '')
-  const statusFilter = searchParams.get('status') || ''
+  const [counselor, setCounselor] = useState(searchParams.get('user') || '')
+  const [paymentStatus, setPaymentStatus] = useState(searchParams.get('status') || '')
+  const [duration, setDuration] = useState(searchParams.get('duration') || '')
+  const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '')
+  const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '')
+  const [importantOnly, setImportantOnly] = useState(searchParams.get('important_only') === 'true')
   const dueThisWeek = searchParams.get('due_this_week') || ''
-  const duePaymentsFilter = statusFilter === 'due' || statusFilter === 'pending_today'
-  const weeklyPendingFilter = statusFilter === 'weekly_pending'
+  const duePaymentsFilter = paymentStatus === 'due' || paymentStatus === 'pending_today'
+  const weeklyPendingFilter = paymentStatus === 'weekly_pending'
   const reasonRequestId = searchParams.get('reason_request') || ''
-  const todayValue = new Date().toISOString().slice(0, 10)
-  const overdueCount = rows.filter((row) => {
-    const nextPending = nextPendingInstallment(row)
-    return ['unpaid', 'partial'].includes(row.status) && nextPending?.due_date && nextPending.due_date < todayValue
-  }).length
+  const overdueCount = rows.filter(isOverduePayment).length
   const paymentSummary = [
     { label: 'Total', value: '', count: rows.length },
     { label: 'Paid', value: 'paid', count: rows.filter((row) => row.status === 'paid').length },
     { label: 'Partial', value: 'partial', count: rows.filter((row) => row.status === 'partial').length },
     { label: 'Overdue', value: 'due', count: overdueCount },
   ]
+
+  const activeSmartFilter = smartFilters.some((item) => item.value === duration) ? duration : ''
 
   useEffect(() => {
     if (navigationMessage) {
@@ -147,6 +183,12 @@ export default function PaymentsListPage() {
   }, [isSuperAdmin])
 
   useEffect(() => {
+    api.get('/leads/staff-options/', { params: isSuperAdmin && branch ? { branch } : {} })
+      .then(({ data }) => setStaffUsers(data.results || data || []))
+      .catch(() => setStaffUsers([]))
+  }, [isSuperAdmin, branch])
+
+  useEffect(() => {
     api.get('/whatsapp-templates/', { params: { template_type: 'payment_reminder', is_active: true } })
       .then(({ data }) => setTemplates(data.results || data))
       .catch(() => setTemplates([]))
@@ -154,10 +196,18 @@ export default function PaymentsListPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    const params = { month }
-    if (statusFilter) params.status = statusFilter
+    const params = {}
+    if (!duration) params.month = month
+    if (paymentStatus) params.status = paymentStatus
     if (dueThisWeek) params.due_this_week = dueThisWeek
     if (isSuperAdmin && branch) params.branch = branch
+    if (counselor) params.user = counselor
+    if (duration) params.duration = duration
+    if (duration === 'custom') {
+      if (dateFrom) params.date_from = dateFrom
+      if (dateTo) params.date_to = dateTo
+    }
+    if (importantOnly) params.important_only = true
     if (search.trim()) params.search = search.trim()
 
     setLoading(true)
@@ -180,7 +230,7 @@ export default function PaymentsListPage() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, search, isSuperAdmin, statusFilter, dueThisWeek, navigationMessage])
+  }, [month, branch, counselor, search, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, importantOnly, dueThisWeek, navigationMessage])
 
   useEffect(() => {
     if (!reasonRequestId) return
@@ -191,6 +241,10 @@ export default function PaymentsListPage() {
 
   const clearStatusFilter = () => {
     setBranch('')
+    setCounselor('')
+    setPaymentStatus('')
+    setDuration('')
+    setImportantOnly(false)
     navigate('/payments')
   }
 
@@ -198,10 +252,30 @@ export default function PaymentsListPage() {
     const nextParams = new URLSearchParams()
     if (month) nextParams.set('month', month)
     if (isSuperAdmin && branch) nextParams.set('branch', branch)
+    if (counselor) nextParams.set('user', counselor)
     if (search.trim()) nextParams.set('search', search.trim())
+    if (duration) nextParams.set('duration', duration)
+    if (duration === 'custom') {
+      if (dateFrom) nextParams.set('date_from', dateFrom)
+      if (dateTo) nextParams.set('date_to', dateTo)
+    }
+    if (importantOnly) nextParams.set('important_only', 'true')
     if (dueThisWeek && value) nextParams.set('due_this_week', dueThisWeek)
     if (value) nextParams.set('status', value)
+    setPaymentStatus(value)
     setSearchParams(nextParams)
+  }
+
+  const applySmartFilter = (value) => {
+    const nextValue = duration === value ? '' : value
+    setDuration(nextValue)
+    setDateFrom('')
+    setDateTo('')
+    if (nextValue) {
+      setPaymentStatus('pending')
+    } else {
+      setPaymentStatus('')
+    }
   }
 
   const closeReasonModal = () => {
@@ -290,9 +364,14 @@ export default function PaymentsListPage() {
         const refreshed = await api.get('/payments/', {
           params: {
             month,
-            ...(statusFilter ? { status: statusFilter } : {}),
+            ...(paymentStatus ? { status: paymentStatus } : {}),
             ...(dueThisWeek ? { due_this_week: dueThisWeek } : {}),
             ...(isSuperAdmin && branch ? { branch } : {}),
+            ...(counselor ? { user: counselor } : {}),
+            ...(duration ? { duration } : {}),
+            ...(duration === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
+            ...(duration === 'custom' && dateTo ? { date_to: dateTo } : {}),
+            ...(importantOnly ? { important_only: true } : {}),
             ...(search.trim() ? { search: search.trim() } : {}),
           },
         })
@@ -333,16 +412,35 @@ export default function PaymentsListPage() {
     setExporting(true)
     setMessage('')
     try {
-      const params = { month, format }
-      if (statusFilter) params.status = statusFilter
+      const params = { format }
+      if (!duration) params.month = month
+      if (paymentStatus) params.status = paymentStatus
       if (dueThisWeek) params.due_this_week = dueThisWeek
       if (isSuperAdmin && branch) params.branch = branch
+      if (counselor) params.user = counselor
+      if (duration) params.duration = duration
+      if (duration === 'custom') {
+        if (dateFrom) params.date_from = dateFrom
+        if (dateTo) params.date_to = dateTo
+      }
+      if (importantOnly) params.important_only = true
       if (search.trim()) params.search = search.trim()
       await downloadExport('/payments/export/', params, `payment-worksheet-${month}.${format === 'csv' ? 'csv' : 'xlsx'}`)
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to export payment worksheet.'))
     } finally {
       setExporting(false)
+    }
+  }
+
+  const togglePaymentImportant = async (row, nextValue) => {
+    setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
+    try {
+      const { data } = await api.post(`/payments/${row.id}/toggle-important/`, { is_important: nextValue })
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: data.is_important } : item))
+    } catch (error) {
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
+      setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
     }
   }
 
@@ -449,13 +547,45 @@ export default function PaymentsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)_220px_220px]">
+        <div className="mb-4 flex flex-wrap gap-2">
+          {smartFilters.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => applySmartFilter(item.value)}
+              className={`rounded-full border px-4 py-2 text-xs font-bold uppercase tracking-[0.12em] transition ${
+                activeSmartFilter === item.value
+                  ? item.value === 'overdue'
+                    ? 'border-rose-200 bg-rose-50 text-rose-700'
+                    : 'border-cyan-200 bg-cyan-50 text-cyan-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <select
             value={month}
             onChange={(event) => setMonth(event.target.value)}
+            disabled={!!duration}
             className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
           >
             {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          <select
+            value={paymentStatus}
+            onChange={(event) => setPaymentStatus(event.target.value)}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+          >
+            <option value="">All payment status</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="pending">Pending</option>
+            <option value="due">Due / Overdue</option>
+            <option value="weekly_pending">Weekly Pending</option>
           </select>
           <input
             value={search}
@@ -475,6 +605,28 @@ export default function PaymentsListPage() {
           ) : (
             <div className="hidden lg:block" />
           )}
+          <select
+            value={counselor}
+            onChange={(event) => setCounselor(event.target.value)}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+          >
+            <option value="">All counselors</option>
+            {staffUsers.map((item) => <option key={item.id} value={item.id}>{item.name || item.full_name || item.username}</option>)}
+          </select>
+          <select
+            value={duration}
+            onChange={(event) => setDuration(event.target.value)}
+            className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+          >
+            {durationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+          {duration === 'custom' && (
+            <>
+              <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+              <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+            </>
+          )}
+          <ImportantFilter checked={importantOnly} onChange={setImportantOnly} />
           {templates.length > 0 ? (
             <select
               value={selectedTemplate}
@@ -499,7 +651,7 @@ export default function PaymentsListPage() {
             </h2>
             <StatusFilterChips
               items={paymentSummary}
-              value={statusFilter}
+              value={paymentStatus}
               onChange={applyStatusFilter}
               className="xl:justify-end"
             />
@@ -527,15 +679,27 @@ export default function PaymentsListPage() {
                   width: 'minmax(150px,1.25fr)',
                   render: (row) => (
                     <div className="min-w-0">
-                      <Link to={`/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ImportantToggle active={!!row.is_important} onToggle={(nextValue) => togglePaymentImportant(row, nextValue)} />
+                        <OwnerDot user={row.counselor_user} />
+                        <Link to={`/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                      </div>
                       <p className="mt-1 truncate text-xs text-slate-500">{row.student_phone || row.student_number || '-'}</p>
                     </div>
                   ),
                 },
-                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
+                { key: 'course', header: 'Course', width: 'minmax(130px,0.95fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
+                ...(isSuperAdmin ? [{
+                  key: 'branch',
+                  header: 'Branch',
+                  width: 'minmax(90px,0.7fr)',
+                  render: (row) => <span className="truncate text-slate-700">{row.branch_name || '-'}</span>,
+                }] : []),
+                { key: 'counselor', header: 'Counselor', width: 'minmax(110px,0.85fr)', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
                 { key: 'paid', header: 'Paid', width: '105px', render: (row) => <span className="font-semibold text-slate-900">Rs {money(row.paid_amount)}</span> },
+                { key: 'dueAmount', header: 'Due', width: '105px', render: (row) => <span className={`font-semibold ${isOverduePayment(row) ? 'text-rose-700' : 'text-slate-900'}`}>Rs {money(nextDueAmount(row))}</span> },
                 { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-black text-slate-950">Rs {money(row.balance)}</span> },
-                { key: 'dueDate', header: 'Due Date', width: '120px', render: (row) => <span className="text-slate-700">{formatDate(nextPendingInstallment(row)?.due_date || row.next_payment_date)}</span> },
+                { key: 'dueDate', header: 'Due Date', width: '120px', render: (row) => <span className={isOverduePayment(row) ? 'font-bold text-rose-700' : 'text-slate-700'}>{formatDate(nextPendingInstallment(row)?.due_date || row.next_payment_date)}</span> },
                 { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={row.status === 'paid' ? 'green' : row.status === 'partial' ? 'amber' : 'red'}>{statusLabel(row.status)}</StatusBadge> },
                 {
                   key: 'actions',

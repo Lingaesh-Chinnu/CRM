@@ -94,6 +94,16 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
         SUPER_ADMIN = 'super_admin', 'Admin'
         STAFF       = 'staff',       'Staff'
 
+    class IdentityColor(models.TextChoices):
+        PURPLE = 'purple', 'Purple'
+        GREEN  = 'green',  'Green'
+        ORANGE = 'orange', 'Orange'
+        BLUE   = 'blue',   'Blue'
+        CYAN   = 'cyan',   'Cyan'
+        TEAL   = 'teal',   'Teal'
+        AMBER  = 'amber',  'Amber'
+        ROSE   = 'rose',   'Rose'
+
     branch     = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name='staff_members')
     username   = models.CharField(max_length=150, unique=True)
@@ -102,6 +112,12 @@ class User(AbstractBaseUser, PermissionsMixin, TimeStampedModel):
     last_name  = models.CharField(max_length=100, blank=True)
     phone      = models.CharField(max_length=20, blank=True)
     role       = models.CharField(max_length=20, choices=Role.choices, default=Role.STAFF)
+    identity_color = models.CharField(
+        max_length=20,
+        choices=IdentityColor.choices,
+        blank=True,
+        default='',
+    )
     is_active  = models.BooleanField(default=True)
     is_staff   = models.BooleanField(default=False)  # Django admin access
     must_change_password = models.BooleanField(default=False)
@@ -379,6 +395,7 @@ class Lead(TimeStampedModel):
     external_message = models.TextField(blank=True)
     is_duplicate = models.BooleanField(default=False, db_index=True)
     imported_via_csv = models.BooleanField(default=False, db_index=True)
+    is_important = models.BooleanField(default=False, db_index=True)
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
@@ -573,6 +590,7 @@ class WalkIn(TimeStampedModel):
     follow_up_date                  = models.DateField(null=True, blank=True)
     remarks                         = models.TextField(blank=True)
     status                          = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW, db_index=True)
+    is_important                    = models.BooleanField(default=False, db_index=True)
     visit_date                      = models.DateField(default=timezone.now)
     converted_to_type               = models.CharField(max_length=20, blank=True)
     converted_record_id             = models.PositiveIntegerField(null=True, blank=True)
@@ -897,6 +915,7 @@ class Enrollment(TimeStampedModel):
 
     status           = models.CharField(max_length=30, choices=Status.choices,
                                         default=Status.PENDING_RULES, db_index=True)
+    is_important     = models.BooleanField(default=False, db_index=True)
     is_deleted       = models.BooleanField(default=False, db_index=True)
     deleted_at       = models.DateTimeField(null=True, blank=True)
     deleted_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,

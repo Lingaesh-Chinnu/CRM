@@ -18,6 +18,18 @@ from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, Hist
 User = get_user_model()
 
 
+def user_identity_payload(user):
+    if not user:
+        return None
+    return {
+        'id': user.id,
+        'name': user.full_name or user.username,
+        'branch_id': user.branch_id,
+        'branch_name': user.branch.name if user.branch else '',
+        'identity_color': getattr(user, 'identity_color', '') or '',
+    }
+
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Adds user info payload to JWT tokens."""
 
@@ -46,6 +58,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'role':       self.effective_role(self.user),
             'branch_id':  self.user.branch_id,
             'branch_name': self.user.branch.name if self.user.branch else None,
+            'identity_color': self.user.identity_color or '',
             'must_change_password': self.user.must_change_password,
         }
         return data
@@ -78,7 +91,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model  = User
         fields = ['id','username','email','first_name','last_name','full_name',
-                  'phone','role','branch','branch_name','is_active',
+                  'phone','role','branch','branch_name','identity_color','is_active',
                   'must_change_password','created_at','password']
         read_only_fields = ['must_change_password']
 
@@ -460,7 +473,7 @@ class LeadListSerializer(serializers.ModelSerializer):
                   'source_description','latest_follow_up_at',
                   'status','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
-                  'branch_name','created_by','imported_via_csv','created_at','updated_at']
+                  'branch_name','created_by','imported_via_csv','is_important','created_at','updated_at']
 
     def get_status(self, obj):
         return safe_deferred_value(obj, 'status', Lead.Status.NEW) or Lead.Status.NEW
@@ -507,12 +520,7 @@ class LeadListSerializer(serializers.ModelSerializer):
             return None
         try:
             user = obj.assigned_to
-            return {
-                'id': user.id,
-                'name': user.full_name or user.username,
-                'branch_id': user.branch_id,
-                'branch_name': user.branch.name if user.branch else '',
-            }
+            return user_identity_payload(user)
         except Exception:
             return None
 
@@ -644,12 +652,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             return None
         try:
             user = obj.assigned_to
-            return {
-                'id': user.id,
-                'name': user.full_name or user.username,
-                'branch_id': user.branch_id,
-                'branch_name': user.branch.name if user.branch else '',
-            }
+            return user_identity_payload(user)
         except Exception:
             return None
 
@@ -785,6 +788,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name',  read_only=True)
     branch_name  = serializers.CharField(source='branch.name',  read_only=True)
     assigned_name= serializers.SerializerMethodField()
+    assigned_user = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
     preferred_timing_display = serializers.SerializerMethodField()
@@ -798,11 +802,11 @@ class WalkInListSerializer(serializers.ModelSerializer):
         model  = WalkIn
         fields = ['id','candidate_number','name','phone','email','course_name',
                   'branch_name','status','visit_date','follow_up_date','remarks','demo_class','assigned_name',
-                  'assigned_to','created_by','created_by_name','converted_by_name',
+                  'assigned_to','assigned_user','created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
-                  'is_converted_to_enrollment','latest_remark','created_at']
+                  'is_converted_to_enrollment','latest_remark','is_important','created_at']
 
     def to_representation(self, instance):
         defaults = {
@@ -824,6 +828,14 @@ class WalkInListSerializer(serializers.ModelSerializer):
             return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
         except Exception:
             return ''
+
+    def get_assigned_user(self, obj):
+        if not getattr(obj, 'assigned_to_id', None):
+            return None
+        try:
+            return user_identity_payload(obj.assigned_to)
+        except Exception:
+            return None
 
     def get_created_by_name(self, obj):
         try:
@@ -1261,6 +1273,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     payment_balance = serializers.SerializerMethodField()
     paid_amount = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
+    counselor_user = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
@@ -1272,6 +1285,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','payment_balance','paid_amount','counselor_name',
+                  'counselor_user','is_important',
                   'custom_payable_fee','net_payable_fee','source','source_display','preferred_timing',
                   'preferred_timing_display','qualification','qualification_display','degree',
                   'demo_class','interested_global_certification']
@@ -1294,6 +1308,9 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     def get_counselor_name(self, obj):
         user = obj.enrolled_by or obj.created_by
         return user.full_name if user else ''
+
+    def get_counselor_user(self, obj):
+        return user_identity_payload(obj.enrolled_by or obj.created_by)
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
@@ -1320,6 +1337,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     counselor_change_requests = CounselorChangeRequestSerializer(many=True, read_only=True)
     counselor_id = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
+    counselor_user = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1401,6 +1419,9 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     def get_counselor_name(self, obj):
         user = obj.enrolled_by or obj.created_by
         return user.full_name if user else ''
+
+    def get_counselor_user(self, obj):
+        return user_identity_payload(obj.enrolled_by or obj.created_by)
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
@@ -1642,6 +1663,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
     branch_name = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
+    counselor_user = serializers.SerializerMethodField()
+    is_important = serializers.BooleanField(source='enrollment.is_important', read_only=True)
     payment_schedule = serializers.SerializerMethodField()
     installment_summary = serializers.SerializerMethodField()
     active_reason_requests = serializers.SerializerMethodField()
@@ -1650,6 +1673,7 @@ class PaymentSerializer(serializers.ModelSerializer):
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
                   'course_name','first_class_date','branch','branch_name','counselor_name',
+                  'counselor_user','is_important',
                   'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
                   'installments','active_reason_requests','updated_at']
@@ -1663,6 +1687,9 @@ class PaymentSerializer(serializers.ModelSerializer):
         if not user:
             return ''
         return user.full_name or user.username
+
+    def get_counselor_user(self, obj):
+        return user_identity_payload(obj.enrollment.enrolled_by or obj.enrollment.created_by)
 
     def get_payment_schedule(self, obj):
         schedule = get_payment_installment_schedule(obj)

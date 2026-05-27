@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
+import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 
 const moduleConfig = {
   leads: { title: 'Lead Pending', endpoint: '/pending/leads/', detailPrefix: '/leads', followType: 'lead' },
@@ -53,6 +54,8 @@ export default function PendingPage() {
     duration: '',
     date_from: '',
     date_to: '',
+    status: '',
+    importantOnly: false,
   })
 
   const params = useMemo(() => {
@@ -64,8 +67,10 @@ export default function PendingPage() {
       if (filters.date_from) next.date_from = filters.date_from
       if (filters.date_to) next.date_to = filters.date_to
     }
+    if (module === 'payments' && filters.status) next.status = filters.status
+    if (filters.importantOnly) next.important_only = true
     return next
-  }, [filters, isAdmin])
+  }, [filters, isAdmin, module])
 
   const loadRows = async () => {
     setLoading(true)
@@ -104,9 +109,21 @@ export default function PendingPage() {
     setRows((current) => current.filter((row) => row.id !== id))
   }
 
+  const toggleImportant = async (row, nextValue) => {
+    const endpoint = module === 'payments' ? `/payments/${row.id}/toggle-important/` : module === 'walkins' ? `/walkins/${row.id}/toggle-important/` : `/leads/${row.id}/toggle-important/`
+    setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
+    try {
+      const { data } = await api.post(endpoint, { is_important: nextValue })
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: data.is_important } : item))
+    } catch (error) {
+      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
+      setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
+    }
+  }
+
   const leadWalkinColumns = [
     { key: 'due', header: 'Due Date', width: '92px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{formatDate(row.due_date)}</span> },
-    { key: 'name', header: 'Candidate', width: 'minmax(140px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><Link to={row.detail_url || `${config.detailPrefix}/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link><p className="mt-1 truncate text-xs text-slate-500">{row.phone || '-'}</p></div> },
+    { key: 'name', header: 'Candidate', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.assigned_user} /><Link to={row.detail_url || `${config.detailPrefix}/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.phone || '-'}</p></div> },
     { key: 'course', header: 'Course', width: 'minmax(120px,0.9fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
     ...(isAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(90px,0.7fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || '-'}</span> }] : []),
     { key: 'status', header: 'Status', width: '108px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status_display || row.status}</StatusBadge> },
@@ -116,7 +133,7 @@ export default function PendingPage() {
 
   const paymentColumns = [
     { key: 'due', header: 'Due Date', width: '92px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{formatDate(row.due_date)}</span> },
-    { key: 'student', header: 'Student', width: 'minmax(140px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><Link to={row.detail_url || `/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link><p className="mt-1 truncate text-xs text-slate-500">{row.student_number || row.phone || '-'}</p></div> },
+    { key: 'student', header: 'Student', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.counselor_user} /><Link to={row.detail_url || `/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number || row.phone || '-'}</p></div> },
     { key: 'course', header: 'Course', width: 'minmax(110px,0.85fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
     ...(isAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(90px,0.7fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || '-'}</span> }] : []),
     { key: 'installment', header: 'Installment', width: 'minmax(120px,0.9fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.installment_label || '-'}</span> },
@@ -147,6 +164,15 @@ export default function PendingPage() {
           <select value={filters.duration} onChange={(event) => setFilters((current) => ({ ...current, duration: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold">
             {durationOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
+          {module === 'payments' && (
+            <select value={filters.status} onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold">
+              <option value="">All payment status</option>
+              <option value="pending">Pending</option>
+              <option value="partial">Partial</option>
+              <option value="unpaid">Unpaid</option>
+            </select>
+          )}
+          <ImportantFilter checked={filters.importantOnly} onChange={(value) => setFilters((current) => ({ ...current, importantOnly: value }))} />
           {filters.duration === 'custom' && (
             <>
               <input type="date" value={filters.date_from} onChange={(event) => setFilters((current) => ({ ...current, date_from: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold" />

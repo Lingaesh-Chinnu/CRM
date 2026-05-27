@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
+import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 function statusLabel(status) {
@@ -120,6 +121,7 @@ export default function LeadsListPage() {
     branch: '',
     createdFrom: '',
     createdTo: '',
+    importantOnly: false,
   })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
@@ -160,6 +162,7 @@ export default function LeadsListPage() {
         || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
       const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
       const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
+      const matchesImportant = !filters.importantOnly || lead.is_important
       let matchesFollowUp = true
       const followUpDate = lead.next_follow_up_date || ''
       if (filters.followUp === 'today') {
@@ -170,7 +173,7 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy
+      return matchesName && matchesPhone && matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
   }, [filters, leads])
 
@@ -190,6 +193,7 @@ export default function LeadsListPage() {
         || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
       const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
       const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
+      const matchesImportant = !filters.importantOnly || lead.is_important
       let matchesFollowUp = true
       const followUpDate = lead.next_follow_up_date || ''
       if (filters.followUp === 'today') {
@@ -200,7 +204,7 @@ export default function LeadsListPage() {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
-      return matchesName && matchesPhone && matchesSource && matchesFollowUp && matchesFollowUpBy
+      return matchesName && matchesPhone && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
   }, [filters, leads])
 
@@ -214,6 +218,7 @@ export default function LeadsListPage() {
     || filters.branch
     || filters.createdFrom
     || filters.createdTo
+    || filters.importantOnly
   )
   const leadSummary = [
     { label: 'Total', value: '', count: statusSummaryBaseLeads.length },
@@ -237,6 +242,7 @@ export default function LeadsListPage() {
     filters.source,
     filters.createdFrom,
     filters.createdTo,
+    filters.importantOnly,
   ])
 
   useEffect(() => {
@@ -280,6 +286,7 @@ export default function LeadsListPage() {
       if (filters.source) params.source = filters.source
       if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
       if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
+      if (filters.importantOnly) params.important_only = true
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
       setLoadMessage('')
@@ -305,6 +312,7 @@ export default function LeadsListPage() {
     if (filters.source) params.source = filters.source
     if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
     if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
+    if (filters.importantOnly) params.important_only = true
     const today = new Date()
     if (filters.followUp === 'today') {
       params.next_follow_up_date_from = isoDate(today)
@@ -379,6 +387,23 @@ export default function LeadsListPage() {
     }
   }
 
+  const toggleLeadImportant = async (lead, nextValue) => {
+    setLeads((current) => current.map((item) => (
+      item.id === lead.id ? { ...item, is_important: nextValue } : item
+    )))
+    try {
+      const { data } = await api.post(`/leads/${lead.id}/toggle-important/`, { is_important: nextValue })
+      setLeads((current) => current.map((item) => (
+        item.id === lead.id ? { ...item, is_important: data.is_important } : item
+      )))
+    } catch (error) {
+      setLeads((current) => current.map((item) => (
+        item.id === lead.id ? { ...item, is_important: !nextValue } : item
+      )))
+      setLoadMessage(apiErrorMessage(error, 'Failed to update important flag.'))
+    }
+  }
+
   const updateFilter = (field, value) => {
     setFilters((current) => ({ ...current, [field]: value }))
   }
@@ -394,6 +419,7 @@ export default function LeadsListPage() {
       branch: '',
       createdFrom: '',
       createdTo: '',
+      importantOnly: false,
     })
   }
 
@@ -629,6 +655,9 @@ export default function LeadsListPage() {
               ))}
             </select>
           </label>
+          <div className="flex items-end">
+            <ImportantFilter checked={filters.importantOnly} onChange={(value) => updateFilter('importantOnly', value)} />
+          </div>
           <button
             type="button"
             onClick={clearFilters}
@@ -734,7 +763,11 @@ export default function LeadsListPage() {
                   className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
-                      <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ImportantToggle active={!!lead.is_important} onToggle={(nextValue) => toggleLeadImportant(lead, nextValue)} />
+                        <OwnerDot user={lead.assigned_user} />
+                        <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
+                      </div>
                       <p className="mt-1 truncate text-xs text-slate-500">{lead.course_name || 'Course not selected'}</p>
                     </div>
                   ),

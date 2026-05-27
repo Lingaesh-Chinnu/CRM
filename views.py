@@ -90,6 +90,7 @@ from serializers import (
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
     CounselorChangeRequestSerializer, payment_installment_summary,
+    user_identity_payload,
 )
 
 
@@ -1034,11 +1035,17 @@ def pending_duration_bounds(request):
     duration = request.query_params.get('duration') or ''
     if duration == 'today':
         return today, today
+    if duration == 'tomorrow':
+        tomorrow = today + timedelta(days=1)
+        return tomorrow, tomorrow
     if duration == 'yesterday':
         yesterday = today - timedelta(days=1)
         return yesterday, yesterday
     if duration == 'last7':
         return today - timedelta(days=6), today
+    if duration == 'this_week':
+        week_start = today - timedelta(days=(today.weekday() + 1) % 7)
+        return week_start, week_start + timedelta(days=6)
     if duration == 'month':
         return today.replace(day=1), today
     if duration == 'custom':
@@ -1064,6 +1071,10 @@ def pending_staff_filter(request):
         return int(raw) if raw else None
     except (TypeError, ValueError):
         return None
+
+
+def truthy_query_param(value):
+    return str(value or '').strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
 def prune_stale_follow_up_notifications(user, lead_due_ids, lead_missed_ids, walkin_due_ids, walkin_missed_ids):
@@ -1970,6 +1981,7 @@ class LeadFilter(django_filters.FilterSet):
     next_follow_up_date_to   = django_filters.DateFilter(method='filter_next_follow_up_date_to')
     created_from     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_to       = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+    important_only   = django_filters.BooleanFilter(method='filter_important_only')
 
     def filter_name(self, queryset, name, value):
         value = (value or '').strip()
@@ -2005,9 +2017,12 @@ class LeadFilter(django_filters.FilterSet):
             return queryset
         return queryset.filter(next_follow_up_date__lte=value)
 
+    def filter_important_only(self, queryset, name, value):
+        return queryset.filter(is_important=True) if value else queryset
+
     class Meta:
         model  = Lead
-        fields = ['status', 'source', 'branch', 'assigned_to', 'course']
+        fields = ['status', 'source', 'branch', 'assigned_to', 'course', 'important_only']
 
 
 class LeadViewSet(viewsets.ModelViewSet):
@@ -2071,6 +2086,14 @@ class LeadViewSet(viewsets.ModelViewSet):
                 timezone.localdate(),
             )
         return qs
+
+    @action(detail=True, methods=['post'], url_path='toggle-important')
+    def toggle_important(self, request, pk=None):
+        lead = self.get_object()
+        requested = request.data.get('is_important', None)
+        lead.is_important = truthy_query_param(requested) if requested is not None else not lead.is_important
+        lead.save(update_fields=['is_important', 'updated_at'])
+        return Response({'id': lead.id, 'is_important': lead.is_important})
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
@@ -2269,6 +2292,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                         source=self._lead_source_to_walkin_source(lead.source),
                         demo_class=data.get('demo_class', False),
                         interested_global_certification=data.get('interested_global_certification', False),
+                        is_important=lead.is_important,
                     )
                     lead_follow_ups = FollowUp.objects.filter(
                         record_type=FollowUp.RecordType.LEAD,
@@ -2389,6 +2413,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'email': user.email,
                 'branch_id': user.branch_id,
                 'branch_name': user.branch.name if user.branch else '',
+                'identity_color': user.identity_color or '',
             })
         return Response(rows)
 
@@ -2563,6 +2588,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 demo_class=data.get('demo_class', False),
                 interested_global_certification=data.get('interested_global_certification', False),
                 status=Enrollment.Status.PENDING_RULES,
+                is_important=lead.is_important,
             )
             enrollment.refresh_from_db()
 
@@ -4169,6 +4195,8 @@ class PendingManagementView(APIView):
         staff_id = pending_staff_filter(request)
         if staff_id:
             qs = qs.filter(assigned_to_id=staff_id)
+        if truthy_query_param(request.query_params.get('important_only')):
+            qs = qs.filter(is_important=True)
         qs = pending_follow_up_queryset(
             qs,
             FollowUp.RecordType.LEAD,
@@ -4186,6 +4214,8 @@ class PendingManagementView(APIView):
         staff_id = pending_staff_filter(request)
         if staff_id:
             qs = qs.filter(assigned_to_id=staff_id)
+        if truthy_query_param(request.query_params.get('important_only')):
+            qs = qs.filter(is_important=True)
         qs = pending_follow_up_queryset(
             qs,
             FollowUp.RecordType.WALKIN,
@@ -4210,6 +4240,14 @@ class PendingManagementView(APIView):
         staff_id = pending_staff_filter(request)
         if staff_id:
             qs = qs.filter(Q(enrollment__enrolled_by_id=staff_id) | Q(enrollment__created_by_id=staff_id))
+        status_filter = request.query_params.get('status') or ''
+        if status_filter:
+            if status_filter == 'pending':
+                qs = qs.filter(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL])
+            else:
+                qs = qs.filter(status=status_filter)
+        if truthy_query_param(request.query_params.get('important_only')):
+            qs = qs.filter(enrollment__is_important=True)
         qs = apply_pending_date_filter(qs, 'next_payment_date', request)
         return qs.order_by('next_payment_date', 'enrollment__name')
 
@@ -4225,6 +4263,8 @@ class PendingManagementView(APIView):
             'due_date': lead.next_follow_up_date,
             'remarks': lead.remarks,
             'assigned_to_name': lead.assigned_to.full_name if lead.assigned_to else '',
+            'assigned_user': user_identity_payload(lead.assigned_to),
+            'is_important': lead.is_important,
             'detail_url': f'/leads/{lead.id}',
         }
 
@@ -4240,6 +4280,8 @@ class PendingManagementView(APIView):
             'due_date': walkin.follow_up_date,
             'remarks': walkin.remarks,
             'assigned_to_name': walkin.assigned_to.full_name if walkin.assigned_to else '',
+            'assigned_user': user_identity_payload(walkin.assigned_to),
+            'is_important': walkin.is_important,
             'detail_url': f'/walkins/{walkin.id}',
         }
 
@@ -4261,6 +4303,8 @@ class PendingManagementView(APIView):
             'installment_status': due.get('status') if due else payment.status,
             'payment_status': payment.status,
             'counselor_name': enrollment.enrolled_by.full_name if enrollment.enrolled_by else (enrollment.created_by.full_name if enrollment.created_by else ''),
+            'counselor_user': user_identity_payload(enrollment.enrolled_by or enrollment.created_by),
+            'is_important': enrollment.is_important,
             'detail_url': f'/payments/{payment.id}',
         }
 
@@ -4455,6 +4499,7 @@ class WalkInFilter(django_filters.FilterSet):
     date_to = django_filters.DateFilter(method='filter_activity_date_to')
     follow_up_date_from = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='gte')
     follow_up_date_to   = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='lte')
+    important_only = django_filters.BooleanFilter(method='filter_important_only')
 
     def filter_branch(self, queryset, name, value):
         if not self.request or not self.request.user.is_super_admin:
@@ -4493,9 +4538,12 @@ class WalkInFilter(django_filters.FilterSet):
             return queryset
         return queryset.filter(Q(visit_date__lte=value) | Q(visit_date__isnull=True, created_at__date__lte=value))
 
+    def filter_important_only(self, queryset, name, value):
+        return queryset.filter(is_important=True) if value else queryset
+
     class Meta:
         model  = WalkIn
-        fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class']
+        fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class', 'important_only']
 
 
 class WalkInViewSet(viewsets.ModelViewSet):
@@ -4530,6 +4578,14 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 timezone.localdate(),
             )
         return qs
+
+    @action(detail=True, methods=['post'], url_path='toggle-important')
+    def toggle_important(self, request, pk=None):
+        walkin = self.get_object()
+        requested = request.data.get('is_important', None)
+        walkin.is_important = truthy_query_param(requested) if requested is not None else not walkin.is_important
+        walkin.save(update_fields=['is_important', 'updated_at'])
+        return Response({'id': walkin.id, 'is_important': walkin.is_important})
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
@@ -4664,6 +4720,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 'email': user.email,
                 'branch_id': user.branch_id,
                 'branch_name': user.branch.name if user.branch else '',
+                'identity_color': user.identity_color or '',
             })
         return Response(rows)
 
@@ -5297,15 +5354,21 @@ class EnrollmentFilter(django_filters.FilterSet):
     status = django_filters.CharFilter(method='filter_status')
     enrolled_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
     enrolled_to   = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
+    important_only = django_filters.BooleanFilter(method='filter_important_only')
 
     def filter_status(self, queryset, name, value):
         if value == Enrollment.Status.ACTIVE:
             return queryset.filter(status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.ENROLLED])
+        if value == 'pending':
+            return queryset.filter(status__in=[Enrollment.Status.DRAFT, Enrollment.Status.PENDING_RULES, Enrollment.Status.RULES_SENT, Enrollment.Status.RULES_SUBMITTED])
         return queryset.filter(status=value) if value else queryset
+
+    def filter_important_only(self, queryset, name, value):
+        return queryset.filter(is_important=True) if value else queryset
 
     class Meta:
         model  = Enrollment
-        fields = ['status', 'branch', 'course']
+        fields = ['status', 'branch', 'course', 'important_only']
 
 
 def serialize_installment_schedule(schedule):
@@ -5451,6 +5514,14 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if getattr(self, 'action', None) == 'list':
             qs = official_enrollment_queryset(qs)
         return qs
+
+    @action(detail=True, methods=['post'], url_path='toggle-important')
+    def toggle_important(self, request, pk=None):
+        enrollment = self.get_object()
+        requested = request.data.get('is_important', None)
+        enrollment.is_important = truthy_query_param(requested) if requested is not None else not enrollment.is_important
+        enrollment.save(update_fields=['is_important', 'updated_at'])
+        return Response({'id': enrollment.id, 'is_important': enrollment.is_important})
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
@@ -6122,13 +6193,23 @@ from serializers import PaymentSerializer, PaymentInstallmentSerializer, payment
 
 class PaymentFilter(django_filters.FilterSet):
     status = django_filters.CharFilter(method='filter_status')
+    branch = django_filters.NumberFilter(field_name='enrollment__branch_id')
+    user = django_filters.NumberFilter(method='filter_user')
+    counselor = django_filters.NumberFilter(method='filter_user')
+    important_only = django_filters.BooleanFilter(method='filter_important_only')
+    duration = django_filters.CharFilter(method='filter_duration')
+    date_from = django_filters.DateFilter(method='filter_date_from')
+    date_to = django_filters.DateFilter(method='filter_date_to')
     due_this_week = django_filters.BooleanFilter(method='filter_due_this_week')
     next_payment_from = django_filters.DateFilter(field_name='next_payment_date', lookup_expr='gte')
     next_payment_to = django_filters.DateFilter(field_name='next_payment_date', lookup_expr='lte')
 
     class Meta:
         model = Payment
-        fields = ['status', 'enrollment__branch', 'due_this_week', 'next_payment_from', 'next_payment_to']
+        fields = [
+            'status', 'branch', 'enrollment__branch', 'user', 'counselor', 'important_only',
+            'duration', 'date_from', 'date_to', 'due_this_week', 'next_payment_from', 'next_payment_to',
+        ]
 
     def filter_status(self, queryset, name, value):
         if value == 'weekly_pending':
@@ -6153,6 +6234,54 @@ class PaymentFilter(django_filters.FilterSet):
         if value == 'pending':
             return queryset.filter(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL])
         return queryset.filter(status=value)
+
+    def filter_user(self, queryset, name, value):
+        if not value:
+            return queryset
+        if self.request and not self.request.user.is_super_admin:
+            allowed = User.objects.filter(
+                id=value,
+                branch_id=self.request.user.branch_id,
+                is_active=True,
+            ).exclude(role=User.Role.SUPER_ADMIN).exists()
+            if not allowed:
+                return queryset.none()
+        return queryset.filter(Q(enrollment__enrolled_by_id=value) | Q(enrollment__created_by_id=value))
+
+    def filter_important_only(self, queryset, name, value):
+        return queryset.filter(enrollment__is_important=True) if value else queryset
+
+    def filter_duration(self, queryset, name, value):
+        today = timezone.localdate()
+        if value == 'overdue':
+            return queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                paid_amount__lt=F('total_fees'),
+                next_payment_date__isnull=False,
+                next_payment_date__lt=today,
+            )
+        if value == 'month':
+            start = today.replace(day=1)
+            end = start.replace(day=monthrange(start.year, start.month)[1])
+        else:
+            start, end = pending_duration_bounds(self.request)
+        if value in ('today', 'tomorrow', 'this_week', 'month'):
+            queryset = queryset.filter(
+                status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+                paid_amount__lt=F('total_fees'),
+                next_payment_date__isnull=False,
+            )
+        if start:
+            queryset = queryset.filter(next_payment_date__gte=start)
+        if end:
+            queryset = queryset.filter(next_payment_date__lte=end)
+        return queryset
+
+    def filter_date_from(self, queryset, name, value):
+        return queryset.filter(next_payment_date__gte=value) if value else queryset
+
+    def filter_date_to(self, queryset, name, value):
+        return queryset.filter(next_payment_date__lte=value) if value else queryset
 
     def filter_due_this_week(self, queryset, name, value):
         if not value:
@@ -6394,7 +6523,12 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
             qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
-        if self.action in ('list', 'export') and self.request.query_params.get('status') not in ('due', 'pending_today', 'weekly_pending'):
+        has_date_filter = any(self.request.query_params.get(key) for key in ('duration', 'date_from', 'date_to', 'next_payment_from', 'next_payment_to'))
+        if (
+            self.action in ('list', 'export')
+            and self.request.query_params.get('status') not in ('due', 'pending_today', 'weekly_pending')
+            and not has_date_filter
+        ):
             month_start, month_end = self._month_bounds()
             qs = qs.filter(
                 Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)
@@ -6520,6 +6654,15 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             str(request.data.get('reason') or 'Admin confirmed permanent delete.').strip(),
         )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='toggle-important')
+    def toggle_important(self, request, pk=None):
+        payment = self.get_object()
+        enrollment = payment.enrollment
+        requested = request.data.get('is_important', None)
+        enrollment.is_important = truthy_query_param(requested) if requested is not None else not enrollment.is_important
+        enrollment.save(update_fields=['is_important', 'updated_at'])
+        return Response({'id': payment.id, 'enrollment': enrollment.id, 'is_important': enrollment.is_important})
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
