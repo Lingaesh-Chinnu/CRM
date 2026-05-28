@@ -7,7 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
-import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
@@ -629,12 +629,14 @@ export default function LeadsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        <StatusFilterChips
-          items={leadSummary}
-          value={filters.status}
-          onChange={(value) => updateFilter('status', value)}
-          className="border-b border-slate-200 px-6 py-4 sm:px-8"
-        />
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 sm:px-8 lg:flex-row lg:items-center lg:justify-between">
+          <StatusFilterChips
+            items={leadSummary}
+            value={filters.status}
+            onChange={(value) => updateFilter('status', value)}
+          />
+          <TeamColorLegend users={filteredLeads.map((lead) => lead.assigned_user)} />
+        </div>
         {loadMessage && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
             {loadMessage}

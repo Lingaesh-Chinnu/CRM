@@ -7,7 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
-import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -120,12 +120,15 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
     <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
       <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-5 xl:flex-row xl:items-center xl:justify-between sm:px-8">
         <h2 className="text-xl font-black tracking-tight text-slate-950">{title}</h2>
-        <StatusFilterChips
-          items={summary}
-          value={activeFilter}
-          onChange={onStatusChange}
-          className="xl:justify-end"
-        />
+        <div className="flex flex-col gap-3 xl:items-end">
+          <StatusFilterChips
+            items={summary}
+            value={activeFilter}
+            onChange={onStatusChange}
+            className="xl:justify-end"
+          />
+          <TeamColorLegend users={walkins.map((walkin) => walkin.assigned_user)} />
+        </div>
       </div>
 
       {walkins.length === 0 ? (

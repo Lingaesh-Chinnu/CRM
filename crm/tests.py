@@ -5,10 +5,104 @@ from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
 
-from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
+class NotificationRoleRoutingTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.course = Course.objects.create(name='Python Full Stack', actual_fees=42900)
+        self.admin = User.objects.create_superuser(
+            username='notification-admin',
+            email='notification-admin@example.com',
+            password='pass12345',
+        )
+        self.staff = User.objects.create_user(
+            username='notification-staff',
+            email='notification-staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+        )
+
+    def create_due_records(self):
+        today = timezone.localdate()
+        Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Due Lead',
+            phone='9000001001',
+            source=Lead.Source.MANUAL,
+            status=Lead.Status.FOLLOW_UP,
+            next_follow_up_date=today,
+            assigned_to=self.staff,
+        )
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            actual_fees=Decimal('42900'),
+            discount_amount=Decimal('0'),
+            final_fees=Decimal('42900'),
+            net_payable_fee=Decimal('42900'),
+            name='Due Payment Student',
+            phone='9000001002',
+            enrollment_date=today,
+            status=Enrollment.Status.ENROLLED,
+        )
+        Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=Decimal('42900'),
+            paid_amount=Decimal('0'),
+            next_payment_date=today,
+            status=Payment.Status.UNPAID,
+        )
+
+    def test_staff_still_receives_operational_smart_notifications(self):
+        self.create_due_records()
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.get('/api/notifications/')
+
+        self.assertEqual(response.status_code, 200)
+        titles = {item['title'] for item in response.data}
+        self.assertIn('Lead follow-up due today', titles)
+        self.assertIn('Payment due today', titles)
+
+    def test_admin_does_not_receive_operational_smart_notifications(self):
+        self.create_due_records()
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get('/api/notifications/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+        self.assertFalse(Notification.objects.filter(user=self.admin).exists())
+
+    def test_admin_notification_center_hides_existing_operational_noise(self):
+        Notification.objects.create(
+            user=self.admin,
+            title='Lead follow-up due today',
+            message='Old reminder',
+            type=Notification.NType.WARNING,
+        )
+        Notification.objects.create(
+            user=self.admin,
+            title='Course Change Request',
+            message='Needs review',
+            type=Notification.NType.INFO,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get('/api/notifications/?scope=all')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item['title'] for item in response.data], ['Course Change Request'])
 
 
 @override_settings(

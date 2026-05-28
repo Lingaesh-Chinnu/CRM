@@ -39,6 +39,43 @@ export function OwnerDot({ user, className = '' }) {
   )
 }
 
+function compactUserName(user) {
+  const name = user?.name || user?.full_name || user?.username || ''
+  return name.trim().split(/\s+/)[0] || ''
+}
+
+export function TeamColorLegend({ users = [], className = '' }) {
+  const seen = new Set()
+  const uniqueUsers = users
+    .filter((user) => compactUserName(user))
+    .filter((user) => {
+      const key = user?.id ? `id:${user.id}` : `name:${compactUserName(user).toLowerCase()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  const visibleUsers = uniqueUsers.slice(0, 6)
+  const hiddenCount = uniqueUsers.length - visibleUsers.length
+
+  if (visibleUsers.length === 0) return null
+
+  return (
+    <div className={`flex min-w-0 flex-wrap items-center justify-end gap-x-4 gap-y-2 text-xs font-medium text-slate-500 ${className}`}>
+      {visibleUsers.map((user) => {
+        const color = user?.identity_color || user?.color || ''
+        const label = user?.name || user?.full_name || user?.username || compactUserName(user)
+        return (
+          <span key={user?.id || label} title={label} className="inline-flex max-w-[120px] items-center gap-1.5">
+            <span className={`h-2 w-2 shrink-0 rounded-full ${userColorClass(color).replace(/ ring-\S+/g, '')}`} />
+            <span className="truncate">{compactUserName(user)}</span>
+          </span>
+        )
+      })}
+      {hiddenCount > 0 && <span className="text-slate-400">+{hiddenCount}</span>}
+    </div>
+  )
+}
+
 export function CandidateName({ children, owner, to }) {
   const content = (
     <>

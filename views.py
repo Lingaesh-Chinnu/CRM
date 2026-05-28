@@ -711,6 +711,8 @@ class PhoneNumberUpdateView(APIView):
 def create_user_notification(user, title, message, notification_type=Notification.NType.INFO, related_url=''):
     if not user or not getattr(user, 'is_active', False):
         return None
+    if is_admin_operational_noise(user, title):
+        return None
     return Notification.objects.create(
         user=user,
         title=title,
@@ -729,6 +731,8 @@ def notify_branch_users(branch, title, message, notification_type=Notification.N
 
 def create_notification_once(user, title, message, notification_type=Notification.NType.INFO, related_url=''):
     if not user:
+        return None
+    if is_admin_operational_noise(user, title):
         return None
     notification = Notification.objects.filter(
         user=user,
@@ -762,6 +766,27 @@ def candidate_url_for_counselor_request(change_request):
 
 def active_admin_users():
     return User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True)
+
+
+ADMIN_OPERATIONAL_NOTIFICATION_TITLES = {
+    'Lead follow-up due today',
+    'Missed lead follow-up',
+    'Walk-in follow-up due today',
+    'Missed walk-in follow-up',
+    'Payment due today',
+    'Birthday reminder',
+    'Bill Generated',
+    'Receipt Generated',
+}
+
+
+def is_admin_operational_noise(user, title):
+    return bool(getattr(user, 'is_super_admin', False) and title in ADMIN_OPERATIONAL_NOTIFICATION_TITLES)
+
+
+def notify_admin_users(title, message, notification_type=Notification.NType.INFO, related_url=''):
+    for admin_user in active_admin_users():
+        create_user_notification(admin_user, title, message, notification_type, related_url)
 
 
 def notify_counselor_request_submitted(change_request):
@@ -1160,9 +1185,11 @@ def clear_follow_up_notifications_for_record(record_type, record_id):
 def generate_smart_notifications(user):
     if not user.is_authenticated:
         return
+    if user.is_super_admin:
+        return
     today = timezone.localdate()
-    lead_scope = visible_candidate_queryset(Lead.objects.all() if user.is_super_admin else Lead.objects.filter(branch=user.branch))
-    walkin_scope = visible_candidate_queryset(WalkIn.objects.all() if user.is_super_admin else WalkIn.objects.filter(branch=user.branch))
+    lead_scope = visible_candidate_queryset(Lead.objects.filter(branch=user.branch))
+    walkin_scope = visible_candidate_queryset(WalkIn.objects.filter(branch=user.branch))
     lead_due_qs = active_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
     lead_missed_qs = missed_lead_follow_up_queryset(lead_scope, 'next_follow_up_date', today)
     walkin_due_qs = active_walkin_follow_up_queryset(walkin_scope, 'follow_up_date', today)
@@ -1187,8 +1214,7 @@ def generate_smart_notifications(user):
         status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
         paid_amount__lt=F('total_fees'),
     ).select_related('enrollment'))
-    if not user.is_super_admin:
-        payment_qs = payment_qs.filter(enrollment__branch=user.branch)
+    payment_qs = payment_qs.filter(enrollment__branch=user.branch)
     payment_due_ids = list(payment_qs.values_list('id', flat=True))
     prune_stale_payment_due_notifications(user, payment_due_ids)
     for payment in payment_qs[:25]:
@@ -1198,8 +1224,7 @@ def generate_smart_notifications(user):
         dob__month=today.month,
         dob__day=today.day,
     ))
-    if not user.is_super_admin:
-        enrollment_qs = enrollment_qs.filter(branch=user.branch)
+    enrollment_qs = enrollment_qs.filter(branch=user.branch)
     for enrollment in enrollment_qs[:25]:
         create_notification_once(user, 'Birthday reminder', f'{enrollment.name} has a birthday today.', Notification.NType.WARNING, f'/students/{enrollment.id}')
 
@@ -2183,6 +2208,12 @@ class LeadViewSet(viewsets.ModelViewSet):
                 Notification.NType.INFO,
                 f'/leads/{lead.id}',
             )
+        notify_admin_users(
+            'Lead Transferred',
+            f'{lead.name} was transferred to {target_user.full_name} by {transferred_by.full_name}.',
+            Notification.NType.INFO,
+            f'/leads/{lead.id}',
+        )
         return history
 
     @action(detail=True, methods=['post'], url_path='transfer')
@@ -2516,6 +2547,12 @@ class LeadViewSet(viewsets.ModelViewSet):
                 Notification.NType.INFO,
                 f'/leads/{lead.id}',
             )
+            notify_admin_users(
+                'Lead Transferred',
+                f'New lead {lead.name} was transferred to {transfer_user.full_name} by {self.request.user.full_name}.',
+                Notification.NType.INFO,
+                f'/leads/{lead.id}',
+            )
 
     def create(self, request, *args, **kwargs):
         try:
@@ -2793,6 +2830,12 @@ class LeadViewSet(viewsets.ModelViewSet):
         notify_branch_users(
             branch,
             'New lead assigned',
+            f'{lead.name} has been assigned to {branch.name}.',
+            Notification.NType.INFO,
+            f'/leads/{lead.id}',
+        )
+        notify_admin_users(
+            'Lead Assigned',
             f'{lead.name} has been assigned to {branch.name}.',
             Notification.NType.INFO,
             f'/leads/{lead.id}',
@@ -4318,6 +4361,8 @@ class NotificationViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         generate_smart_notifications(self.request.user)
         queryset = Notification.objects.filter(user=self.request.user).order_by('-created_at')
+        if self.request.user.is_super_admin:
+            queryset = queryset.exclude(title__in=ADMIN_OPERATIONAL_NOTIFICATION_TITLES)
         scope = self.request.query_params.get('scope', 'active')
         status_filter = self.request.query_params.get('status', '').strip()
         state_filter = self.request.query_params.get('state', '').strip()

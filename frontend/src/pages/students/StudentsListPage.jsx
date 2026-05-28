@@ -6,7 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { downloadExport, ExportMenu } from '../../utils/exportData'
-import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function normaliseListResponse(data) {
@@ -252,18 +252,21 @@ export default function StudentsListPage() {
             {message}
           </div>
         )}
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
+        <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Directory</p>
             <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Student details</h2>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <StatusFilterChips
-              items={statusSummary}
-              value={filters.status}
-              onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
-              className="justify-end"
-            />
+          <div className="flex flex-col gap-3 lg:items-end">
+            <div className="flex flex-col gap-2 lg:items-end">
+              <StatusFilterChips
+                items={statusSummary}
+                value={filters.status}
+                onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
+                className="lg:justify-end"
+              />
+              <TeamColorLegend users={rows.map((row) => row.counselor_user)} />
+            </div>
             <ExportMenu onExport={exportStudents} exporting={exporting} />
           </div>
         </div>
