@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
-import brandLogo from '../../assets/brand-logo.png'
+import brandLogo from '/iie-white.png'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 const REDIRECT_URL = 'https://www.indrainstitute.com'
@@ -156,7 +156,7 @@ export default function PublicLeadForm() {
           <div className="pr-10 sm:pr-12">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
               <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] border border-sky-200/30 bg-[#07142b] p-2 shadow-[0_16px_36px_-20px_rgba(14,165,233,0.55),0_10px_24px_-18px_rgba(7,20,43,0.9)] sm:h-20 sm:w-20 sm:rounded-[22px] sm:p-3">
-                <img src={brandLogo} alt="IIE Logo" className="h-full w-full object-contain" />
+                <img src={iie-white.png} alt="IIE Logo" className="h-full w-full object-contain" />
               </div>
 
               <div>
