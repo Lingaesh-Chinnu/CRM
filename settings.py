@@ -70,7 +70,7 @@ ALLOWED_HOSTS = env_list(
 )
 CSRF_TRUSTED_ORIGINS = env_list(
     'CSRF_TRUSTED_ORIGINS',
-    'https://*.onrender.com,https://wingrootechnologies.com,https://www.wingrootechnologies.com',
+    'https://*.onrender.com,https://wingrootechnologies.com,https://www.wingrootechnologies.com,https://indrainstitute.com,https://www.indrainstitute.com',
 )
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', not DEBUG)
@@ -272,7 +272,7 @@ SIMPLE_JWT: dict = {  # type: ignore
 # ── CORS ──────────────────────────────────────────────────────
 CORS_ALLOWED_ORIGINS = env_list(
     'CORS_ALLOWED_ORIGINS',
-    'https://wingrootechnologies.com,https://www.wingrootechnologies.com,http://localhost:3000,http://localhost:5173'
+    'https://wingrootechnologies.com,https://www.wingrootechnologies.com,https://indrainstitute.com,https://www.indrainstitute.com,http://localhost:3000,http://localhost:5173'
 )
 CORS_ALLOWED_ORIGIN_REGEXES = env_list(
     'CORS_ALLOWED_ORIGIN_REGEXES',
