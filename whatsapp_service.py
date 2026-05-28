@@ -62,6 +62,22 @@ class WATIClient:
         )
         return self._response_payload(response)
 
+    def send_session_file(self, phone, file_bytes, filename, caption=''):
+        if not self.is_configured:
+            return {'error': 'WATI is not configured.'}
+        url = f'{self.base_url}/api/v1/sendSessionFile/{phone}'
+        headers = {'Authorization': f'Bearer {self.access_token}'}
+        files = {'file': (filename, file_bytes, 'application/pdf')}
+        data = {'caption': caption or ''}
+        response = requests.post(
+            url,
+            files=files,
+            data=data,
+            headers=headers,
+            timeout=30,
+        )
+        return self._response_payload(response)
+
     def send_template_message(self, phone, template_name, values, language_code='en'):
         if not self.is_configured:
             return {'error': 'WATI is not configured.'}
@@ -205,6 +221,45 @@ def send_candidate_message(
         message_body=rendered_body,
         result=result,
         template_name=template_name,
+        sent_by=sent_by,
+        related_model=related_model,
+        related_id=related_id,
+    )
+
+
+def send_candidate_document(
+    *,
+    candidate_name,
+    phone,
+    message_type,
+    caption,
+    file_bytes,
+    filename,
+    sent_by=None,
+    related_model='',
+    related_id=None,
+):
+    normalized_phone = normalize_candidate_phone(phone)
+    if not normalized_phone:
+        return log_whatsapp_message(
+            candidate_name=candidate_name,
+            phone=str(phone or ''),
+            message_type=message_type,
+            message_body=caption,
+            result={'error': 'Invalid candidate phone number.'},
+            sent_by=sent_by,
+            related_model=related_model,
+            related_id=related_id,
+        )
+
+    result = WATIClient().send_session_file(normalized_phone, file_bytes, filename, caption)
+    return log_whatsapp_message(
+        candidate_name=candidate_name,
+        phone=normalized_phone,
+        message_type=message_type,
+        message_body=caption,
+        result=result,
+        template_name=filename,
         sent_by=sent_by,
         related_model=related_model,
         related_id=related_id,

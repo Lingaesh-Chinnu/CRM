@@ -66,7 +66,7 @@ import logging
 import re
 import uuid
 import zipfile
-from whatsapp_service import send_candidate_message
+from whatsapp_service import send_candidate_document, send_candidate_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
@@ -5966,7 +5966,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = visible_candidate_queryset(Enrollment.objects.select_related(
-            'course','branch','enrolled_by','created_by'
+            'course','branch','enrolled_by','created_by','lead','walkin','walkin__lead'
         ).prefetch_related(
             'payment__installments',
             'course_change_history',
@@ -7770,6 +7770,126 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment.save(update_fields=['document_snapshot', 'document_html', 'bill_total'])
         return html
 
+    def _build_document_pdf(self, installment):
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+        except ImportError as exc:
+            raise RuntimeError('Pillow is required to generate bill PDFs.') from exc
+
+        snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
+        document_number = snapshot.get('document_number') or self._document_number(installment)
+        document_title = 'OFFICIAL PAYMENT BILL' if snapshot.get('document_type') == 'bill' else 'PAYMENT RECEIPT'
+        document_label = 'Bill No' if snapshot.get('document_type') == 'bill' else 'Receipt No'
+        width, height = 1240, 1754
+        margin = 82
+        navy = '#1E3A5F'
+        slate = '#334155'
+        border = '#CBD5E1'
+        light = '#F8FAFC'
+        page = Image.new('RGB', (width, height), 'white')
+        draw = ImageDraw.Draw(page)
+        font = ImageFont.load_default()
+        title_font = ImageFont.load_default()
+        label_font = ImageFont.load_default()
+
+        draw.rectangle((0, 0, width, 170), fill=navy)
+        logo_candidates = [
+            Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
+            Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'brand-logo.png',
+        ]
+        for logo_path in logo_candidates:
+            if logo_path.exists():
+                logo = Image.open(logo_path).convert('RGBA')
+                logo.thumbnail((112, 112))
+                page.paste(logo, (margin, 28), logo)
+                break
+
+        def center_text(text, y, fill='white'):
+            bbox = draw.textbbox((0, 0), text, font=title_font)
+            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=title_font)
+
+        center_text('INDRA INSTITUTE OF EDUCATION', 34)
+        center_text('IT Training & Testing Services', 66)
+        center_text('First Floor, AAKIFAH 2017 Complex, Palghat Main Road,', 98)
+        center_text('Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008', 124)
+
+        y = 170
+        draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
+        draw.text((margin, y + 24), document_title, fill='black', font=title_font)
+        number_label = f'{document_label}: {document_number or ""}'
+        number_bbox = draw.textbbox((0, 0), number_label, font=title_font)
+        draw.text((width - margin - (number_bbox[2] - number_bbox[0]), y + 24), number_label, fill=navy, font=title_font)
+
+        fields = [
+            ('STUDENT NAME', snapshot.get('student_name') or ''),
+            ('STUDENT ID', snapshot.get('student_number') or ''),
+            ('COURSE', snapshot.get('course_name') or ''),
+            ('BRANCH', snapshot.get('branch_name') or ''),
+            ('PAYMENT MODE', snapshot.get('payment_mode') or ''),
+            ('REFERENCE NO', snapshot.get('reference_number') or ''),
+            ('PAYMENT DATE', snapshot.get('payment_date') or ''),
+            ('INSTALLMENT', snapshot.get('installment_label') or ''),
+            ('PAYMENT AMOUNT', f"Rs {Decimal(str(snapshot.get('payment_amount') or 0)):,.2f}"),
+            ('TOTAL FEES', f"Rs {Decimal(str(snapshot.get('total_fees') or 0)):,.2f}"),
+            ('PAID AMOUNT', f"Rs {Decimal(str(snapshot.get('paid_amount') or 0)):,.2f}"),
+            ('BALANCE', f"Rs {Decimal(str(snapshot.get('balance') or 0)):,.2f}"),
+        ]
+
+        y += 110
+        col_width = (width - (margin * 2) - 44) / 2
+        row_height = 80
+        for index, (label, value) in enumerate(fields):
+            col = index % 2
+            row = index // 2
+            x = margin + col * (col_width + 44)
+            row_y = y + row * row_height
+            draw.text((x, row_y), label, fill=slate, font=label_font)
+            for line_index, line in enumerate(wrap_text(draw, str(value), font, int(col_width))[:3]):
+                draw.text((x, row_y + 26 + (line_index * 22)), line, fill='black', font=font)
+
+        table_y = y + 6 * row_height + 30
+        draw.text((margin, table_y), 'BILLED PAYMENT ENTRY', fill='black', font=title_font)
+        table_y += 34
+        headers = ['INSTALLMENT', 'PAYMENT DATE', 'AMOUNT', 'MODE']
+        col_widths = [420, 230, 230, 180]
+        x = margin
+        for header, col_width_item in zip(headers, col_widths):
+            draw.rectangle((x, table_y, x + col_width_item, table_y + 42), fill=light, outline=border)
+            draw.text((x + 12, table_y + 14), header, fill=slate, font=label_font)
+            x += col_width_item
+        y_row = table_y + 42
+        for item in (snapshot.get('included_installments') or [])[:8]:
+            values = [
+                item.get('label') or '',
+                item.get('payment_date') or '',
+                f"Rs {Decimal(str(item.get('amount') or 0)):,.2f}",
+                item.get('payment_mode') or '',
+            ]
+            x = margin
+            for value, col_width_item in zip(values, col_widths):
+                draw.rectangle((x, y_row, x + col_width_item, y_row + 48), fill='white', outline=border)
+                for line_index, line in enumerate(wrap_text(draw, str(value), font, col_width_item - 22)[:2]):
+                    draw.text((x + 12, y_row + 12 + (line_index * 18)), line, fill='black', font=font)
+                x += col_width_item
+            y_row += 48
+
+        info_y = y_row + 48
+        draw.line((margin, info_y - 24, width - margin, info_y - 24), fill=border, width=2)
+        draw.text((margin, info_y), 'GENERATED BY: Indra Institute of Education', fill=slate, font=font)
+        draw.text((margin, info_y + 34), f"GENERATED ON: {self._receipt_date(snapshot.get('generated_at'))}", fill=slate, font=font)
+
+        footer_y = height - 92
+        draw.rectangle((0, footer_y, width, height), fill=navy)
+        draw.text((margin, footer_y + 34), 'Fees once paid cannot be refunded.', fill='white', font=font)
+        footer_text = 'This is a computer-generated document, no signature required.'
+        footer_bbox = draw.textbbox((0, 0), footer_text, font=font)
+        draw.text((width - margin - (footer_bbox[2] - footer_bbox[0]), footer_y + 34), footer_text, fill='white', font=font)
+
+        output = io.BytesIO()
+        page.save(output, format='PDF')
+        output.seek(0)
+        return output.read()
+
     @action(detail=True, methods=['get'], url_path='view-bill')
     def view_bill(self, request, pk=None):
         installment = self.get_object()
@@ -7791,6 +7911,44 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         response = HttpResponse(self._immutable_document_html(installment), content_type='text/html; charset=utf-8')
         response['Content-Disposition'] = f'attachment; filename="{document_number}.html"'
         return response
+
+    @action(detail=True, methods=['post'], url_path='send-bill')
+    def send_bill(self, request, pk=None):
+        installment = self.get_object()
+        document_number = self._document_number(installment)
+        if not document_number:
+            return Response({'detail': 'Generate the bill or receipt before sending it.'}, status=400)
+
+        enrollment = installment.enrollment
+        document_label = 'Bill' if installment.bill_number else 'Receipt'
+        filename = f'{document_number}.pdf'
+        try:
+            pdf_bytes = self._build_document_pdf(installment)
+        except RuntimeError as exc:
+            return Response({'detail': str(exc)}, status=503)
+        caption = (
+            f'Hi {enrollment.name},\n\n'
+            f'Please find your {document_label.lower()} {document_number} attached.\n\n'
+            '-Team IIE'
+        )
+        log = send_candidate_document(
+            candidate_name=enrollment.name,
+            phone=enrollment.phone,
+            message_type=WhatsAppMessage.MsgType.MANUAL,
+            caption=caption,
+            file_bytes=pdf_bytes,
+            filename=filename,
+            sent_by=request.user,
+            related_model='payment_installment',
+            related_id=installment.id,
+        )
+        return Response({
+            'detail': f'{document_label} send request processed.',
+            'phone': enrollment.phone,
+            'document_number': document_number,
+            'whatsapp_message': caption,
+            **whatsapp_send_payload(log),
+        })
 
 
 class AdminReceiptViewSet(viewsets.ModelViewSet):

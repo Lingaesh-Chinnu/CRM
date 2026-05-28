@@ -662,7 +662,16 @@ export default function PaymentsListPage() {
                     </div>
                   ),
                 },
-                { key: 'course', header: 'Course', width: 'minmax(130px,0.95fr)', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
+                {
+                  key: 'course',
+                  header: 'Course',
+                  width: 'minmax(170px,1fr)',
+                  render: (row) => (
+                    <span className="block whitespace-normal break-words leading-5 text-slate-700 [overflow-wrap:anywhere]">
+                      {row.course_name || '-'}
+                    </span>
+                  ),
+                },
                 ...(isSuperAdmin ? [{
                   key: 'branch',
                   header: 'Branch',

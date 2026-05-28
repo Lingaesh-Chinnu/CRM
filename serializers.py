@@ -1366,6 +1366,9 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     counselor_id = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
     counselor_user = serializers.SerializerMethodField()
+    lead_created_date = serializers.SerializerMethodField()
+    walkin_date = serializers.SerializerMethodField()
+    first_payment_date = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1453,6 +1456,38 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
+
+    def _journey_walkin(self, obj):
+        if obj.walkin_id and obj.walkin:
+            return obj.walkin
+        lead = obj.lead or None
+        if lead:
+            linked_walkin = getattr(lead, 'walkin', None)
+            if linked_walkin:
+                return linked_walkin
+        return WalkIn.objects.filter(converted_to_type='enrollment', converted_record_id=obj.id).select_related('lead').first()
+
+    def get_lead_created_date(self, obj):
+        walkin = self._journey_walkin(obj)
+        lead = obj.lead or (walkin.lead if walkin and walkin.lead_id else None)
+        return lead.created_at if lead else None
+
+    def get_walkin_date(self, obj):
+        walkin = self._journey_walkin(obj)
+        if walkin:
+            return walkin.visit_date
+        if obj.lead_id and obj.lead:
+            return obj.lead.walkin_date
+        return None
+
+    def get_first_payment_date(self, obj):
+        payment = getattr(obj, 'payment', None)
+        if not payment:
+            return None
+        installments = list(payment.installments.all())
+        if not installments:
+            return None
+        return min((installment.payment_date for installment in installments if installment.payment_date), default=None)
 
     def get_rules_signing_status(self, obj):
         return self._rules_signing_data(obj).get('status') or 'pending'

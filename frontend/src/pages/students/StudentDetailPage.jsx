@@ -8,6 +8,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
 import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
+import CandidateTimeline from '../../components/common/CandidateTimeline'
 
 const studentStatusOptions = [
   { value: 'active', label: 'Active' },
@@ -190,6 +191,8 @@ export default function StudentDetailPage() {
         onReassign={reassignCounselor}
       />
 
+      <CandidateTimeline candidate={row} />
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-slate-50 p-4">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Phone</p>
@@ -210,6 +213,7 @@ export default function StudentDetailPage() {
             <DetailCard label="Course" value={prettyValue(row.course_name)} />
             <DetailCard label="Qualification" value={prettyValue(row.qualification_display || row.qualification)} />
             <DetailCard label="Degree / Department" value={prettyValue(row.degree)} />
+            <DetailCard label="Walkin Date" value={formatDate(row.walkin_date)} />
             <DetailCard label="Enrollment Date" value={formatDate(row.enrollment_date)} />
             <DetailCard label="Start Date" value={formatDate(row.start_date)} />
             <DetailCard label="Preferred Timing" value={prettyValue(row.preferred_timing_display)} />

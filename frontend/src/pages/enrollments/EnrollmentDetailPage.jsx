@@ -9,6 +9,7 @@ import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import CourseChangeModal, { CourseChangeHistorySection } from '../../components/common/CourseChangeModal'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
+import CandidateTimeline from '../../components/common/CandidateTimeline'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -77,6 +78,16 @@ function statusLabel(value) {
 
 function prettyValue(value) {
   return value || 'Not provided'
+}
+
+function formatDate(value) {
+  if (!value) return 'Not provided'
+
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
 }
 
 function DetailCard({ label, value }) {
@@ -384,6 +395,8 @@ export default function EnrollmentDetailPage() {
         onReassign={reassignCounselor}
       />
 
+      <CandidateTimeline candidate={row} />
+
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Actual Fees</p>
@@ -428,6 +441,8 @@ export default function EnrollmentDetailPage() {
             )}
           </div>
           <DetailCard label="Preferred Timing" value={row.preferred_timing_display} />
+          <DetailCard label="Walkin Date" value={formatDate(row.walkin_date)} />
+          <DetailCard label="Enrollment Date" value={formatDate(row.enrollment_date)} />
         </div>
       </section>
 

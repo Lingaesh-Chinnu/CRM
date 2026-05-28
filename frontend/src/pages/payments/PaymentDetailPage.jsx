@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
+import toast from 'react-hot-toast'
 import { api } from '../../services/api'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 
@@ -120,6 +121,7 @@ export default function PaymentDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [billActionId, setBillActionId] = useState(null)
+  const [sendingBillId, setSendingBillId] = useState(null)
   const [message, setMessage] = useState('')
   const [schedule, setSchedule] = useState([])
   const { user } = useSelector((state) => state.auth)
@@ -230,6 +232,27 @@ export default function PaymentDetailPage() {
       setMessage(error.response?.data?.detail || 'Failed to open bill.')
     } finally {
       setBillActionId(null)
+    }
+  }
+
+  const sendBill = async (installment) => {
+    if (sendingBillId) return
+    setSendingBillId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
+      const nextMessage = data.whatsapp_sent
+        ? `${installment.document_type_display || 'Document'} sent to ${payment.student_name}.`
+        : data.whatsapp_error || 'Bill send request failed.'
+      setMessage(nextMessage)
+      if (data.whatsapp_sent) toast.success(nextMessage)
+      else toast.error(nextMessage)
+    } catch (error) {
+      const nextMessage = error.response?.data?.detail || 'Failed to send bill.'
+      setMessage(nextMessage)
+      toast.error(nextMessage)
+    } finally {
+      setSendingBillId(null)
     }
   }
 
@@ -505,6 +528,14 @@ export default function PaymentDetailPage() {
                                   >
                                     Download {documentLabel}
                                   </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => sendBill(installment)}
+                                    disabled={billActionId === installment.id || sendingBillId === installment.id}
+                                    className="w-full whitespace-nowrap rounded-xl border border-cyan-200 bg-cyan-50 px-2 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
+                                  >
+                                    {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
+                                  </button>
                                 </>
                               ) : null}
                             </div>
@@ -586,6 +617,14 @@ export default function PaymentDetailPage() {
                               className="w-full whitespace-nowrap rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                             >
                               Download {documentLabel}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => sendBill(installment)}
+                              disabled={billActionId === installment.id || sendingBillId === installment.id}
+                              className="w-full whitespace-nowrap rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
+                            >
+                              {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
                             </button>
                           </>
                         ) : null}
