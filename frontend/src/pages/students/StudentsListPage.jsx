@@ -5,7 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
-import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
+import { OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function normaliseListResponse(data) {
@@ -45,7 +45,6 @@ export default function StudentsListPage() {
     search: '',
     enrolledFrom: '',
     enrolledTo: '',
-    importantOnly: false,
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -59,7 +58,7 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, filters.importantOnly, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
 
   const loadFilterOptions = async () => {
     try {
@@ -95,7 +94,6 @@ export default function StudentsListPage() {
       }
       if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
       if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
-      if (filters.importantOnly) params.important_only = true
 
       const { data } = await api.get('/enrollments/', { params })
       setRows(normaliseListResponse(data))
@@ -105,17 +103,6 @@ export default function StudentsListPage() {
       setMessage(apiErrorMessage(error, 'Failed to load students.'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  const toggleStudentImportant = async (row, nextValue) => {
-    setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
-    try {
-      const { data } = await api.post(`/enrollments/${row.id}/toggle-important/`, { is_important: nextValue })
-      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: data.is_important } : item))
-    } catch (error) {
-      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
-      setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
     }
   }
 
@@ -214,9 +201,6 @@ export default function StudentsListPage() {
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
             <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
           </label>
-          <div className="flex items-end">
-            <ImportantFilter checked={filters.importantOnly} onChange={(value) => setFilters((current) => ({ ...current, importantOnly: value }))} />
-          </div>
         </div>
       </section>
 
@@ -253,7 +237,7 @@ export default function StudentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'name', header: 'Student Name', width: 'minmax(160px,1.2fr)', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleStudentImportant(row, nextValue)} /><OwnerDot user={row.counselor_user} /><Link to={`/students/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'name', header: 'Student Name', width: 'minmax(160px,1.2fr)', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={`/students/${row.id}`} className="min-w-0 truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
                 { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{compactValue(row.course_name, 'Course pending')}</span> },
                 { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{compactValue(row.branch_name, 'No branch')}</span> },
                 { key: 'status', header: 'Status', width: '110px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{studentStatusLabel(row.status)}</StatusBadge> },

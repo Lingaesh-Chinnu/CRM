@@ -7,7 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
-import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
+import { OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
 function statusLabel(status) {
@@ -146,7 +146,6 @@ export default function PaymentsListPage() {
   const [duration, setDuration] = useState(searchParams.get('duration') || '')
   const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '')
   const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '')
-  const [importantOnly, setImportantOnly] = useState(searchParams.get('important_only') === 'true')
   const dueThisWeek = searchParams.get('due_this_week') || ''
   const debouncedSearch = useDebouncedValue(search.trim())
   const duePaymentsFilter = paymentStatus === 'due' || paymentStatus === 'pending_today'
@@ -207,7 +206,6 @@ export default function PaymentsListPage() {
       if (dateFrom) params.date_from = dateFrom
       if (dateTo) params.date_to = dateTo
     }
-    if (importantOnly) params.important_only = true
     if (debouncedSearch) params.search = debouncedSearch
 
     setLoading(true)
@@ -230,7 +228,7 @@ export default function PaymentsListPage() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, importantOnly, dueThisWeek, navigationMessage])
+  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek, navigationMessage])
 
   useEffect(() => {
     if (!reasonRequestId) return
@@ -244,7 +242,6 @@ export default function PaymentsListPage() {
     setCounselor('')
     setPaymentStatus('')
     setDuration('')
-    setImportantOnly(false)
     navigate('/payments')
   }
 
@@ -259,7 +256,6 @@ export default function PaymentsListPage() {
       if (dateFrom) nextParams.set('date_from', dateFrom)
       if (dateTo) nextParams.set('date_to', dateTo)
     }
-    if (importantOnly) nextParams.set('important_only', 'true')
     if (dueThisWeek && value) nextParams.set('due_this_week', dueThisWeek)
     if (value) nextParams.set('status', value)
     setPaymentStatus(value)
@@ -371,7 +367,6 @@ export default function PaymentsListPage() {
             ...(duration ? { duration } : {}),
             ...(duration === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
             ...(duration === 'custom' && dateTo ? { date_to: dateTo } : {}),
-            ...(importantOnly ? { important_only: true } : {}),
             ...(debouncedSearch ? { search: debouncedSearch } : {}),
           },
         })
@@ -408,17 +403,6 @@ export default function PaymentsListPage() {
     }
   }
 
-  const togglePaymentImportant = async (row, nextValue) => {
-    setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
-    try {
-      const { data } = await api.post(`/payments/${row.id}/toggle-important/`, { is_important: nextValue })
-      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: data.is_important } : item))
-    } catch (error) {
-      setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
-      setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
-    }
-  }
-
   const actionControls = (row, compact = false) => {
     const nextPending = nextPendingInstallment(row)
     const reason = nextPending ? activeReasonRequestFor(row, nextPending.index) : null
@@ -429,7 +413,7 @@ export default function PaymentsListPage() {
     const primaryClass = `${buttonClass} bg-slate-950 text-white disabled:opacity-60`
 
     if (isSuperAdmin) {
-      if (!nextPending || !['unpaid', 'partial'].includes(row.status)) {
+      if (!nextPending || Number(row.balance || 0) <= 0 || !['unpaid', 'partial', 'pending'].includes(row.status)) {
         return null
       }
       if (reason?.status === 'pending_response') {
@@ -600,7 +584,6 @@ export default function PaymentsListPage() {
               <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
             </>
           )}
-          <ImportantFilter checked={importantOnly} onChange={setImportantOnly} />
           {templates.length > 0 ? (
             <select
               value={selectedTemplate}
@@ -654,9 +637,8 @@ export default function PaymentsListPage() {
                   render: (row) => (
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
-                        <ImportantToggle active={!!row.is_important} onToggle={(nextValue) => togglePaymentImportant(row, nextValue)} />
                         <OwnerDot user={row.counselor_user} />
-                        <Link to={`/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                        <Link to={`/payments/${row.id}`} className="min-w-0 truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
                       </div>
                       <p className="mt-1 truncate text-xs text-slate-500">{row.student_phone || row.student_number || '-'}</p>
                     </div>
@@ -665,9 +647,9 @@ export default function PaymentsListPage() {
                 {
                   key: 'course',
                   header: 'Course',
-                  width: 'minmax(170px,1fr)',
+                  width: 'minmax(170px,220px)',
                   render: (row) => (
-                    <span className="block whitespace-normal break-words leading-5 text-slate-700 [overflow-wrap:anywhere]">
+                    <span className="block max-w-[220px] overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [overflow-wrap:anywhere] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
                       {row.course_name || '-'}
                     </span>
                   ),
