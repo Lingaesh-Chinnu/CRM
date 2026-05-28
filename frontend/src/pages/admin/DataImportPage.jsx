@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import { downloadExport } from '../../utils/exportData'
 
 const importTabs = [
   { value: 'leads', label: 'Leads' },
@@ -11,6 +12,28 @@ const importTabs = [
   { value: 'payments', label: 'Payments' },
 ]
 
+const exportTabs = [
+  { value: 'leads', label: 'Leads Export' },
+  { value: 'walkins', label: 'Walkins Export' },
+  { value: 'enrollments', label: 'Enrollments Export' },
+  { value: 'students', label: 'Students Export' },
+  { value: 'payments', label: 'Payments Export' },
+  { value: 'courses', label: 'Courses Export' },
+  { value: 'users', label: 'Users Report Export' },
+]
+
+const periodOptions = [
+  { value: 'today', label: 'Today' },
+  { value: 'last_7_days', label: 'Last 7 Days' },
+  { value: 'last_1_month', label: 'Last 1 Month' },
+  { value: 'last_3_months', label: 'Last 3 Months' },
+  { value: 'last_6_months', label: 'Last 6 Months' },
+  { value: 'last_1_year', label: 'Last 1 Year' },
+  { value: 'last_2_years', label: 'Last 2 Years' },
+  { value: 'last_3_years', label: 'Last 3 Years' },
+  { value: 'custom', label: 'Custom Date Range' },
+]
+
 function statusClass(status) {
   if (status === 'matched') return 'text-emerald-700 bg-emerald-50 border-emerald-200'
   if (status === 'missing') return 'text-rose-700 bg-rose-50 border-rose-200'
@@ -18,8 +41,19 @@ function statusClass(status) {
 }
 
 export default function DataImportPage() {
+  const [section, setSection] = useState('import')
   const [history, setHistory] = useState([])
   const [importType, setImportType] = useState('leads')
+  const [exportType, setExportType] = useState('leads')
+  const [period, setPeriod] = useState('last_1_month')
+  const [branch, setBranch] = useState('')
+  const [user, setUser] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [branches, setBranches] = useState([])
+  const [users, setUsers] = useState([])
+  const [exportPreview, setExportPreview] = useState(null)
+  const [exportLoading, setExportLoading] = useState(false)
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [importSummary, setImportSummary] = useState(null)
@@ -27,12 +61,54 @@ export default function DataImportPage() {
   const [message, setMessage] = useState('')
 
   useEffect(() => {
-    api.get('/admin-data-import/')
-      .then(({ data }) => {
-        setHistory(data.history || [])
+    Promise.all([
+      api.get('/admin-data-import/'),
+      api.get('/branches/').catch(() => ({ data: [] })),
+      api.get('/leads/staff-options/').catch(() => ({ data: [] })),
+    ])
+      .then(([importRes, branchesRes, usersRes]) => {
+        setHistory(importRes.data.history || [])
+        setBranches(branchesRes.data.results || branchesRes.data || [])
+        setUsers(usersRes.data.results || usersRes.data || [])
       })
-      .catch((error) => setMessage(apiErrorMessage(error, 'Failed to load import setup.')))
+      .catch((error) => setMessage(apiErrorMessage(error, 'Failed to load Data House setup.')))
   }, [])
+
+  const exportParams = (download = false) => ({
+    type: exportType,
+    period,
+    ...(branch ? { branch } : {}),
+    ...(user ? { user } : {}),
+    ...(period === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
+    ...(period === 'custom' && dateTo ? { date_to: dateTo } : {}),
+    ...(download ? { download: 1 } : {}),
+  })
+
+  const previewExport = async () => {
+    setExportLoading(true)
+    setMessage('')
+    try {
+      const { data } = await api.get('/admin-data-export/', { params: exportParams(false) })
+      setExportPreview(data)
+    } catch (error) {
+      setExportPreview(null)
+      setMessage(apiErrorMessage(error, 'Failed to preview export data.'))
+    } finally {
+      setExportLoading(false)
+    }
+  }
+
+  const downloadDataExport = async () => {
+    setExportLoading(true)
+    setMessage('')
+    try {
+      await downloadExport('/admin-data-export/', exportParams(true), `${exportType}.xlsx`)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to download export.'))
+    } finally {
+      setExportLoading(false)
+    }
+  }
 
   const previewImport = async (event) => {
     event.preventDefault()
@@ -109,9 +185,27 @@ export default function DataImportPage() {
   return (
     <div className="space-y-5">
       <section className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-        <h1 className="text-3xl font-black tracking-tight text-slate-950">Data Import</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Admin</p>
+        <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Data House</h1>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {[
+            ['import', 'Import Data'],
+            ['export', 'Export Data'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setSection(value)}
+              className={`rounded-2xl px-4 py-3 text-sm font-semibold ${section === value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </section>
 
+      {section === 'import' && (
+      <>
       <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
         <div className="flex flex-wrap gap-2">
           {importTabs.map((tab) => (
@@ -288,7 +382,112 @@ export default function DataImportPage() {
           </div>
         )}
       </section>
+      </>
+      )}
 
+      {section === 'export' && (
+        <section className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+          <div className="flex flex-wrap gap-2">
+            {exportTabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => {
+                  setExportType(tab.value)
+                  setExportPreview(null)
+                }}
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold ${exportType === tab.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <label>
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date Filter</span>
+              <select value={period} onChange={(event) => { setPeriod(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+                {periodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Branch</span>
+              <select value={branch} onChange={(event) => { setBranch(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+                <option value="">All branches</option>
+                {branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">User / Counselor</span>
+              <select value={user} onChange={(event) => { setUser(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+                <option value="">All users</option>
+                {users.map((item) => <option key={item.id} value={item.id}>{item.name || item.full_name || item.username}</option>)}
+              </select>
+            </label>
+            <div className="flex items-end gap-3">
+              <button type="button" onClick={previewExport} disabled={exportLoading} className="min-h-[48px] rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+                {exportLoading ? 'Loading...' : 'Preview'}
+              </button>
+              <button type="button" onClick={downloadDataExport} disabled={exportLoading} className="min-h-[48px] rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+                Download Excel
+              </button>
+            </div>
+            {period === 'custom' && (
+              <>
+                <label>
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
+                  <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+                </label>
+                <label>
+                  <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
+                  <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+                </label>
+              </>
+            )}
+          </div>
+
+          {message && <p className="mt-5 text-sm font-semibold text-slate-600">{message}</p>}
+
+          {exportPreview && (
+            <div className="mt-6">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-black tracking-tight text-slate-950">{exportPreview.label}</h2>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">
+                    Showing {exportPreview.rows.length} of {exportPreview.total} {exportPreview.label}
+                  </p>
+                </div>
+                <p className="text-sm text-slate-500">
+                  {exportPreview.filters.branch} / {exportPreview.filters.user} / {exportPreview.filters.period}
+                </p>
+              </div>
+              <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      {exportPreview.headers.slice(0, 8).map((header) => <th key={header} className="px-4 py-3">{header}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {exportPreview.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.slice(0, 8).map((value, index) => <td key={index} className="px-4 py-3">{value || '-'}</td>)}
+                      </tr>
+                    ))}
+                    {exportPreview.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={Math.min(exportPreview.headers.length, 8)} className="px-4 py-8 text-center text-slate-500">No records match these filters.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {section === 'import' && (
       <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <h2 className="text-xl font-black tracking-tight text-slate-950">Import History</h2>
         <div className="mt-5 overflow-x-auto">
@@ -325,6 +524,7 @@ export default function DataImportPage() {
           </table>
         </div>
       </section>
+      )}
     </div>
   )
 }

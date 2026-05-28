@@ -5,7 +5,6 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
-import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
@@ -49,7 +48,6 @@ export default function StudentsListPage() {
     importantOnly: false,
   })
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState('')
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -110,18 +108,6 @@ export default function StudentsListPage() {
     }
   }
 
-  const studentQueryParams = (format) => {
-    const params = { format, kind: 'students' }
-    if (isSuperAdmin && filters.branch) params.branch = filters.branch
-    if (filters.course) params.course = filters.course
-    if (filters.status) params.status = filters.status
-    if (debouncedSearch) params.search = debouncedSearch
-    if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
-    if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
-    if (filters.importantOnly) params.important_only = true
-    return params
-  }
-
   const toggleStudentImportant = async (row, nextValue) => {
     setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
     try {
@@ -130,18 +116,6 @@ export default function StudentsListPage() {
     } catch (error) {
       setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
       setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
-    }
-  }
-
-  const exportStudents = async (format) => {
-    setExporting(true)
-    setMessage('')
-    try {
-      await downloadExport('/students/export/', studentQueryParams(format), `students-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to export students.'))
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -267,7 +241,6 @@ export default function StudentsListPage() {
               />
               <TeamColorLegend users={rows.map((row) => row.counselor_user)} />
             </div>
-            <ExportMenu onExport={exportStudents} exporting={exporting} />
           </div>
         </div>
 

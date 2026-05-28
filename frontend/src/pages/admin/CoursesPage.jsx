@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
-import { downloadExport, ExportMenu } from '../../utils/exportData'
 
 const initialForm = {
   name: '',
@@ -40,7 +39,6 @@ export default function CoursesPage() {
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const [courseSearch, setCourseSearch] = useState('')
 
   const normalizedCourseSearch = courseSearch.trim().toLowerCase()
@@ -126,21 +124,6 @@ export default function CoursesPage() {
     }
   }
 
-  const exportCourses = async (format) => {
-    setExporting(true)
-    setMessage('')
-    try {
-      const params = { format }
-      if (canManageCourses) params.include_inactive = 1
-      if (courseSearch.trim()) params.search = courseSearch.trim()
-      await downloadExport('/courses/export/', params, `courses-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to export courses.'))
-    } finally {
-      setExporting(false)
-    }
-  }
-
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -198,7 +181,6 @@ export default function CoursesPage() {
               <div className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
                 {visibleCourses.length} Courses
               </div>
-              <ExportMenu onExport={exportCourses} exporting={exporting} />
             </div>
           </div>
 

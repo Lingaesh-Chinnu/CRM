@@ -1943,6 +1943,8 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         queryset = self.filter_queryset(self.get_queryset())
         headers = ['Course Name', 'Duration Months', 'Actual Fees', 'Discount Amount', 'Final Fees', 'Status']
         rows = [
@@ -2236,6 +2238,8 @@ class LeadViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         queryset = self.filter_queryset(self.get_queryset())
         headers = [
             'Lead Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
@@ -4148,6 +4152,194 @@ class AdminDataImportTemplateView(APIView):
         return response
 
 
+DATA_EXPORT_TYPES = {
+    'leads': 'Leads',
+    'walkins': 'Walkins',
+    'enrollments': 'Enrollments',
+    'students': 'Students',
+    'payments': 'Payments',
+    'courses': 'Courses',
+    'users': 'Users Report',
+}
+
+
+def add_months(value, months):
+    month = value.month + months
+    year = value.year + (month - 1) // 12
+    month = ((month - 1) % 12) + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def data_export_date_bounds(period, date_from=None, date_to=None):
+    today = timezone.localdate()
+    if period == 'today':
+        return today, today
+    if period == 'last_7_days':
+        return today - timedelta(days=6), today
+    if period == 'last_1_month':
+        return add_months(today, -1), today
+    if period == 'last_3_months':
+        return add_months(today, -3), today
+    if period == 'last_6_months':
+        return add_months(today, -6), today
+    if period == 'last_1_year':
+        return today.replace(year=today.year - 1), today
+    if period == 'last_2_years':
+        return today.replace(year=today.year - 2), today
+    if period == 'last_3_years':
+        return today.replace(year=today.year - 3), today
+    if period == 'custom':
+        return parse_date(date_from or ''), parse_date(date_to or '')
+    return None, None
+
+
+def filter_by_date_range(queryset, field_name, start_date, end_date, is_datetime=False):
+    if start_date:
+        lookup = f'{field_name}__date__gte' if is_datetime else f'{field_name}__gte'
+        queryset = queryset.filter(**{lookup: start_date})
+    if end_date:
+        lookup = f'{field_name}__date__lte' if is_datetime else f'{field_name}__lte'
+        queryset = queryset.filter(**{lookup: end_date})
+    return queryset
+
+
+def data_export_filename(export_type, period, branch_id=None):
+    parts = [export_type]
+    if branch_id:
+        branch = Branch.objects.filter(pk=branch_id).first()
+        if branch:
+            parts.append(branch.name.lower().replace(' ', '_'))
+    parts.append(period or timezone.localdate().strftime('%b_%Y').lower())
+    return '_'.join(parts).replace('-', '_')
+
+
+class AdminDataExportView(APIView):
+    permission_classes = [IsSuperAdmin]
+
+    def get(self, request):
+        export_type = request.query_params.get('type') or 'leads'
+        if export_type not in DATA_EXPORT_TYPES:
+            return Response({'detail': 'Select a valid export type.'}, status=400)
+        if request.query_params.get('download') in ('1', 'true'):
+            headers, rows = self.export_rows(request, export_type)
+            filename = data_export_filename(export_type, request.query_params.get('period') or '', request.query_params.get('branch') or '')
+            return export_tabular_response(filename, headers, rows, 'xlsx')
+        headers, rows = self.export_rows(request, export_type)
+        return Response({
+            'type': export_type,
+            'label': DATA_EXPORT_TYPES[export_type],
+            'headers': headers,
+            'rows': rows[:10],
+            'total': len(rows),
+            'filters': self.filter_summary(request),
+        })
+
+    def filter_summary(self, request):
+        period = request.query_params.get('period') or ''
+        branch_id = request.query_params.get('branch') or ''
+        user_id = request.query_params.get('user') or ''
+        branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+        user = User.objects.filter(pk=user_id).first() if user_id else None
+        start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
+        return {
+            'period': (period or 'all_dates').replace('_', ' ').title(),
+            'date_from': start_date,
+            'date_to': end_date,
+            'branch': branch.name if branch else 'All branches',
+            'user': user.full_name if user else 'All users',
+        }
+
+    def filtered_queryset(self, request, export_type):
+        branch_id = request.query_params.get('branch') or ''
+        user_id = request.query_params.get('user') or ''
+        start_date, end_date = data_export_date_bounds(
+            request.query_params.get('period') or '',
+            request.query_params.get('date_from') or '',
+            request.query_params.get('date_to') or '',
+        )
+        if export_type == 'leads':
+            qs = visible_candidate_queryset(Lead.objects.select_related('branch', 'course', 'assigned_to', 'created_by'))
+            qs = filter_by_date_range(qs, 'created_at', start_date, end_date, is_datetime=True)
+            if branch_id:
+                qs = qs.filter(branch_id=branch_id)
+            if user_id:
+                qs = qs.filter(Q(assigned_to_id=user_id) | Q(created_by_id=user_id))
+            return qs.order_by('-created_at')
+        if export_type == 'walkins':
+            qs = visible_candidate_queryset(WalkIn.objects.select_related('branch', 'course', 'assigned_to', 'created_by'))
+            qs = filter_by_date_range(qs, 'visit_date', start_date, end_date)
+            if branch_id:
+                qs = qs.filter(branch_id=branch_id)
+            if user_id:
+                qs = qs.filter(Q(assigned_to_id=user_id) | Q(created_by_id=user_id))
+            return qs.order_by('-visit_date', '-created_at')
+        if export_type in ('enrollments', 'students'):
+            qs = visible_candidate_queryset(Enrollment.objects.select_related('branch', 'course', 'enrolled_by', 'created_by', 'payment'))
+            qs = filter_by_date_range(qs, 'enrollment_date', start_date, end_date)
+            if export_type == 'students':
+                qs = qs.filter(status__in=Enrollment.FINAL_STATUSES)
+            if branch_id:
+                qs = qs.filter(branch_id=branch_id)
+            if user_id:
+                qs = qs.filter(Q(enrolled_by_id=user_id) | Q(created_by_id=user_id))
+            return qs.order_by('-enrollment_date', '-created_at')
+        if export_type == 'payments':
+            qs = visible_payment_queryset(Payment.objects.select_related('enrollment__branch', 'enrollment__course', 'enrollment__enrolled_by'))
+            qs = filter_by_date_range(qs, 'created_at', start_date, end_date, is_datetime=True)
+            if branch_id:
+                qs = qs.filter(enrollment__branch_id=branch_id)
+            if user_id:
+                qs = qs.filter(Q(enrollment__enrolled_by_id=user_id) | Q(installments__collected_by_id=user_id)).distinct()
+            return qs.order_by('-created_at')
+        if export_type == 'courses':
+            return Course.objects.all().order_by('name')
+        qs = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch').order_by('first_name', 'username')
+        if branch_id:
+            qs = qs.filter(branch_id=branch_id)
+        if user_id:
+            qs = qs.filter(id=user_id)
+        return qs
+
+    def export_rows(self, request, export_type):
+        queryset = self.filtered_queryset(request, export_type)
+        if export_type == 'leads':
+            headers = ['Lead Number', 'Name', 'Phone', 'Course', 'Branch', 'Status', 'Source', 'Follow Up Date', 'Counselor', 'Created At']
+            return headers, [[lead.lead_number, lead.name, lead.phone, lead.course.name if lead.course else '', lead.branch.name if lead.branch else '', automated_lead_status_display(lead), lead.get_source_display() if lead.source else '', lead.next_follow_up_date, lead.assigned_to.full_name if lead.assigned_to else '', lead.created_at] for lead in queryset]
+        if export_type == 'walkins':
+            headers = ['Walk-in Number', 'Name', 'Phone', 'Course', 'Branch', 'Status', 'Visit Date', 'Follow Up Date', 'Counselor', 'Created At']
+            return headers, [[walkin.candidate_number, walkin.name, walkin.phone, walkin.course.name if walkin.course else '', walkin.branch.name if walkin.branch else '', automated_walkin_status_display(walkin), walkin.visit_date, walkin.follow_up_date, walkin.assigned_to.full_name if walkin.assigned_to else '', walkin.created_at] for walkin in queryset]
+        if export_type in ('enrollments', 'students'):
+            headers = ['Student ID', 'Name', 'Phone', 'Course', 'Branch', 'Enrollment Date', 'Start Date', 'Payable Fee', 'Paid Amount', 'Balance', 'Counselor', 'Status']
+            rows = []
+            for enrollment in queryset:
+                payment = getattr(enrollment, 'payment', None)
+                rows.append([enrollment.student_number, enrollment.name, enrollment.phone, enrollment.course.name if enrollment.course else '', enrollment.branch.name if enrollment.branch else '', enrollment.enrollment_date, enrollment.start_date, enrollment_payable_fee(enrollment), payment.paid_amount if payment else '', payment.balance if payment else '', enrollment.enrolled_by.full_name if enrollment.enrolled_by else '', enrollment.get_status_display()])
+            return headers, rows
+        if export_type == 'payments':
+            headers = ['Student ID', 'Student Name', 'Course', 'Branch', 'Total Fees', 'Paid Amount', 'Balance', 'Next Payment Date', 'Status', 'Counselor']
+            return headers, [[payment.enrollment.student_number, payment.enrollment.name, payment.enrollment.course.name if payment.enrollment.course else '', payment.enrollment.branch.name if payment.enrollment.branch else '', payment.total_fees, payment.paid_amount, payment.balance, payment.next_payment_date, payment.get_status_display(), payment.enrollment.enrolled_by.full_name if payment.enrollment.enrolled_by else ''] for payment in queryset]
+        if export_type == 'courses':
+            headers = ['Course Name', 'Duration Months', 'Actual Fees', 'Discount Amount', 'Final Fees', 'Status']
+            return headers, [[course.name, course.duration_months, course.actual_fees, course.discount_amount, course.final_fees, 'Active' if course.is_active else 'Inactive'] for course in queryset]
+        return self.user_report_rows(request, queryset)
+
+    def user_report_rows(self, request, users):
+        start_date, end_date = data_export_date_bounds(request.query_params.get('period') or '', request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
+        headers = ['User', 'Branch', 'Leads Handled', 'Walkins Handled', 'Conversions', 'Enrollments', 'Payments Collected', 'Pending Followups']
+        rows = []
+        for user in users:
+            leads = filter_by_date_range(visible_candidate_queryset(Lead.objects.filter(Q(assigned_to=user) | Q(created_by=user))), 'created_at', start_date, end_date, is_datetime=True)
+            walkins = filter_by_date_range(visible_candidate_queryset(WalkIn.objects.filter(Q(assigned_to=user) | Q(created_by=user))), 'visit_date', start_date, end_date)
+            enrollments = filter_by_date_range(visible_candidate_queryset(Enrollment.objects.filter(Q(enrolled_by=user) | Q(created_by=user))), 'enrollment_date', start_date, end_date)
+            installments = filter_by_date_range(PaymentInstallment.objects.filter(collected_by=user), 'payment_date', start_date, end_date)
+            pending_leads = pending_follow_up_queryset(leads, FollowUp.RecordType.LEAD, 'next_follow_up_date', LEAD_CLOSED_FOLLOW_UP_STATUSES).exclude(next_follow_up_date__isnull=True).count()
+            pending_walkins = pending_follow_up_queryset(walkins, FollowUp.RecordType.WALKIN, 'follow_up_date', WALKIN_CLOSED_FOLLOW_UP_STATUSES).exclude(follow_up_date__isnull=True).count()
+            conversions = leads.filter(converted_to_type__in=['walkin', 'enrollment']).count() + walkins.filter(converted_to_type='enrollment').count()
+            rows.append([user.full_name, user.branch.name if user.branch else '', leads.count(), walkins.count(), conversions, enrollments.count(), installments.aggregate(total=Sum('amount'))['total'] or 0, pending_leads + pending_walkins])
+        return headers, rows
+
+
 class ExternalLeadCaptureView(APIView):
     """Public/API endpoint for auto-captured leads. Leads remain unassigned for admin review."""
     permission_classes = [AllowAny]
@@ -4819,6 +5011,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         queryset = self.filter_queryset(self.get_queryset())
         headers = [
             'Walk-in Number', 'Name', 'Phone', 'Course', 'Branch', 'Source', 'Status',
@@ -5763,6 +5957,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         queryset = self.filter_queryset(self.get_queryset())
         export_kind = request.query_params.get('kind') or 'enrollments'
         headers = [
@@ -6912,6 +7108,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         if requested_export_format(request) == 'csv':
             return self._export_csv()
         try:
@@ -8554,6 +8752,8 @@ class ExportLeadsExcelView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
     def get(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             import openpyxl
         except ImportError:
@@ -8603,6 +8803,8 @@ class ExportEnrollmentsExcelView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
     def get(self, request):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can export data.'}, status=status.HTTP_403_FORBIDDEN)
         try:
             import openpyxl
         except ImportError:

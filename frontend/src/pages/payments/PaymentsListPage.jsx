@@ -7,7 +7,6 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
-import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
@@ -131,7 +130,6 @@ export default function PaymentsListPage() {
   const [templates, setTemplates] = useState([])
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState(navigationMessage)
   const [sendingId, setSendingId] = useState(null)
   const [reasonRequest, setReasonRequest] = useState(null)
@@ -410,31 +408,6 @@ export default function PaymentsListPage() {
     }
   }
 
-  const exportWorksheet = async (format) => {
-    setExporting(true)
-    setMessage('')
-    try {
-      const params = { format }
-      if (!duration) params.month = month
-      if (paymentStatus) params.status = paymentStatus
-      if (dueThisWeek) params.due_this_week = dueThisWeek
-      if (isSuperAdmin && branch) params.branch = branch
-      if (counselor) params.user = counselor
-      if (duration) params.duration = duration
-      if (duration === 'custom') {
-        if (dateFrom) params.date_from = dateFrom
-        if (dateTo) params.date_to = dateTo
-      }
-      if (importantOnly) params.important_only = true
-      if (debouncedSearch) params.search = debouncedSearch
-      await downloadExport('/payments/export/', params, `payment-worksheet-${month}.${format === 'csv' ? 'csv' : 'xlsx'}`)
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to export payment worksheet.'))
-    } finally {
-      setExporting(false)
-    }
-  }
-
   const togglePaymentImportant = async (row, nextValue) => {
     setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
     try {
@@ -530,7 +503,6 @@ export default function PaymentsListPage() {
               </div>
             )}
           </div>
-          <ExportMenu onExport={exportWorksheet} exporting={exporting} />
         </div>
       </section>
 

@@ -5,7 +5,6 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
-import { downloadExport, ExportMenu } from '../../utils/exportData'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
@@ -94,7 +93,6 @@ export default function EnrollmentsListPage() {
     importantOnly: false,
   })
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
   const [message, setMessage] = useState('')
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
@@ -155,18 +153,6 @@ export default function EnrollmentsListPage() {
     }
   }
 
-  const enrollmentQueryParams = (format) => {
-    const params = { format, kind: 'enrollments' }
-    if (isSuperAdmin && filters.branch) params.branch = filters.branch
-    if (filters.course) params.course = filters.course
-    if (filters.status) params.status = filters.status
-    if (debouncedSearch) params.search = debouncedSearch
-    if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
-    if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
-    if (filters.importantOnly) params.important_only = true
-    return params
-  }
-
   const toggleEnrollmentImportant = async (row, nextValue) => {
     setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: nextValue } : item))
     try {
@@ -175,18 +161,6 @@ export default function EnrollmentsListPage() {
     } catch (error) {
       setRows((current) => current.map((item) => item.id === row.id ? { ...item, is_important: !nextValue } : item))
       setMessage(apiErrorMessage(error, 'Failed to update important flag.'))
-    }
-  }
-
-  const exportEnrollments = async (format) => {
-    setExporting(true)
-    setMessage('')
-    try {
-      await downloadExport('/enrollments/export/', enrollmentQueryParams(format), `enrollments-export.${format === 'csv' ? 'csv' : 'xlsx'}`)
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to export enrollments.'))
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -313,7 +287,6 @@ export default function EnrollmentsListPage() {
               onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
               className="justify-end"
             />
-            <ExportMenu onExport={exportEnrollments} exporting={exporting} />
           </div>
         </div>
 
