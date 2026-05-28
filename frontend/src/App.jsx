@@ -93,6 +93,7 @@ export default function App() {
       <Route path="/public/walkin"     element={<PublicWalkInForm />} />
       <Route path="/lead-form"         element={<PublicLeadForm />} />
       <Route path="/public/lead-form"  element={<PublicLeadForm />} />
+      <Route path="/public-lead-form"  element={<PublicLeadForm />} />
       <Route path="/IIE-Rules-Regulations/:token" element={<RulesSigningPage />} />
       <Route path="/rules-sign/:token" element={<RulesSigningPage />} />
 
