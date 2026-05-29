@@ -4,8 +4,9 @@ from django.utils import timezone
 from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
+from datetime import timedelta
 
-from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, RulesSigningRequest, WalkIn
+from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn
 
 
 User = get_user_model()
@@ -118,6 +119,13 @@ class PaymentScheduleSyncTests(APITestCase):
             email='schedule-admin@example.com',
             password='pass12345',
         )
+        self.staff = User.objects.create_user(
+            username='schedule-staff',
+            email='schedule-staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
         self.enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -130,6 +138,8 @@ class PaymentScheduleSyncTests(APITestCase):
             email='schedule@example.com',
             enrollment_date='2026-05-01',
             start_date='2026-05-15',
+            enrolled_by=self.staff,
+            created_by=self.staff,
             status=Enrollment.Status.ENROLLED,
         )
         self.payment = Payment.objects.create(
@@ -185,6 +195,44 @@ class PaymentScheduleSyncTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.total_fees, Decimal('42900.00'))
+
+    def test_payment_reason_conversation_tracks_admin_and_staff_messages(self):
+        self.client.force_authenticate(self.admin)
+
+        create_response = self.client.post('/api/payment-reason-requests/', {
+            'payment': self.payment.id,
+            'installment_index': 2,
+            'message': 'Why is payment pending?',
+        }, format='json')
+
+        self.assertEqual(create_response.status_code, 201)
+        reason_request = PaymentReasonRequest.objects.get()
+        self.assertEqual(reason_request.branch_staff, self.staff)
+        self.assertEqual(PaymentReasonMessage.objects.count(), 1)
+        self.assertEqual(create_response.data['messages'][0]['message'], 'Why is payment pending?')
+
+        self.client.force_authenticate(self.staff)
+        promised_date = (timezone.localdate() + timedelta(days=7)).isoformat()
+        reply_response = self.client.post(f'/api/payment-reason-requests/{reason_request.id}/messages/', {
+            'message': 'Student requested salary delay.',
+            'promised_payment_date': promised_date,
+        }, format='json')
+
+        self.assertEqual(reply_response.status_code, 200)
+        reason_request.refresh_from_db()
+        self.assertEqual(reason_request.status, PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL)
+        self.assertEqual(reason_request.staff_response, 'Student requested salary delay.')
+        self.assertEqual(str(reason_request.promised_payment_date), promised_date)
+        self.assertEqual(len(reply_response.data['messages']), 2)
+
+        self.client.force_authenticate(self.admin)
+        followup_response = self.client.post(f'/api/payment-reason-requests/{reason_request.id}/messages/', {
+            'message': 'Okay, approved till promised date.',
+        }, format='json')
+
+        self.assertEqual(followup_response.status_code, 200)
+        self.assertEqual(len(followup_response.data['messages']), 3)
+        self.assertEqual(followup_response.data['messages'][-1]['sender_role'], 'admin')
 
 
 @override_settings(

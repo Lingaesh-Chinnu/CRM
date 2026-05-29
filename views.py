@@ -76,7 +76,7 @@ from crm.models import (
     RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
-    PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
+    PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
     get_default_installment_schedule, get_enrollment_installment_schedule, normalize_installment_schedule,
@@ -6789,7 +6789,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             'payment__enrollment__course',
             'admin_user',
             'branch_staff',
-        ).order_by('-created_at')
+        ).prefetch_related('messages__sender').order_by('-created_at')
         user = self.request.user
         if user.is_super_admin:
             return queryset
@@ -6817,6 +6817,46 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             is_active=True,
         ).exclude(role=User.Role.SUPER_ADMIN).order_by('first_name', 'last_name', 'username').first()
 
+    def _serialize(self, reason_request, status_code=200):
+        reason_request = PaymentReasonRequest.objects.select_related(
+            'payment__enrollment__branch',
+            'payment__enrollment__course',
+            'admin_user',
+            'branch_staff',
+        ).prefetch_related('messages__sender').get(pk=reason_request.pk)
+        return Response(PaymentReasonRequestSerializer(reason_request).data, status=status_code)
+
+    def _message_role(self, user):
+        return PaymentReasonMessage.SenderRole.ADMIN if user.is_super_admin else PaymentReasonMessage.SenderRole.USER
+
+    def _append_message(self, reason_request, user, message, promised_payment_date=None, sender_role=None):
+        return PaymentReasonMessage.objects.create(
+            reason_request=reason_request,
+            sender=user,
+            sender_role=sender_role or self._message_role(user),
+            message=str(message or '').strip(),
+            status=reason_request.status,
+            promised_payment_date=promised_payment_date,
+        )
+
+    def _notify_conversation_target(self, reason_request, sender):
+        if sender.is_super_admin:
+            create_user_notification(
+                reason_request.branch_staff,
+                'Payment Reason Conversation',
+                'Admin sent a payment reason message.',
+                Notification.NType.INFO,
+                f'/payments?reason_request={reason_request.id}',
+            )
+            return
+        create_user_notification(
+            reason_request.admin_user,
+            'Payment Reason Conversation',
+            f'{sender.full_name or sender.username} replied in payment reason conversation.',
+            Notification.NType.INFO,
+            f'/payments?reason_request={reason_request.id}',
+        )
+
     def create(self, request, *args, **kwargs):
         if not request.user.is_super_admin:
             return Response({'detail': 'Only admin can request a pending payment reason.'}, status=403)
@@ -6838,9 +6878,13 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             payment=payment,
             installment_index=installment_index,
             status__in=self.ACTIVE_STATUSES,
-        ).first()
+        ).prefetch_related('messages__sender').first()
         if existing:
-            return Response(PaymentReasonRequestSerializer(existing).data, status=200)
+            message = str(request.data.get('message') or request.data.get('question') or '').strip()
+            if message:
+                self._append_message(existing, request.user, message)
+                self._notify_conversation_target(existing, request.user)
+            return self._serialize(existing, status_code=200)
         branch_staff = self._assigned_branch_staff(payment)
         if not branch_staff:
             return Response({'detail': 'No active branch staff user found for this payment.'}, status=400)
@@ -6851,8 +6895,9 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             installment_due_date=parse_date(installment.get('due_date')) if isinstance(installment.get('due_date'), str) else installment.get('due_date'),
             admin_user=request.user,
             branch_staff=branch_staff,
-            question='Why is this payment still pending?',
+            question=str(request.data.get('message') or request.data.get('question') or 'Why is this payment still pending?').strip() or 'Why is this payment still pending?',
         )
+        self._append_message(reason_request, request.user, reason_request.question)
         create_user_notification(
             branch_staff,
             'Payment Reason Requested',
@@ -6860,7 +6905,52 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             Notification.NType.WARNING,
             f'/payments?reason_request={reason_request.id}',
         )
-        return Response(PaymentReasonRequestSerializer(reason_request).data, status=201)
+        return self._serialize(reason_request, status_code=201)
+
+    @action(detail=True, methods=['post'], url_path='messages')
+    def messages(self, request, pk=None):
+        reason_request = self.get_object()
+        if not (request.user.is_super_admin or reason_request.branch_staff_id == request.user.id):
+            return Response({'detail': 'You do not have access to this conversation.'}, status=403)
+        message = str(request.data.get('message') or request.data.get('staff_response') or '').strip()
+        if not message:
+            return Response({'message': 'Message is required.'}, status=400)
+
+        promised_payment_date = None
+        raw_promised_date = str(request.data.get('promised_payment_date') or '').strip()
+        if raw_promised_date:
+            promised_payment_date = parse_date(raw_promised_date)
+            if not promised_payment_date:
+                return Response({'promised_payment_date': 'Enter a valid promised payment date.'}, status=400)
+            if promised_payment_date < timezone.localdate():
+                return Response({'promised_payment_date': 'Promised Payment Date cannot be in the past.'}, status=400)
+
+        update_fields = ['updated_at']
+        if not request.user.is_super_admin:
+            if reason_request.status == PaymentReasonRequest.Status.PENDING_RESPONSE and not promised_payment_date:
+                return Response({'promised_payment_date': 'Promised Payment Date is required.'}, status=400)
+            if reason_request.status == PaymentReasonRequest.Status.PENDING_RESPONSE:
+                reason_request.status = PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL
+                reason_request.responded_at = timezone.now()
+                update_fields += ['status', 'responded_at']
+            if not reason_request.staff_response:
+                reason_request.staff_response = message
+                update_fields.append('staff_response')
+            if promised_payment_date:
+                reason_request.promised_payment_date = promised_payment_date
+                update_fields.append('promised_payment_date')
+            reason_request.save(update_fields=list(dict.fromkeys(update_fields)))
+            resolve_notifications(Notification.objects.filter(
+                user=request.user,
+                title='Payment Reason Requested',
+                related_url=f'/payments?reason_request={reason_request.id}',
+            ))
+        else:
+            reason_request.save(update_fields=['updated_at'])
+
+        self._append_message(reason_request, request.user, message, promised_payment_date)
+        self._notify_conversation_target(reason_request, request.user)
+        return self._serialize(reason_request)
 
     @action(detail=True, methods=['post'], url_path='respond')
     def respond(self, request, pk=None):
@@ -6884,6 +6974,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
         reason_request.save(update_fields=[
             'staff_response', 'promised_payment_date', 'status', 'responded_at', 'updated_at',
         ])
+        self._append_message(reason_request, request.user, response_text, promised_payment_date)
         resolve_notifications(Notification.objects.filter(
             user=request.user,
             title='Payment Reason Requested',
@@ -6896,7 +6987,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             Notification.NType.INFO,
             f'/payments?reason_request={reason_request.id}',
         )
-        return Response(PaymentReasonRequestSerializer(reason_request).data)
+        return self._serialize(reason_request)
 
     @action(detail=True, methods=['post'], url_path='mark-resolved')
     def mark_resolved(self, request, pk=None):
@@ -6913,6 +7004,11 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
         reason_request.status = PaymentReasonRequest.Status.RESOLVED
         reason_request.resolved_at = timezone.now()
         reason_request.save(update_fields=['status', 'resolved_at', 'updated_at'])
+        self._append_message(
+            reason_request,
+            request.user,
+            str(request.data.get('message') or 'Marked resolved.').strip() or 'Marked resolved.',
+        )
         mark_notifications_terminal(
             Notification.objects.filter(
                 related_url=f'/payments?reason_request={reason_request.id}',
@@ -6926,7 +7022,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             Notification.NType.SUCCESS,
             f'/payments?reason_request={reason_request.id}',
         )
-        return Response(PaymentReasonRequestSerializer(reason_request).data)
+        return self._serialize(reason_request)
 
     def _update_requested_due_date(self, reason_request):
         payment = reason_request.payment
@@ -6955,6 +7051,11 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
         reason_request.status = PaymentReasonRequest.Status.APPROVED
         reason_request.approved_at = timezone.now()
         reason_request.save(update_fields=['status', 'approved_at', 'updated_at'])
+        self._append_message(
+            reason_request,
+            request.user,
+            str(request.data.get('message') or 'Approved promise.').strip() or 'Approved promise.',
+        )
         mark_notifications_terminal(
             Notification.objects.filter(
                 user=reason_request.admin_user,
@@ -6963,7 +7064,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             ),
             Notification.Status.APPROVED,
         )
-        return Response(PaymentReasonRequestSerializer(reason_request).data)
+        return self._serialize(reason_request)
 
     @action(detail=True, methods=['post'], url_path='reject')
     def reject(self, request, pk=None):
@@ -6975,6 +7076,11 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
         reason_request.status = PaymentReasonRequest.Status.REJECTED
         reason_request.rejected_at = timezone.now()
         reason_request.save(update_fields=['status', 'rejected_at', 'updated_at'])
+        self._append_message(
+            reason_request,
+            request.user,
+            str(request.data.get('message') or 'Rejected response.').strip() or 'Rejected response.',
+        )
         mark_notifications_terminal(
             Notification.objects.filter(
                 user=reason_request.admin_user,
@@ -6995,7 +7101,7 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
             notification.is_read = True
             notification.resolved_at = timezone.now()
             notification.save(update_fields=['status', 'is_read', 'resolved_at'])
-        return Response(PaymentReasonRequestSerializer(reason_request).data)
+        return self._serialize(reason_request)
 
 
 class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):

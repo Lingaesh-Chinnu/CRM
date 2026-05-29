@@ -1545,7 +1545,7 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 from decimal import Decimal
 
-from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, AdminReceipt, get_payment_installment_schedule
+from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, get_payment_installment_schedule
 
 
 def payment_installment_summary(payment):
@@ -1678,6 +1678,39 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
         return 'pending'
 
 
+class PaymentReasonMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    sender_role_display = serializers.CharField(source='get_sender_role_display', read_only=True)
+    status_display = serializers.SerializerMethodField()
+    created_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PaymentReasonMessage
+        fields = [
+            'id', 'reason_request', 'sender', 'sender_name', 'sender_role',
+            'sender_role_display', 'message', 'status', 'status_display',
+            'promised_payment_date', 'created_at', 'created_display',
+        ]
+        read_only_fields = [
+            'reason_request', 'sender', 'sender_name', 'sender_role',
+            'sender_role_display', 'status', 'status_display', 'created_at',
+            'created_display',
+        ]
+
+    def get_sender_name(self, obj):
+        if obj.sender:
+            return obj.sender.full_name or obj.sender.username
+        return obj.get_sender_role_display()
+
+    def get_status_display(self, obj):
+        if not obj.status:
+            return ''
+        return dict(PaymentReasonRequest.Status.choices).get(obj.status, obj.status.replace('_', ' ').title())
+
+    def get_created_display(self, obj):
+        return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')
+
+
 class PaymentReasonRequestSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='payment.enrollment.name', read_only=True)
     course_name = serializers.CharField(source='payment.enrollment.course.name', read_only=True)
@@ -1689,6 +1722,7 @@ class PaymentReasonRequestSerializer(serializers.ModelSerializer):
     submitted_display = serializers.SerializerMethodField()
     created_display = serializers.SerializerMethodField()
     current_installment_due_date = serializers.SerializerMethodField()
+    messages = PaymentReasonMessageSerializer(many=True, read_only=True)
 
     class Meta:
         model = PaymentReasonRequest
@@ -1699,6 +1733,7 @@ class PaymentReasonRequestSerializer(serializers.ModelSerializer):
             'question', 'staff_response', 'promised_payment_date', 'status',
             'status_display', 'student_name', 'course_name', 'branch_name',
             'submitted_by', 'submitted_display', 'created_display',
+            'messages',
             'created_at', 'responded_at', 'approved_at', 'rejected_at', 'resolved_at',
         ]
         read_only_fields = [
@@ -1780,7 +1815,12 @@ class PaymentSerializer(serializers.ModelSerializer):
                 PaymentReasonRequest.Status.PENDING_RESPONSE,
                 PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL,
             ],
-        ).select_related('admin_user', 'branch_staff', 'payment__enrollment__course', 'payment__enrollment__branch')
+        ).select_related(
+            'admin_user',
+            'branch_staff',
+            'payment__enrollment__course',
+            'payment__enrollment__branch',
+        ).prefetch_related('messages__sender')
         return PaymentReasonRequestSerializer(requests, many=True).data
 
     def get_latest_reason_request(self, obj):
@@ -1789,7 +1829,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             'branch_staff',
             'payment__enrollment__course',
             'payment__enrollment__branch',
-        ).order_by('-created_at').first()
+        ).prefetch_related('messages__sender').order_by('-created_at').first()
         if not reason_request:
             return None
         return PaymentReasonRequestSerializer(reason_request).data

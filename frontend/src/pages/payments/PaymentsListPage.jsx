@@ -98,21 +98,19 @@ function activeReasonRequestFor(row, installmentIndex) {
   return (row.active_reason_requests || []).find((item) => Number(item.installment_index) === Number(installmentIndex)) || null
 }
 
+function latestReasonRequestFor(row, installmentIndex) {
+  const active = activeReasonRequestFor(row, installmentIndex)
+  if (active) return active
+  const latest = row.latest_reason_request || null
+  if (latest && Number(latest.installment_index) === Number(installmentIndex)) return latest
+  return null
+}
+
 function latestGeneratedDocument(row) {
   const documents = orderedInstallments(row).filter((installment) => (
     installment.bill_is_generated || installment.bill_number || installment.document_status === 'bill_generated'
   ))
   return documents[documents.length - 1] || null
-}
-
-function paymentReasonStatus(row) {
-  const request = row.latest_reason_request || (row.active_reason_requests || [])[0] || null
-  if (request?.status === 'pending_response') return { label: 'Pending Reason', tone: 'amber' }
-  if (request?.status === 'pending_admin_approval') return { label: 'Pending Response', tone: 'cyan' }
-  if (request?.status === 'approved') return { label: 'Approved Promise', tone: 'green' }
-  if (request?.status === 'resolved') return { label: 'Resolved', tone: 'green' }
-  if (Number(row.balance || 0) > 0) return { label: 'Waiting for Payment', tone: 'slate' }
-  return null
 }
 
 function feeReminderMessage(row) {
@@ -151,8 +149,8 @@ export default function PaymentsListPage() {
   const [sendingId, setSendingId] = useState(null)
   const [documentActionId, setDocumentActionId] = useState(null)
   const [reasonRequest, setReasonRequest] = useState(null)
-  const [reasonMode, setReasonMode] = useState('')
-  const [reasonForm, setReasonForm] = useState({ staff_response: '', promised_payment_date: '' })
+  const [reasonContext, setReasonContext] = useState(null)
+  const [reasonForm, setReasonForm] = useState({ message: '', promised_payment_date: '' })
   const [reasonSubmitting, setReasonSubmitting] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const options = useMemo(() => monthOptions(), [])
@@ -294,8 +292,8 @@ export default function PaymentsListPage() {
 
   const closeReasonModal = () => {
     setReasonRequest(null)
-    setReasonMode('')
-    setReasonForm({ staff_response: '', promised_payment_date: '' })
+    setReasonContext(null)
+    setReasonForm({ message: '', promised_payment_date: '' })
     if (reasonRequestId) {
       const nextParams = new URLSearchParams(location.search)
       nextParams.delete('reason_request')
@@ -306,17 +304,22 @@ export default function PaymentsListPage() {
     }
   }
 
-  const openReasonRequest = (request) => {
+  const openReasonRequest = (request, row = null, installment = null) => {
     setReasonRequest(request)
+    setReasonContext({ row, installment })
     setReasonForm({
-      staff_response: request.staff_response || '',
+      message: '',
       promised_payment_date: request.promised_payment_date || '',
     })
-    if (!isSuperAdmin && request.status === 'pending_response') {
-      setReasonMode('respond')
-    } else {
-      setReasonMode('review')
-    }
+  }
+
+  const openAskReason = (row, installment) => {
+    setReasonRequest(null)
+    setReasonContext({ row, installment })
+    setReasonForm({
+      message: 'Why is this payment still pending?',
+      promised_payment_date: '',
+    })
   }
 
   const upsertReasonRequest = (request) => {
@@ -333,34 +336,33 @@ export default function PaymentsListPage() {
     }))
   }
 
-  const askReason = async (row, installment) => {
-    setMessage('')
-    setReasonSubmitting(true)
-    try {
-      const { data } = await api.post('/payment-reason-requests/', {
-        payment: row.id,
-        installment_index: installment.index,
-      })
-      upsertReasonRequest(data)
-      setMessage(data.status === 'pending_response' ? 'Reason request sent to branch staff.' : 'Reason request already exists.')
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to create reason request.'))
-    } finally {
-      setReasonSubmitting(false)
+  const submitReasonMessage = async () => {
+    if (!reasonRequest && !reasonContext?.row) return
+    const messageText = reasonForm.message.trim()
+    if (!messageText) {
+      setMessage('Message is required.')
+      return
     }
-  }
-
-  const submitReasonResponse = async () => {
-    if (!reasonRequest) return
     setReasonSubmitting(true)
     setMessage('')
     try {
-      const { data } = await api.post(`/payment-reason-requests/${reasonRequest.id}/respond/`, reasonForm)
+      const payload = {
+        message: messageText,
+        promised_payment_date: reasonForm.promised_payment_date || undefined,
+      }
+      const { data } = reasonRequest
+        ? await api.post(`/payment-reason-requests/${reasonRequest.id}/messages/`, payload)
+        : await api.post('/payment-reason-requests/', {
+          payment: reasonContext.row.id,
+          installment_index: reasonContext.installment.index,
+          message: messageText,
+        })
       upsertReasonRequest(data)
-      closeReasonModal()
-      setMessage('Response submitted to Admin.')
+      setReasonRequest(data)
+      setReasonForm({ message: '', promised_payment_date: data.promised_payment_date || '' })
+      setMessage(reasonRequest ? 'Message sent.' : 'Reason request sent to branch staff.')
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to submit response.'))
+      setMessage(apiErrorMessage(error, 'Failed to send message.'))
     } finally {
       setReasonSubmitting(false)
     }
@@ -373,7 +375,7 @@ export default function PaymentsListPage() {
     try {
       const { data } = await api.post(`/payment-reason-requests/${reasonRequest.id}/${decision}/`)
       upsertReasonRequest(data)
-      closeReasonModal()
+      setReasonRequest(data)
       setMessage(decision === 'approve' ? 'Promised payment date approved.' : 'Reason response rejected.')
       if (decision === 'approve') {
         const refreshed = await api.get('/payments/', {
@@ -406,7 +408,7 @@ export default function PaymentsListPage() {
     try {
       const { data } = await api.post(`/payment-reason-requests/${reasonRequest.id}/mark-resolved/`)
       upsertReasonRequest(data)
-      closeReasonModal()
+      setReasonRequest(data)
       setMessage('Payment reason request marked resolved.')
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to mark request resolved.'))
@@ -477,7 +479,7 @@ export default function PaymentsListPage() {
 
   const actionControls = (row, compact = false) => {
     const nextPending = nextPendingInstallment(row)
-    const reason = nextPending ? activeReasonRequestFor(row, nextPending.index) : null
+    const reason = nextPending ? latestReasonRequestFor(row, nextPending.index) : (row.latest_reason_request || null)
     const generatedDocument = latestGeneratedDocument(row)
     const buttonClass = compact
       ? 'whitespace-nowrap rounded-2xl px-4 py-3 text-sm font-semibold'
@@ -486,21 +488,18 @@ export default function PaymentsListPage() {
     const primaryClass = `${buttonClass} bg-slate-950 text-white disabled:opacity-60`
 
     if (isSuperAdmin) {
-      if (!nextPending || Number(row.balance || 0) <= 0 || !['unpaid', 'partial', 'pending'].includes(row.status)) {
-        return null
-      }
-      if (reason?.status === 'pending_response') {
-        return <span className="inline-flex whitespace-nowrap rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">Reason Requested</span>
-      }
-      if (reason?.status === 'pending_admin_approval') {
+      if (reason) {
         return (
-          <button type="button" onClick={() => openReasonRequest(reason)} className={primaryClass}>
-            Review Response
+          <button type="button" onClick={() => openReasonRequest(reason, row, nextPending)} className={primaryClass}>
+            View Conversation
           </button>
         )
       }
+      if (!nextPending || Number(row.balance || 0) <= 0 || !['unpaid', 'partial', 'pending'].includes(row.status)) {
+        return null
+      }
       return (
-        <button type="button" onClick={() => askReason(row, nextPending)} disabled={reasonSubmitting} className={primaryClass}>
+        <button type="button" onClick={() => openAskReason(row, nextPending)} disabled={reasonSubmitting} className={primaryClass}>
           Ask Reason
         </button>
       )
@@ -520,9 +519,9 @@ export default function PaymentsListPage() {
         ) : (
           null
         )}
-        {reason?.status === 'pending_response' && (
-          <button type="button" onClick={() => openReasonRequest(reason)} className={secondaryClass}>
-            Respond Reason
+        {reason && (
+          <button type="button" onClick={() => openReasonRequest(reason, row, nextPending)} className={secondaryClass}>
+            View Conversation
           </button>
         )}
         <button
@@ -756,15 +755,6 @@ export default function PaymentsListPage() {
                 { key: 'dueDate', header: 'Due Date', width: '120px', render: (row) => <span className={isOverduePayment(row) ? 'font-bold text-rose-700' : 'text-slate-700'}>{formatDate(nextPendingInstallment(row)?.due_date || row.next_payment_date)}</span> },
                 { key: 'status', header: 'Status', width: '130px', render: (row) => <StatusBadge tone={row.status === 'paid' ? 'green' : row.status === 'partial' ? 'amber' : 'red'}>{statusLabel(row.status)}</StatusBadge> },
                 {
-                  key: 'reasonStatus',
-                  header: 'Reason',
-                  width: '160px',
-                  render: (row) => {
-                    const status = paymentReasonStatus(row)
-                    return status ? <StatusBadge tone={status.tone}>{status.label}</StatusBadge> : <span className="text-slate-400">-</span>
-                  },
-                },
-                {
                   key: 'actions',
                   header: 'Actions',
                   width: isSuperAdmin ? '150px' : '300px',
@@ -780,137 +770,154 @@ export default function PaymentsListPage() {
         )}
       </section>
 
-      {reasonRequest && (
-        <div onClick={closeReasonModal} className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4 py-6">
-          <div onClick={(event) => event.stopPropagation()} className="relative max-h-[90vh] w-full max-w-2xl overflow-auto rounded-[24px] bg-white shadow-2xl">
-            <ModalCloseButton onClick={closeReasonModal} label="Close payment reason request" />
-            <div className="border-b border-slate-200 px-6 py-5">
-              <div className="flex items-start justify-between gap-4">
+      {(reasonRequest || reasonContext) && (() => {
+        const contextRow = reasonContext?.row
+        const contextInstallment = reasonContext?.installment
+        const messages = reasonRequest?.messages || []
+        const installmentLabel = reasonRequest?.installment_label || contextInstallment?.label || `${contextInstallment?.index || reasonRequest?.installment_index || ''} Installment`
+        const currentDueDate = reasonRequest?.current_installment_due_date || reasonRequest?.installment_due_date || contextInstallment?.due_date
+        const statusTone = reasonRequest?.status === 'approved' || reasonRequest?.status === 'resolved'
+          ? 'green'
+          : reasonRequest?.status === 'pending_admin_approval'
+          ? 'cyan'
+          : reasonRequest?.status === 'rejected'
+          ? 'red'
+          : 'amber'
+
+        return (
+          <div onClick={closeReasonModal} className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-4 py-6">
+            <div onClick={(event) => event.stopPropagation()} className="relative flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl">
+              <ModalCloseButton onClick={closeReasonModal} label="Close payment reason conversation" />
+              <div className="border-b border-slate-200 px-6 py-5">
                 <div className="pr-10">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment Reason Request</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment Reason Conversation</p>
                   <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-                    {reasonMode === 'respond' ? 'Respond to Admin' : 'Review Staff Response'}
+                    {reasonRequest ? 'View Conversation' : 'Ask Reason'}
                   </h3>
                 </div>
               </div>
-            </div>
 
-            <div className="space-y-5 px-6 py-5">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Student</p>
-                  <p className="mt-1 font-bold text-slate-950">{reasonRequest.student_name || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Course</p>
-                  <p className="mt-1 font-bold text-slate-950">{reasonRequest.course_name || '-'}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Installment</p>
-                  <p className="mt-1 font-bold text-slate-950">{reasonRequest.installment_label || `${reasonRequest.installment_index} Installment`}</p>
-                </div>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Current Due Date</p>
-                  <p className="mt-1 font-bold text-slate-950">{formatDate(reasonRequest.current_installment_due_date || reasonRequest.installment_due_date)}</p>
-                </div>
-              </div>
-
-              <div className="rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Admin Question</p>
-                <p className="mt-2 font-semibold text-slate-950">{reasonRequest.question}</p>
-              </div>
-
-              {reasonMode === 'respond' ? (
-                <>
+              <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
-                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Response / Reason</label>
-                    <textarea
-                      value={reasonForm.staff_response}
-                      onChange={(event) => setReasonForm((current) => ({ ...current, staff_response: event.target.value }))}
-                      rows={5}
-                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-                    />
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Student</p>
+                    <p className="mt-1 font-bold text-slate-950">{reasonRequest?.student_name || contextRow?.student_name || '-'}</p>
                   </div>
                   <div>
-                    <label className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Promised Payment Date</label>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Course</p>
+                    <p className="mt-1 overflow-hidden break-words font-bold leading-5 text-slate-950 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{reasonRequest?.course_name || contextRow?.course_name || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Payment</p>
+                    <p className="mt-1 font-bold text-slate-950">{installmentLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Due Date</p>
+                    <p className="mt-1 font-bold text-slate-950">{formatDate(currentDueDate)}</p>
+                  </div>
+                </div>
+
+                {reasonRequest && (
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <StatusBadge tone={statusTone}>{reasonRequest.status_display || statusLabel(reasonRequest.status)}</StatusBadge>
+                    {reasonRequest.promised_payment_date && (
+                      <span className="text-xs font-semibold text-slate-500">
+                        Promised: {formatDate(reasonRequest.promised_payment_date)}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-5 space-y-3 rounded-2xl bg-slate-50 p-4">
+                  {messages.length === 0 ? (
+                    <p className="text-sm font-medium text-slate-500">No messages yet.</p>
+                  ) : (
+                    messages.map((item) => {
+                      const fromAdmin = item.sender_role === 'admin'
+                      return (
+                        <div key={item.id} className={`flex ${fromAdmin ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] rounded-2xl border px-4 py-3 ${fromAdmin ? 'border-slate-900 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-800'}`}>
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] opacity-80">
+                              <span>{item.sender_name || '-'}</span>
+                              <span>{item.sender_role_display || statusLabel(item.sender_role)}</span>
+                              {item.status_display && <span>{item.status_display}</span>}
+                            </div>
+                            <p className="mt-2 whitespace-pre-line text-sm leading-6">{item.message}</p>
+                            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs opacity-75">
+                              <span>{item.created_display || formatDate(item.created_at)}</span>
+                              {item.promised_payment_date && <span>Promise: {formatDate(item.promised_payment_date)}</span>}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-200 px-6 py-5">
+                <div className="grid gap-3">
+                  <textarea
+                    value={reasonForm.message}
+                    onChange={(event) => setReasonForm((current) => ({ ...current, message: event.target.value }))}
+                    rows={3}
+                    placeholder={isSuperAdmin ? 'Send a reason request or follow-up message' : 'Reply with reason or clarification'}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  />
+                  {!isSuperAdmin && (
                     <input
                       type="date"
                       value={reasonForm.promised_payment_date}
                       onChange={(event) => setReasonForm((current) => ({ ...current, promised_payment_date: event.target.value }))}
-                      className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                      className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                     />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={submitReasonResponse}
-                    disabled={reasonSubmitting}
-                    className="w-full rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    {reasonSubmitting ? 'Submitting...' : 'Submit Response'}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="sm:col-span-2">
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Staff Reason</p>
-                      <p className="mt-2 whitespace-pre-line rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-700">
-                        {reasonRequest.staff_response || '-'}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Promised Payment Date</p>
-                      <p className="mt-1 font-bold text-slate-950">{formatDate(reasonRequest.promised_payment_date)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Submitted By</p>
-                      <p className="mt-1 font-bold text-slate-950">{reasonRequest.submitted_by || reasonRequest.branch_staff_name || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Submitted Date/Time</p>
-                      <p className="mt-1 font-bold text-slate-950">{reasonRequest.submitted_display || '-'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Status</p>
-                      <p className="mt-1 font-bold text-slate-950">{statusLabel(reasonRequest.status)}</p>
-                    </div>
-                  </div>
-                  {isSuperAdmin && reasonRequest.status === 'pending_admin_approval' && (
-                    <div className="flex flex-wrap gap-3">
-                      <button
-                        type="button"
-                        onClick={() => reviewReasonResponse('approve')}
-                        disabled={reasonSubmitting}
-                        className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => reviewReasonResponse('reject')}
-                        disabled={reasonSubmitting}
-                        className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
-                      >
-                        Reject
-                      </button>
-                    </div>
                   )}
-                  {isSuperAdmin && ['approved', 'pending_admin_approval'].includes(reasonRequest.status) && (
+                  <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
-                      onClick={markReasonResolved}
+                      onClick={submitReasonMessage}
                       disabled={reasonSubmitting}
-                      className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                      className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
                     >
-                      Mark Resolved
+                      {reasonSubmitting ? 'Sending...' : reasonRequest ? 'Send Message' : 'Send Request'}
                     </button>
-                  )}
-                </>
-              )}
+                    {isSuperAdmin && reasonRequest?.status === 'pending_admin_approval' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => reviewReasonResponse('approve')}
+                          disabled={reasonSubmitting}
+                          className="rounded-2xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => reviewReasonResponse('reject')}
+                          disabled={reasonSubmitting}
+                          className="rounded-2xl bg-rose-600 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          Reject
+                        </button>
+                      </>
+                    )}
+                    {isSuperAdmin && ['approved', 'pending_admin_approval'].includes(reasonRequest?.status) && (
+                      <button
+                        type="button"
+                        onClick={markReasonResolved}
+                        disabled={reasonSubmitting}
+                        className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        Mark Resolved
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

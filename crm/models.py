@@ -1337,6 +1337,34 @@ class PaymentReasonRequest(models.Model):
         return f'{self.payment_id} installment {self.installment_index} - {self.status}'
 
 
+class PaymentReasonMessage(models.Model):
+    """Conversation entry for a payment reason request."""
+
+    class SenderRole(models.TextChoices):
+        ADMIN = 'admin', 'Admin'
+        USER = 'user', 'User'
+        SYSTEM = 'system', 'System'
+
+    reason_request = models.ForeignKey(PaymentReasonRequest, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='payment_reason_messages')
+    sender_role = models.CharField(max_length=20, choices=SenderRole.choices, db_index=True)
+    message = models.TextField()
+    status = models.CharField(max_length=30, blank=True, db_index=True)
+    promised_payment_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'payment_reason_messages'
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['reason_request', 'created_at']),
+            models.Index(fields=['sender_role', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.reason_request_id} - {self.sender_role}'
+
+
 class TeamNotice(TimeStampedModel):
     """Internal CRM notice board message from admin to branches."""
 
