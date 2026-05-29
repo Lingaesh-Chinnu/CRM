@@ -30,29 +30,37 @@ function addOneMonth(value) {
   return date.toISOString().slice(0, 10)
 }
 
-function buildSchedule(row, startDate) {
+function splitAmount(total, parts) {
+  const safeTotal = Math.max(Math.round(Number(total || 0)), 0)
+  const count = Math.max(Number(parts || 1), 1)
+  const base = Math.floor(safeTotal / count)
+  const amounts = Array.from({ length: count }, () => base)
+  amounts[count - 1] += safeTotal - base * count
+  return amounts
+}
+
+function installmentLabel(index) {
+  return {
+    1: '1st Installment',
+    2: '2nd Installment',
+    3: '3rd Installment',
+  }[index] || `${index}th Installment`
+}
+
+function buildSchedule(row, startDate, splitCount = 2) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
   const courseStartDate = startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
-  const durationMonths = Number(row?.course_duration_months || row?.duration_months || row?.course_duration || row?.course?.duration_months || 0)
-  const enrollmentAmount = Math.min(5000, finalFees)
-  if (finalFees <= 6000) {
-    return [{ label: '1st Installment', amount: finalFees, due_date: enrollmentDate }]
+  if (finalFees < 7000) {
+    return [{ label: 'Full Payment', amount: finalFees, due_date: enrollmentDate, paid_amount: 0, pending_amount: finalFees, status: 'pending' }]
   }
-  const remaining = finalFees - enrollmentAmount
-  if (durationMonths <= 2) {
-    return [
-      { label: '1st Installment', amount: enrollmentAmount, due_date: enrollmentDate },
-      { label: '2nd Installment', amount: remaining, due_date: courseStartDate },
-    ]
-  }
-  const second = Math.floor(remaining / 2)
-  const third = remaining - second
-  return [
-    { label: '1st Installment', amount: enrollmentAmount, due_date: enrollmentDate },
-    { label: '2nd Installment', amount: second, due_date: courseStartDate },
-    { label: '3rd Installment', amount: third, due_date: addOneMonth(courseStartDate) },
-  ]
+  let dueDate = courseStartDate
+  const rows = [{ label: 'Enrollment', amount: 5000, due_date: enrollmentDate, paid_amount: 0, pending_amount: 5000, status: 'pending' }]
+  splitAmount(finalFees - 5000, splitCount >= 3 ? 3 : 2).forEach((amount, index) => {
+    rows.push({ label: installmentLabel(index + 1), amount, due_date: dueDate, paid_amount: 0, pending_amount: amount, status: 'pending' })
+    dueDate = addOneMonth(dueDate) || dueDate
+  })
+  return rows
 }
 
 function formatCurrency(value) {
@@ -136,6 +144,7 @@ export default function EnrollmentDetailPage() {
   const [counselors, setCounselors] = useState([])
   const [startDate, setStartDate] = useState('')
   const [batchTiming, setBatchTiming] = useState('')
+  const [splitCount, setSplitCount] = useState(2)
   const [phone, setPhone] = useState('')
   const [branch, setBranch] = useState('')
   const [editingDetails, setEditingDetails] = useState(false)
@@ -166,6 +175,7 @@ export default function EnrollmentDetailPage() {
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
         setPhone(data.phone || '')
+        setSplitCount((data.installment_schedule || []).some((item) => item.label === '3rd Installment') ? 3 : 2)
       })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
   }, [id, isSuperAdmin])
@@ -196,9 +206,16 @@ export default function EnrollmentDetailPage() {
         start_date: startDate || null,
         batch_timing: batchTiming || '',
       })
+      const { data: scheduleEnrollment } = await api.post(`/enrollments/${id}/payment-schedule/`, {
+        split_count: splitCount,
+      })
       const { data } = await api.post(`/enrollments/${id}/send-rules-form/`)
       setRow({
         ...updatedEnrollment,
+        installment_schedule: scheduleEnrollment.installment_schedule,
+        payment_schedule: scheduleEnrollment.payment_schedule,
+        payment_schedule_locked: true,
+        payment_schedule_finalized_at: scheduleEnrollment.payment_schedule_finalized_at,
         rules_signing_status: data.status,
         status: data.enrollment_status || updatedEnrollment.status,
         rules_signed_pdf_url: updatedEnrollment.rules_signed_pdf_url,
@@ -317,6 +334,31 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const addSplit = async () => {
+    if (!startDate) {
+      setMessage('Course start date is required before adding a split.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      await api.patch(`/enrollments/${id}/`, {
+        start_date: startDate || null,
+        batch_timing: batchTiming || '',
+      })
+      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, { split_count: 3 })
+      setRow(data)
+      setStartDate(data.start_date || '')
+      setBatchTiming(data.batch_timing || '')
+      setSplitCount(3)
+      setMessage('Payment split updated.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to update payment split.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const submitCourseChange = async (payload) => {
     setSaving(true)
     setMessage('')
@@ -356,7 +398,11 @@ export default function EnrollmentDetailPage() {
   const canEnroll = rulesStatus === 'submitted'
   const isFinalEnrollment = ['enrolled', 'active', 'completed', 'dropped', 'on_hold'].includes(row.status)
   const canAddToPayment = ['enrolled', 'active', 'completed'].includes(row.status) && !row.payment_info
-  const schedule = buildSchedule(row, startDate)
+  const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
+  const schedule = row.installment_schedule?.length && !editingDetails
+    ? row.installment_schedule
+    : buildSchedule(row, startDate, splitCount)
+  const canAddSplit = finalFees >= 7000 && splitCount < 3 && !row.payment_schedule_locked && !isFinalEnrollment
 
   return (
     <div className="space-y-6">
@@ -514,13 +560,30 @@ export default function EnrollmentDetailPage() {
           </div>
         </div>
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Schedule</p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Schedule</p>
+            {canAddSplit && (
+              <button
+                type="button"
+                onClick={addSplit}
+                disabled={saving}
+                className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+              >
+                Add Split
+              </button>
+            )}
+          </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {schedule.map((item) => (
               <div key={item.label} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
                 <p className="text-sm font-bold text-slate-950">{item.label}</p>
                 <p className="mt-2 text-xl font-black text-slate-950">{formatCurrency(item.amount)}</p>
                 <p className="mt-1 text-sm text-slate-500">Due: {item.due_date || 'Set course start date'}</p>
+                <div className="mt-3 space-y-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  <p>Paid: {formatCurrency(item.paid_amount || 0)}</p>
+                  <p>Pending: {formatCurrency(item.pending_amount ?? item.amount)}</p>
+                  <p>Status: {item.status || 'pending'}</p>
+                </div>
               </div>
             ))}
           </div>

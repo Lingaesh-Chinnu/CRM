@@ -4,6 +4,7 @@
 # ============================================================
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from decimal import Decimal
 
 
@@ -797,6 +798,10 @@ def generate_student_number(branch):
 def add_month_to_date(value):
     if not value:
         return None
+    if isinstance(value, str):
+        value = parse_date(value)
+        if not value:
+            return None
     month = value.month + 1
     year = value.year + (month - 1) // 12
     month = ((month - 1) % 12) + 1
@@ -823,40 +828,72 @@ def enrollment_payable_fee(enrollment):
     return enrollment.net_payable_fee if enrollment.net_payable_fee is not None else enrollment.final_fees
 
 
-def get_default_installment_schedule(enrollment):
+PAYMENT_SPLIT_THRESHOLD = 7000
+ENROLLMENT_PAYMENT_AMOUNT = 5000
+
+
+def _split_integer_amount(total_amount, parts):
+    total_amount = max(int(round(float(total_amount or 0))), 0)
+    parts = max(int(parts or 1), 1)
+    base_amount = total_amount // parts
+    amounts = [base_amount for _ in range(parts)]
+    amounts[-1] += total_amount - (base_amount * parts)
+    return amounts
+
+
+def _installment_label(index):
+    return {
+        1: '1st Installment',
+        2: '2nd Installment',
+        3: '3rd Installment',
+    }.get(index, f'{index}th Installment')
+
+
+def normalize_installment_schedule(schedule):
+    rows = []
+    for item in schedule or []:
+        amount = max(int(round(float(item.get('amount') or 0))), 0)
+        due_date = item.get('due_date')
+        rows.append({
+            'label': item.get('label') or f'{len(rows) + 1} Installment',
+            'amount': amount,
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+        })
+    return rows
+
+
+def get_default_installment_schedule(enrollment, split_count=2):
     final_fees = int(round(float(enrollment_payable_fee(enrollment) or 0)))
     enrollment_date = enrollment.enrollment_date
-    second_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
-    duration_months = int(getattr(getattr(enrollment, 'course', None), 'duration_months', 0) or 0)
-    enrollment_amount = min(5000, final_fees)
+    first_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
 
-    if final_fees <= 6000:
+    if final_fees < PAYMENT_SPLIT_THRESHOLD:
         return [{
-            'label': '1st Installment',
+            'label': 'Full Payment',
             'amount': final_fees,
             'due_date': enrollment_date,
         }]
 
-    remaining = final_fees - enrollment_amount
-    if duration_months <= 2:
-        return [
-            {'label': '1st Installment', 'amount': enrollment_amount, 'due_date': enrollment_date},
-            {'label': '2nd Installment', 'amount': remaining, 'due_date': second_due_date},
-        ]
+    split_count = 3 if int(split_count or 2) >= 3 else 2
+    remaining = max(final_fees - ENROLLMENT_PAYMENT_AMOUNT, 0)
+    rows = [{'label': 'Enrollment', 'amount': ENROLLMENT_PAYMENT_AMOUNT, 'due_date': enrollment_date}]
+    due_date = first_due_date
+    for index, amount in enumerate(_split_integer_amount(remaining, split_count), start=1):
+        rows.append({'label': _installment_label(index), 'amount': amount, 'due_date': due_date})
+        due_date = add_month_to_date(due_date) or due_date
+    return rows
 
-    second = remaining // 2
-    third = remaining - second
-    return [
-        {'label': '1st Installment', 'amount': enrollment_amount, 'due_date': enrollment_date},
-        {'label': '2nd Installment', 'amount': second, 'due_date': second_due_date},
-        {'label': '3rd Installment', 'amount': third, 'due_date': add_month_to_date(second_due_date)},
-    ]
+
+def get_enrollment_installment_schedule(enrollment):
+    if getattr(enrollment, 'payment_schedule', None):
+        return normalize_installment_schedule(enrollment.payment_schedule)
+    return normalize_installment_schedule(get_default_installment_schedule(enrollment))
 
 
 def get_payment_installment_schedule(payment):
     if payment.manual_installment_schedule:
         return payment.manual_installment_schedule
-    return get_default_installment_schedule(payment.enrollment)
+    return get_enrollment_installment_schedule(payment.enrollment)
 
 
 def calculate_next_payment_date_from_schedule(schedule, paid_amount, total_fees):
@@ -931,6 +968,9 @@ class Enrollment(TimeStampedModel):
     spot_conversion_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     custom_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     net_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payment_schedule = models.JSONField(default=list, blank=True)
+    payment_schedule_locked = models.BooleanField(default=False)
+    payment_schedule_finalized_at = models.DateTimeField(null=True, blank=True)
     discount          = models.ForeignKey(Discount, null=True, blank=True, on_delete=models.SET_NULL,
                                           related_name='enrollments')
 

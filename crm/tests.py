@@ -585,9 +585,9 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(payment.status, Payment.Status.UNPAID)
         self.assertEqual(payment.paid_amount, 0)
         self.assertEqual(payment.manual_installment_schedule, [
-            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
-            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
 
     def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):

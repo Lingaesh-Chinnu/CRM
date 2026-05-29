@@ -79,7 +79,8 @@ from crm.models import (
     PaymentInstallment, PaymentReasonRequest, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
-    get_default_installment_schedule, enrollment_payable_fee,
+    get_default_installment_schedule, get_enrollment_installment_schedule, normalize_installment_schedule,
+    enrollment_payable_fee,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -1245,7 +1246,7 @@ def build_default_installment_plan(enrollment):
             **item,
             'date': item.get('due_date'),
         }
-        for item in get_default_installment_schedule(enrollment)
+        for item in get_enrollment_installment_schedule(enrollment)
     ]
 
 
@@ -3989,17 +3990,15 @@ class AdminDataImportView(APIView):
                             status=payload.get('status') or Enrollment.Status.ACTIVE,
                         )
                         enrollment.save()
+                        enrollment.payment_schedule = serialize_enrollment_payment_schedule(enrollment)
+                        enrollment.payment_schedule_locked = enrollment.status in Enrollment.FINAL_STATUSES
+                        enrollment.payment_schedule_finalized_at = timezone.now() if enrollment.payment_schedule_locked else None
+                        enrollment.save(update_fields=['payment_schedule', 'payment_schedule_locked', 'payment_schedule_finalized_at', 'updated_at'])
                         Payment.objects.get_or_create(
                             enrollment=enrollment,
                             defaults={
                                 'total_fees': enrollment_payable_fee(enrollment),
-                                'manual_installment_schedule': [
-                                    {
-                                        **item,
-                                        'due_date': item['due_date'].isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
-                                    }
-                                    for item in get_default_installment_schedule(enrollment)
-                                ],
+                                'manual_installment_schedule': serialize_enrollment_payment_schedule(enrollment),
                             },
                         )
                         summary['enrollments_added'] += 1
@@ -5841,6 +5840,10 @@ def serialize_installment_schedule(schedule):
     return rows
 
 
+def serialize_enrollment_payment_schedule(enrollment):
+    return serialize_installment_schedule(get_enrollment_installment_schedule(enrollment))
+
+
 def decimal_to_schedule_amount(value):
     value = Decimal(str(value or 0))
     if value == value.to_integral_value():
@@ -5854,7 +5857,7 @@ def rebuild_pending_installment_schedule(enrollment, payment):
     if new_total <= 0:
         return []
 
-    default_schedule = serialize_installment_schedule(get_default_installment_schedule(enrollment))
+    default_schedule = serialize_enrollment_payment_schedule(enrollment)
     if paid_amount <= 0:
         return default_schedule
 
@@ -5998,6 +6001,30 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         return EnrollmentListSerializer if self.action == 'list' else EnrollmentDetailSerializer
+
+    def _schedule_from_split_count(self, enrollment, split_count):
+        schedule = get_default_installment_schedule(enrollment, split_count=split_count)
+        total = sum(int(item.get('amount') or 0) for item in schedule)
+        expected_total = int(round(float(enrollment_payable_fee(enrollment) or 0)))
+        if total != expected_total:
+            return None, 'Payment schedule total must match net payable fee.'
+        return normalize_installment_schedule(schedule), ''
+
+    def _ensure_enrollment_schedule(self, enrollment, split_count=None, lock=False):
+        if split_count is not None or not enrollment.payment_schedule:
+            schedule, error = self._schedule_from_split_count(enrollment, split_count or 2)
+            if error:
+                raise ValueError(error)
+            enrollment.payment_schedule = schedule
+        else:
+            enrollment.payment_schedule = normalize_installment_schedule(enrollment.payment_schedule)
+        update_fields = ['payment_schedule', 'updated_at']
+        if lock and not enrollment.payment_schedule_locked:
+            enrollment.payment_schedule_locked = True
+            enrollment.payment_schedule_finalized_at = timezone.now()
+            update_fields.extend(['payment_schedule_locked', 'payment_schedule_finalized_at'])
+        enrollment.save(update_fields=update_fields)
+        return enrollment.payment_schedule
 
     def perform_create(self, serializer):
         serializer.save(enrolled_by=self.request.user, created_by=self.request.user)
@@ -6208,6 +6235,26 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         enrollment.refresh_from_db()
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
+    @action(detail=True, methods=['post'], url_path='payment-schedule')
+    def payment_schedule(self, request, pk=None):
+        enrollment = self.get_object()
+        if enrollment.payment_schedule_locked and not request.user.is_super_admin:
+            return Response({'detail': 'Payment schedule is locked after Rules & Regulation sending.'}, status=status.HTTP_403_FORBIDDEN)
+        if enrollment.status in Enrollment.FINAL_STATUSES and not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can override payment schedules after enrollment confirmation.'}, status=status.HTTP_403_FORBIDDEN)
+        if not enrollment.start_date:
+            return Response({'detail': 'Course start date is required before finalizing payment schedule.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            split_count = int(request.data.get('split_count') or 2)
+        except (TypeError, ValueError):
+            split_count = 2
+        split_count = 3 if split_count >= 3 else 2
+        try:
+            self._ensure_enrollment_schedule(enrollment, split_count=split_count, lock=False)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
+
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):
         enrollment = self.get_object()
@@ -6221,6 +6268,10 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 {'detail': 'Course start date and batch timing are required before sending the Rules & Regulation form.', **errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        try:
+            self._ensure_enrollment_schedule(enrollment, lock=True)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
         signing.status = RulesSigningRequest.Status.SENT
@@ -6297,13 +6348,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 defaults={
                     'total_fees': enrollment_payable_fee(enrollment),
                     'status': Payment.Status.UNPAID,
-                    'manual_installment_schedule': [
-                        {
-                            **item,
-                            'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
-                        }
-                        for item in get_default_installment_schedule(enrollment)
-                    ],
+                    'manual_installment_schedule': serialize_enrollment_payment_schedule(enrollment),
                 },
             )
             if not created:
@@ -6312,13 +6357,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                     payment.total_fees = enrollment_payable_fee(enrollment)
                     update_fields.append('total_fees')
                 if not payment.manual_installment_schedule:
-                    payment.manual_installment_schedule = [
-                        {
-                            **item,
-                            'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
-                        }
-                        for item in get_default_installment_schedule(enrollment)
-                    ]
+                    payment.manual_installment_schedule = serialize_enrollment_payment_schedule(enrollment)
                     update_fields.append('manual_installment_schedule')
                 if update_fields:
                     update_fields.extend(['paid_amount', 'status', 'next_payment_date', 'updated_at'])
@@ -6353,13 +6392,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 enrollment=enrollment,
                 total_fees=enrollment_payable_fee(enrollment),
                 status=Payment.Status.UNPAID,
-                manual_installment_schedule=[
-                    {
-                        **item,
-                        'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
-                    }
-                    for item in get_default_installment_schedule(enrollment)
-                ],
+                manual_installment_schedule=serialize_enrollment_payment_schedule(enrollment),
             )
 
         enrollment.refresh_from_db()
@@ -7285,7 +7318,13 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             )
             payment.enrollment.custom_payable_fee = total_fees
             payment.enrollment.net_payable_fee = total_fees
-            payment.enrollment.save(update_fields=['custom_payable_fee', 'net_payable_fee', 'updated_at'])
+            payment.enrollment.payment_schedule = cleaned
+            payment.enrollment.payment_schedule_locked = True
+            payment.enrollment.payment_schedule_finalized_at = payment.enrollment.payment_schedule_finalized_at or timezone.now()
+            payment.enrollment.save(update_fields=[
+                'custom_payable_fee', 'net_payable_fee', 'payment_schedule',
+                'payment_schedule_locked', 'payment_schedule_finalized_at', 'updated_at',
+            ])
             payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
             payment.total_fees = total_fees
             payment.manual_installment_schedule = cleaned
@@ -7475,6 +7514,34 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _snapshot_decimal(self, value):
         return f'{Decimal(str(value or 0)):.2f}'
 
+    def _default_bill_address_lines(self):
+        return [
+            'First Floor, AAKIFAH 2017 Complex, Palghat Main Road,',
+            'Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008',
+        ]
+
+    def _branch_address_lines(self, branch):
+        if not branch:
+            return self._default_bill_address_lines()
+
+        lines = [line.strip() for line in str(branch.address or '').splitlines() if line.strip()]
+        city_line_parts = [
+            str(branch.city or '').strip(),
+            str(branch.state or '').strip(),
+            str(branch.pincode or '').strip(),
+        ]
+        city_line = ', '.join([part for part in city_line_parts if part])
+        if city_line:
+            lines.append(city_line)
+        return lines or self._default_bill_address_lines()
+
+    def _branch_header_payload(self, branch):
+        return {
+            'branch_name': branch.name if branch and branch.name else 'Indra Institute of Education',
+            'branch_address_lines': self._branch_address_lines(branch),
+            'branch_phone': branch.phone if branch and branch.phone else 'Phone number not set',
+        }
+
     def _next_payment_schedule(self, payment):
         for item in payment_installment_summary(payment):
             pending_amount = Decimal(str(item.get('pending_amount') or 0))
@@ -7489,6 +7556,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _build_document_snapshot(self, installment):
         enrollment = installment.enrollment
         payment = installment.payment
+        branch_header = self._branch_header_payload(enrollment.branch)
         is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
         generated_at = installment.bill_generated_at or timezone.now()
         cutoff = generated_at if is_bill else timezone.now()
@@ -7505,8 +7573,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'student_name': enrollment.name,
             'student_number': enrollment.student_number or '',
             'course_name': enrollment.course.name if enrollment.course else '',
-            'branch_name': enrollment.branch.name if enrollment.branch else 'No branch',
-            'branch_phone': enrollment.branch.phone if enrollment.branch and enrollment.branch.phone else 'Phone number not set',
+            'branch_name': branch_header['branch_name'],
+            'branch_address_lines': branch_header['branch_address_lines'],
+            'branch_phone': branch_header['branch_phone'],
             'payment_mode': installment.get_payment_mode_display(),
             'reference_number': installment.reference_number or 'Not provided',
             'payment_date': self._receipt_date(installment.payment_date),
@@ -7535,9 +7604,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         enrollment = installment.enrollment
         payment = installment.payment
         branch = enrollment.branch
-        branch_address_line_1 = 'First Floor, AAKIFAH 2017 Complex, Palghat Main Road,'
-        branch_address_line_2 = 'Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008'
-        branch_phone = snapshot.get('branch_phone') or (branch.phone if branch and branch.phone else 'Phone number not set')
+        branch_header = self._branch_header_payload(branch)
+        branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
+        branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_address_lines)
+        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         schedule = get_payment_installment_schedule(payment)
 
         paid_running_total = 0
@@ -7612,7 +7682,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         student_name = snapshot.get('student_name') or enrollment.name
         student_number = snapshot.get('student_number') or enrollment.student_number or ''
         course_name = snapshot.get('course_name') or (enrollment.course.name if enrollment.course else '')
-        branch_name = snapshot.get('branch_name') or (branch.name if branch else 'No branch')
+        branch_name = snapshot.get('branch_name') or branch_header['branch_name']
         payment_mode = snapshot.get('payment_mode') or installment.get_payment_mode_display()
         reference_number = snapshot.get('reference_number') or installment.reference_number or 'Not provided'
         payment_date = snapshot.get('payment_date') or self._receipt_date(installment.payment_date)
@@ -7681,11 +7751,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           {'<img src="' + logo_src + '" alt="Indra Institute of Education logo">' if logo_src else ''}
         </div>
         <div class="brand">
-          <h1>Indra Institute of Education</h1>
+          <h1>{escape(branch_name)}</h1>
           <div class="tagline">IT Training &amp; Testing Services</div>
           <div class="address">
-            <p>{escape(branch_address_line_1)}</p>
-            <p>{escape(branch_address_line_2)}</p>
+            {branch_address_html}
           </div>
           <p class="phone">{escape(branch_phone)}</p>
         </div>
@@ -7837,6 +7906,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             raise RuntimeError('Pillow is required to generate bill PDFs.') from exc
 
         snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
+        branch = installment.enrollment.branch
+        branch_header = self._branch_header_payload(branch)
+        branch_name = snapshot.get('branch_name') or branch_header['branch_name']
+        branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
+        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         document_number = snapshot.get('document_number') or self._document_number(installment)
         document_title = 'OFFICIAL PAYMENT BILL' if snapshot.get('document_type') == 'bill' else 'PAYMENT RECEIPT'
         document_label = 'Bill No' if snapshot.get('document_type') == 'bill' else 'Receipt No'
@@ -7868,10 +7942,12 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             bbox = draw.textbbox((0, 0), text, font=title_font)
             draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=title_font)
 
-        center_text('INDRA INSTITUTE OF EDUCATION', 34)
+        center_text(str(branch_name).upper(), 34)
         center_text('IT Training & Testing Services', 66)
-        center_text('First Floor, AAKIFAH 2017 Complex, Palghat Main Road,', 98)
-        center_text('Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008', 124)
+        for line_index, line in enumerate(branch_address_lines[:2]):
+            center_text(str(line), 98 + (line_index * 26))
+        if branch_phone:
+            center_text(str(branch_phone), 150)
 
         y = 170
         draw.rectangle((0, y, width, y + 70), fill='white', outline=border)

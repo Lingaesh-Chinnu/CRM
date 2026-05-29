@@ -1210,7 +1210,7 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import CounselorChangeRequest, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, RulesSigningRequest, get_default_installment_schedule
+from crm.models import CounselorChangeRequest, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, RulesSigningRequest, get_enrollment_installment_schedule
 
 
 class CourseChangeHistorySerializer(serializers.ModelSerializer):
@@ -1502,13 +1502,20 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         return self._rules_signing_data(obj).get('submitted_at')
 
     def get_installment_schedule(self, obj):
-        schedule = get_default_installment_schedule(obj)
+        schedule = get_enrollment_installment_schedule(obj)
+        payment_summary = []
+        if getattr(obj, 'payment', None):
+            payment_summary = payment_installment_summary(obj.payment)
+        summary_by_index = {item['index']: item for item in payment_summary}
         return [
             {
                 **item,
-                'due_date': item['due_date'].isoformat() if item.get('due_date') else None,
+                'due_date': item['due_date'].isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
+                'paid_amount': summary_by_index.get(index, {}).get('paid_amount', 0),
+                'pending_amount': summary_by_index.get(index, {}).get('pending_amount', item.get('amount') or 0),
+                'status': summary_by_index.get(index, {}).get('status', 'pending'),
             }
-            for item in schedule
+            for index, item in enumerate(schedule, start=1)
         ]
 
 # ============================================================
