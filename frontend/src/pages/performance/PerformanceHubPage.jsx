@@ -38,52 +38,41 @@ function formatMetricValue(row, value) {
   return Number(value || 0).toLocaleString('en-IN')
 }
 
-function CircularProgress({ value, color }) {
-  const safeValue = Math.min(Math.max(Number(value || 0), 0), 100)
-  const circumference = 2 * Math.PI * 18
-  const offset = circumference - (safeValue / 100) * circumference
-  return (
-    <svg viewBox="0 0 44 44" className="h-16 w-16">
-      <circle cx="22" cy="22" r="18" fill="none" stroke="#e2e8f0" strokeWidth="5" />
-      <circle
-        cx="22"
-        cy="22"
-        r="18"
-        fill="none"
-        stroke={color}
-        strokeWidth="5"
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        transform="rotate(-90 22 22)"
-      />
-      <text x="22" y="24" textAnchor="middle" className="fill-slate-900 text-[9px] font-black">{Math.round(safeValue)}%</text>
-    </svg>
-  )
-}
-
 function MiniMetricVisual({ row, colors }) {
   const current = Number(row.this_month || 0)
   const previous = Number(row.last_month || 0)
   const maxValue = Math.max(current, previous, 1)
-  if (row.key === 'conversion_ratio') {
-    return (
-      <div className="flex items-center justify-between gap-4">
-        <CircularProgress value={current} color={colors.dark} />
-        <div className="min-w-0 flex-1">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Last Month</p>
-          <p className="mt-1 text-sm font-bold text-slate-700">{formatMetricValue(row, previous)}</p>
+  const currentHeight = Math.max((current / maxValue) * 100, current > 0 ? 12 : 3)
+  const previousHeight = Math.max((previous / maxValue) * 100, previous > 0 ? 12 : 3)
+  const isRevenue = row.key === 'revenue'
+  return (
+    <div className={`rounded-2xl bg-slate-50 px-4 pb-3 pt-4 ${isRevenue ? 'min-h-[190px]' : 'min-h-[132px]'}`}>
+      <div className={`flex items-end justify-center gap-7 ${isRevenue ? 'h-36' : 'h-24'}`}>
+        <div className="flex h-full w-16 flex-col items-center justify-end gap-2">
+          <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-t-2xl">
+            <div
+              className="w-9 max-w-full rounded-t-2xl transition-[height] duration-500 ease-out"
+              style={{ height: `${Math.min(previousHeight, 100)}%`, background: colors.light }}
+            />
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Last</span>
+        </div>
+        <div className="flex h-full w-16 flex-col items-center justify-end gap-2">
+          <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-t-2xl">
+            <div
+              className="w-9 max-w-full rounded-t-2xl transition-[height] duration-500 ease-out"
+              style={{
+                height: `${Math.min(currentHeight, 100)}%`,
+                background: isRevenue ? `linear-gradient(180deg, ${colors.light}, ${colors.dark})` : colors.dark,
+              }}
+            />
+          </div>
+          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">This</span>
         </div>
       </div>
-    )
-  }
-  return (
-    <div className="grid gap-2">
-      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full" style={{ width: `${Math.min((current / maxValue) * 100, 100)}%`, backgroundColor: colors.dark }} />
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full" style={{ width: `${Math.min((previous / maxValue) * 100, 100)}%`, backgroundColor: colors.light }} />
+      <div className="mt-3 grid grid-cols-2 gap-3 text-center text-xs font-bold text-slate-700">
+        <span className="truncate">{formatMetricValue(row, previous)}</span>
+        <span className="truncate">{formatMetricValue(row, current)}</span>
       </div>
     </div>
   )
