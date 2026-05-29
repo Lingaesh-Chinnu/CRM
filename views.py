@@ -1878,8 +1878,11 @@ def ratio(numerator, denominator):
 
 def seconds_to_duration(total_seconds):
     total_seconds = max(int(total_seconds or 0), 0)
-    hours = total_seconds // 3600
+    days = total_seconds // 86400
+    hours = (total_seconds % 86400) // 3600
     minutes = (total_seconds % 3600) // 60
+    if days:
+        return f'{days}d {hours}h {minutes}m'
     if hours:
         return f'{hours}h {minutes}m'
     return f'{minutes}m'

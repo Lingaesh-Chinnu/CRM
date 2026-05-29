@@ -19,32 +19,49 @@ function monthLabel(value) {
   return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
 }
 
-function trendPoints(rows) {
-  const values = rows || []
-  const maxValue = Math.max(...values.map((item) => Number(item.value || 0)), 1)
-  return values.map((item, index) => {
-    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100
-    const y = 38 - ((Number(item.value || 0) / maxValue) * 32)
-    return `${x},${y}`
-  }).join(' ')
+const metricColors = {
+  leads: { light: '#93c5fd', dark: '#1d4ed8', soft: 'bg-blue-50', text: 'text-blue-800' },
+  walkins: { light: '#fcd34d', dark: '#b45309', soft: 'bg-amber-50', text: 'text-amber-800' },
+  enrollments: { light: '#86efac', dark: '#047857', soft: 'bg-emerald-50', text: 'text-emerald-800' },
+  revenue: { light: '#c4b5fd', dark: '#6d28d9', soft: 'bg-violet-50', text: 'text-violet-800' },
+  conversion: { light: '#cbd5e1', dark: '#334155', soft: 'bg-slate-100', text: 'text-slate-800' },
 }
 
-function MiniTrend({ rows }) {
-  return (
-    <svg viewBox="0 0 100 42" className="h-24 w-full overflow-visible">
-      <polyline points={trendPoints(rows)} fill="none" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  )
-}
-
-function AnalyticsCard({ label, value, change }) {
+function AnalyticsCard({ label, value, change, tone = 'conversion' }) {
+  const colors = metricColors[tone] || metricColors.conversion
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+        <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors.dark }} />
+      </div>
       <p className="mt-3 text-2xl font-black tracking-tight text-slate-950">{value}</p>
       <p className={`mt-2 text-xs font-bold ${Number(change || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
         {Number(change || 0) >= 0 ? '+' : ''}{Number(change || 0).toFixed(0)}% from last month
       </p>
+    </div>
+  )
+}
+
+function ComparisonBar({ label, value, maxValue, tone }) {
+  const colors = metricColors[tone] || metricColors.conversion
+  return (
+    <div className="rounded-2xl bg-slate-50 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-bold text-slate-950">{label}</p>
+        <p className="text-sm font-black text-slate-800">{value}</p>
+      </div>
+      <div className="mt-3 h-2 rounded-full bg-slate-200">
+        <div className="h-2 rounded-full" style={{ width: `${Math.max((Number(value || 0) / Math.max(maxValue, 1)) * 100, 5)}%`, backgroundColor: colors.dark }} />
+      </div>
+    </div>
+  )
+}
+
+function InsightCard({ children }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-sm font-semibold leading-6 text-slate-700">{children}</p>
     </div>
   )
 }
@@ -221,50 +238,45 @@ export default function ReportsPage() {
       {analytics && (
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <AnalyticsCard label="Leads" value={analytics.metrics.leads} change={analytics.changes.leads} />
-            <AnalyticsCard label="Walk-ins" value={analytics.metrics.walkins} change={analytics.changes.walkins} />
-            <AnalyticsCard label="Enrollments" value={analytics.metrics.enrollments} change={analytics.changes.enrollments} />
-            <AnalyticsCard label="Revenue" value={currency(analytics.metrics.revenue)} change={analytics.changes.revenue} />
+            <AnalyticsCard label="Leads" value={analytics.metrics.leads} change={analytics.changes.leads} tone="leads" />
+            <AnalyticsCard label="Walk-ins" value={analytics.metrics.walkins} change={analytics.changes.walkins} tone="walkins" />
+            <AnalyticsCard label="Enrollments" value={analytics.metrics.enrollments} change={analytics.changes.enrollments} tone="enrollments" />
+            <AnalyticsCard label="Revenue" value={currency(analytics.metrics.revenue)} change={analytics.changes.revenue} tone="revenue" />
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-4">
-            {[
-              ['Leads trend', analytics.trends.leads],
-              ['Walk-in trend', analytics.trends.walkins],
-              ['Enrollment trend', analytics.trends.enrollments],
-              ['Revenue trend', analytics.trends.revenue],
-            ].map(([label, trend]) => (
-              <div key={label} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-                  <MiniTrend rows={trend} />
+          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="space-y-6">
+              <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Core KPI Balance</p>
+                <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Pipeline and revenue shape</h2>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  {(() => {
+                    const maxValue = Math.max(
+                      Number(analytics.metrics.leads || 0),
+                      Number(analytics.metrics.walkins || 0),
+                      Number(analytics.metrics.enrollments || 0),
+                      1
+                    )
+                    return (
+                      <>
+                        <ComparisonBar label="Leads" value={analytics.metrics.leads} maxValue={maxValue} tone="leads" />
+                        <ComparisonBar label="Walk-ins" value={analytics.metrics.walkins} maxValue={maxValue} tone="walkins" />
+                        <ComparisonBar label="Enrollments" value={analytics.metrics.enrollments} maxValue={maxValue} tone="enrollments" />
+                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-bold text-slate-950">Revenue</p>
+                            <p className="text-sm font-black text-slate-800">{currency(analytics.metrics.revenue)}</p>
+                          </div>
+                          <div className="mt-3 h-2 rounded-full bg-slate-200">
+                            <div className="h-2 rounded-full" style={{ width: '78%', backgroundColor: metricColors.revenue.dark }} />
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               </div>
-            ))}
-          </section>
 
-          <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Conversion Funnel</p>
-              <div className="mt-5 space-y-3">
-                {analytics.funnel.map((row) => (
-                  <div key={row.stage} className="rounded-2xl bg-slate-50 p-4">
-                    <div className="flex items-center justify-between">
-                      <p className="font-bold text-slate-950">{row.stage}</p>
-                      <p className="text-xs font-bold text-slate-500">{percentage(row.conversion_percent)}</p>
-                    </div>
-                    <p className="mt-2 text-2xl font-black text-slate-950">{row.count}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 rounded-2xl bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Follow-up Efficiency</p>
-                <p className="mt-2 text-2xl font-black text-slate-950">{percentage(analytics.followup_efficiency.completion_ratio)}</p>
-                <p className="mt-2 text-sm text-slate-500">{analytics.followup_efficiency.pending_followups} pending follow-ups</p>
-              </div>
-            </div>
-
-            <div className="grid gap-6">
               <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
                 <div className="border-b border-slate-200 px-6 py-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counselor Comparison</p>
@@ -281,7 +293,49 @@ export default function ReportsPage() {
                   ))}
                 </div>
               </div>
+            </div>
 
+            <div className="space-y-6">
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Performance Insights</p>
+                <div className="mt-4 grid gap-3">
+                  {analytics.insights.map((item) => (
+                    <InsightCard key={item}>{item}</InsightCard>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Conversion Funnel</p>
+                <div className="mt-4 space-y-3">
+                  {analytics.funnel.map((row) => {
+                    const tone = row.stage === 'Leads' ? 'leads' : row.stage === 'Walk-ins' ? 'walkins' : 'enrollments'
+                    const colors = metricColors[tone]
+                    return (
+                      <div key={row.stage} className="rounded-2xl bg-slate-50 p-4">
+                        <div className="flex items-center justify-between">
+                          <p className="font-bold text-slate-950">{row.stage}</p>
+                          <p className="text-xs font-bold text-slate-500">{percentage(row.conversion_percent)}</p>
+                        </div>
+                        <p className="mt-2 text-2xl font-black text-slate-950">{row.count}</p>
+                        <div className="mt-3 h-2 rounded-full bg-slate-200">
+                          <div className="h-2 rounded-full" style={{ width: `${Math.max(Number(row.conversion_percent || 0), 8)}%`, backgroundColor: colors.dark }} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Follow-up Efficiency</p>
+                <p className="mt-2 text-2xl font-black text-slate-950">{percentage(analytics.followup_efficiency.completion_ratio)}</p>
+                <p className="mt-2 text-sm text-slate-500">{analytics.followup_efficiency.pending_followups} pending follow-ups</p>
+              </div>
+            </div>
+          </section>
+
+          <section>
               <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
                 <div className="border-b border-slate-200 px-6 py-5">
                   <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Branch Comparison</p>
@@ -297,16 +351,6 @@ export default function ReportsPage() {
                   ))}
                 </div>
               </div>
-            </div>
-          </section>
-
-          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Performance Insights</p>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              {analytics.insights.map((item) => (
-                <p key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-700">{item}</p>
-              ))}
-            </div>
           </section>
         </>
       )}

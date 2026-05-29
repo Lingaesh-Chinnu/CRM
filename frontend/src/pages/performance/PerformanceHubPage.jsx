@@ -14,6 +14,14 @@ function monthValue(date) {
   return date.toISOString().slice(0, 7)
 }
 
+const metricColors = {
+  leads: { light: '#93c5fd', dark: '#1d4ed8', soft: 'bg-blue-50', text: 'text-blue-800' },
+  walkins: { light: '#fcd34d', dark: '#b45309', soft: 'bg-amber-50', text: 'text-amber-800' },
+  enrollments: { light: '#86efac', dark: '#047857', soft: 'bg-emerald-50', text: 'text-emerald-800' },
+  conversion_ratio: { light: '#cbd5e1', dark: '#334155', soft: 'bg-slate-100', text: 'text-slate-800' },
+  revenue: { light: '#c4b5fd', dark: '#6d28d9', soft: 'bg-violet-50', text: 'text-violet-800' },
+}
+
 function MetricCard({ label, value, subtext }) {
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
@@ -28,7 +36,9 @@ function ComparisonBars({ rows }) {
   const maxValue = Math.max(...(rows || []).map((row) => Math.max(Number(row.this_month || 0), Number(row.last_month || 0))), 1)
   return (
     <div className="space-y-4">
-      {(rows || []).map((row) => (
+      {(rows || []).map((row) => {
+        const colors = metricColors[row.key] || metricColors.conversion_ratio
+        return (
         <div key={row.key} className="rounded-2xl bg-slate-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-bold text-slate-950">{row.label}</p>
@@ -40,20 +50,20 @@ function ComparisonBars({ rows }) {
             <div className="flex items-center gap-3">
               <span className="w-20 text-xs font-semibold text-slate-500">This</span>
               <div className="h-2 flex-1 rounded-full bg-slate-200">
-                <div className="h-2 rounded-full bg-slate-950" style={{ width: `${Math.max((Number(row.this_month || 0) / maxValue) * 100, 4)}%` }} />
+                <div className="h-2 rounded-full" style={{ width: `${Math.max((Number(row.this_month || 0) / maxValue) * 100, 4)}%`, backgroundColor: colors.dark }} />
               </div>
               <span className="w-20 text-right text-xs font-bold text-slate-700">{row.key === 'revenue' ? money(row.this_month) : row.this_month}</span>
             </div>
             <div className="flex items-center gap-3">
               <span className="w-20 text-xs font-semibold text-slate-500">Last</span>
               <div className="h-2 flex-1 rounded-full bg-slate-200">
-                <div className="h-2 rounded-full bg-slate-500" style={{ width: `${Math.max((Number(row.last_month || 0) / maxValue) * 100, 4)}%` }} />
+                <div className="h-2 rounded-full" style={{ width: `${Math.max((Number(row.last_month || 0) / maxValue) * 100, 4)}%`, backgroundColor: colors.light }} />
               </div>
               <span className="w-20 text-right text-xs font-bold text-slate-700">{row.key === 'revenue' ? money(row.last_month) : row.last_month}</span>
             </div>
           </div>
         </div>
-      ))}
+      )})}
     </div>
   )
 }
@@ -69,17 +79,25 @@ function UsageLine({ points }) {
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
       <svg viewBox="0 0 100 40" className="h-32 w-full overflow-visible">
-        <polyline points={polyline} fill="none" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={polyline} fill="none" stroke="#334155" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
         {values.map((item, index) => {
           const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100
           const y = 36 - ((Number(item.seconds || 0) / maxSeconds) * 30)
-          return <circle key={item.date} cx={x} cy={y} r="1.8" fill="#0f172a" />
+          return <circle key={item.date} cx={x} cy={y} r="1.8" fill="#334155" />
         })}
       </svg>
       <div className="mt-2 flex justify-between text-xs font-semibold text-slate-500">
         <span>{values[0]?.date || '-'}</span>
         <span>{values[values.length - 1]?.date || '-'}</span>
       </div>
+    </div>
+  )
+}
+
+function InsightCard({ children }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-sm font-semibold leading-6 text-slate-700">{children}</p>
     </div>
   )
 }
@@ -180,9 +198,9 @@ export default function PerformanceHubPage() {
 
             <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Insights</p>
-              <div className="mt-4 space-y-3">
+              <div className="mt-4 grid gap-3">
                 {(data.insights || []).map((item) => (
-                  <p key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-700">{item}</p>
+                  <InsightCard key={item}>{item}</InsightCard>
                 ))}
               </div>
             </div>
