@@ -1692,11 +1692,11 @@ class PaymentReasonRequestSerializer(serializers.ModelSerializer):
             'question', 'staff_response', 'promised_payment_date', 'status',
             'status_display', 'student_name', 'course_name', 'branch_name',
             'submitted_by', 'submitted_display', 'created_display',
-            'created_at', 'responded_at', 'approved_at', 'rejected_at',
+            'created_at', 'responded_at', 'approved_at', 'rejected_at', 'resolved_at',
         ]
         read_only_fields = [
             'admin_user', 'branch_staff', 'question', 'status',
-            'created_at', 'responded_at', 'approved_at', 'rejected_at',
+            'created_at', 'responded_at', 'approved_at', 'rejected_at', 'resolved_at',
         ]
 
     def get_submitted_display(self, obj):
@@ -1727,19 +1727,19 @@ class PaymentSerializer(serializers.ModelSerializer):
     branch_name = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
     counselor_user = serializers.SerializerMethodField()
-    is_important = serializers.BooleanField(source='enrollment.is_important', read_only=True)
     payment_schedule = serializers.SerializerMethodField()
     installment_summary = serializers.SerializerMethodField()
     active_reason_requests = serializers.SerializerMethodField()
+    latest_reason_request = serializers.SerializerMethodField()
 
     class Meta:
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
                   'course_name','first_class_date','branch','branch_name','counselor_name',
-                  'counselor_user','is_important',
+                  'counselor_user',
                   'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
-                  'installments','active_reason_requests','updated_at']
+                  'installments','active_reason_requests','latest_reason_request','updated_at']
         read_only_fields = ['paid_amount','balance','status']
 
     def get_branch_name(self, obj):
@@ -1775,6 +1775,17 @@ class PaymentSerializer(serializers.ModelSerializer):
             ],
         ).select_related('admin_user', 'branch_staff', 'payment__enrollment__course', 'payment__enrollment__branch')
         return PaymentReasonRequestSerializer(requests, many=True).data
+
+    def get_latest_reason_request(self, obj):
+        reason_request = obj.reason_requests.select_related(
+            'admin_user',
+            'branch_staff',
+            'payment__enrollment__course',
+            'payment__enrollment__branch',
+        ).order_by('-created_at').first()
+        if not reason_request:
+            return None
+        return PaymentReasonRequestSerializer(reason_request).data
 
 
 class AdminReceiptSerializer(serializers.ModelSerializer):

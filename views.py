@@ -6864,6 +6864,36 @@ class PaymentReasonRequestViewSet(viewsets.ModelViewSet):
         )
         return Response(PaymentReasonRequestSerializer(reason_request).data)
 
+    @action(detail=True, methods=['post'], url_path='mark-resolved')
+    def mark_resolved(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can mark payment reason requests resolved.'}, status=403)
+        reason_request = self.get_object()
+        if reason_request.status == PaymentReasonRequest.Status.RESOLVED:
+            return Response(PaymentReasonRequestSerializer(reason_request).data)
+        if reason_request.status not in [
+            PaymentReasonRequest.Status.APPROVED,
+            PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL,
+        ]:
+            return Response({'detail': 'Only approved or review-ready payment reason requests can be resolved.'}, status=400)
+        reason_request.status = PaymentReasonRequest.Status.RESOLVED
+        reason_request.resolved_at = timezone.now()
+        reason_request.save(update_fields=['status', 'resolved_at', 'updated_at'])
+        mark_notifications_terminal(
+            Notification.objects.filter(
+                related_url=f'/payments?reason_request={reason_request.id}',
+            ),
+            Notification.Status.RESOLVED,
+        )
+        create_user_notification(
+            reason_request.branch_staff,
+            'Payment Reason Request Resolved',
+            'Admin marked the payment reason request as resolved.',
+            Notification.NType.SUCCESS,
+            f'/payments?reason_request={reason_request.id}',
+        )
+        return Response(PaymentReasonRequestSerializer(reason_request).data)
+
     def _update_requested_due_date(self, reason_request):
         payment = reason_request.payment
         schedule = [
@@ -7104,15 +7134,6 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             str(request.data.get('reason') or 'Admin confirmed permanent delete.').strip(),
         )
         return super().destroy(request, *args, **kwargs)
-
-    @action(detail=True, methods=['post'], url_path='toggle-important')
-    def toggle_important(self, request, pk=None):
-        payment = self.get_object()
-        enrollment = payment.enrollment
-        requested = request.data.get('is_important', None)
-        enrollment.is_important = truthy_query_param(requested) if requested is not None else not enrollment.is_important
-        enrollment.save(update_fields=['is_important', 'updated_at'])
-        return Response({'id': payment.id, 'enrollment': enrollment.id, 'is_important': enrollment.is_important})
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):

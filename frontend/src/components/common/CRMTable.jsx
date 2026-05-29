@@ -33,33 +33,45 @@ export default function CRMTable({ columns, rows, keyField = 'id', emptyMessage 
   return (
     <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white">
       <div className="hidden min-[900px]:block">
-        <div
-          className="grid items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500"
-          style={{ gridTemplateColumns }}
-        >
-          {columns.map((column) => (
-            <div key={column.key} className={column.headerClassName || ''}>{column.header}</div>
-          ))}
-        </div>
-        {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-sm font-medium text-slate-500">{emptyMessage}</div>
-        ) : (
-          <div className="divide-y divide-slate-200">
-            {rows.map((row) => (
-              <div
-                key={row[keyField]}
-                className="grid min-h-[68px] items-center gap-3 px-4 py-3 text-sm transition hover:bg-slate-50"
-                style={{ gridTemplateColumns }}
-              >
-                {columns.map((column) => (
-                  <div key={column.key} className={`min-w-0 ${column.className || ''}`}>
-                    {column.render ? column.render(row) : row[column.key]}
+        <div className="overflow-x-auto">
+          <div className="min-w-max">
+            <div
+              className="grid items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500"
+              style={{ gridTemplateColumns }}
+            >
+              {columns.map((column) => (
+                <div
+                  key={column.key}
+                  className={`${column.sticky ? 'sticky right-0 z-20 bg-slate-50 pl-4 shadow-[-12px_0_18px_-18px_rgba(15,23,42,0.7)]' : ''} ${column.headerClassName || ''}`}
+                >
+                  {column.header}
+                </div>
+              ))}
+            </div>
+            {rows.length === 0 ? (
+              <div className="px-4 py-10 text-center text-sm font-medium text-slate-500">{emptyMessage}</div>
+            ) : (
+              <div className="divide-y divide-slate-200">
+                {rows.map((row) => (
+                  <div
+                    key={row[keyField]}
+                    className="grid min-h-[68px] items-center gap-3 px-4 py-3 text-sm transition hover:bg-slate-50"
+                    style={{ gridTemplateColumns }}
+                  >
+                    {columns.map((column) => (
+                      <div
+                        key={column.key}
+                        className={`min-w-0 ${column.sticky ? 'sticky right-0 z-10 bg-white pl-4 shadow-[-12px_0_18px_-18px_rgba(15,23,42,0.7)]' : ''} ${column.className || ''}`}
+                      >
+                        {column.render ? column.render(row) : row[column.key]}
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       <div className="divide-y divide-slate-200 min-[900px]:hidden">

@@ -528,14 +528,16 @@ export default function PaymentDetailPage() {
                                   >
                                     Download {documentLabel}
                                   </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => sendBill(installment)}
-                                    disabled={billActionId === installment.id || sendingBillId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-cyan-200 bg-cyan-50 px-2 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
-                                  >
-                                    {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
-                                  </button>
+                                  {!isSuperAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => sendBill(installment)}
+                                      disabled={billActionId === installment.id || sendingBillId === installment.id}
+                                      className="w-full whitespace-nowrap rounded-xl border border-cyan-200 bg-cyan-50 px-2 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
+                                    >
+                                      {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
+                                    </button>
+                                  )}
                                 </>
                               ) : null}
                             </div>
@@ -618,14 +620,16 @@ export default function PaymentDetailPage() {
                             >
                               Download {documentLabel}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => sendBill(installment)}
-                              disabled={billActionId === installment.id || sendingBillId === installment.id}
-                              className="w-full whitespace-nowrap rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
-                            >
-                              {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
-                            </button>
+                            {!isSuperAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => sendBill(installment)}
+                                disabled={billActionId === installment.id || sendingBillId === installment.id}
+                                className="w-full whitespace-nowrap rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
+                              >
+                                {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
+                              </button>
+                            )}
                           </>
                         ) : null}
                       </div>

@@ -1263,6 +1263,7 @@ class PaymentReasonRequest(models.Model):
         PENDING_ADMIN_APPROVAL = 'pending_admin_approval', 'Pending Admin Approval'
         APPROVED = 'approved', 'Approved'
         REJECTED = 'rejected', 'Rejected'
+        RESOLVED = 'resolved', 'Resolved'
 
     payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name='reason_requests')
     installment_index = models.PositiveSmallIntegerField(db_index=True)
@@ -1277,6 +1278,7 @@ class PaymentReasonRequest(models.Model):
     responded_at = models.DateTimeField(null=True, blank=True)
     approved_at = models.DateTimeField(null=True, blank=True)
     rejected_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

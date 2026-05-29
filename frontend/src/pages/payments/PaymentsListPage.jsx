@@ -98,6 +98,23 @@ function activeReasonRequestFor(row, installmentIndex) {
   return (row.active_reason_requests || []).find((item) => Number(item.installment_index) === Number(installmentIndex)) || null
 }
 
+function latestGeneratedDocument(row) {
+  const documents = orderedInstallments(row).filter((installment) => (
+    installment.bill_is_generated || installment.bill_number || installment.document_status === 'bill_generated'
+  ))
+  return documents[documents.length - 1] || null
+}
+
+function paymentReasonStatus(row) {
+  const request = row.latest_reason_request || (row.active_reason_requests || [])[0] || null
+  if (request?.status === 'pending_response') return { label: 'Pending Reason', tone: 'amber' }
+  if (request?.status === 'pending_admin_approval') return { label: 'Pending Response', tone: 'cyan' }
+  if (request?.status === 'approved') return { label: 'Approved Promise', tone: 'green' }
+  if (request?.status === 'resolved') return { label: 'Resolved', tone: 'green' }
+  if (Number(row.balance || 0) > 0) return { label: 'Waiting for Payment', tone: 'slate' }
+  return null
+}
+
 function feeReminderMessage(row) {
   return `Hi ${row.student_name},
 
@@ -132,6 +149,7 @@ export default function PaymentsListPage() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(navigationMessage)
   const [sendingId, setSendingId] = useState(null)
+  const [documentActionId, setDocumentActionId] = useState(null)
   const [reasonRequest, setReasonRequest] = useState(null)
   const [reasonMode, setReasonMode] = useState('')
   const [reasonForm, setReasonForm] = useState({ staff_response: '', promised_payment_date: '' })
@@ -310,6 +328,7 @@ export default function PaymentsListPage() {
       return {
         ...row,
         active_reason_requests: isActive ? [...filtered, request] : filtered,
+        latest_reason_request: request,
       }
     }))
   }
@@ -380,6 +399,59 @@ export default function PaymentsListPage() {
     }
   }
 
+  const markReasonResolved = async () => {
+    if (!reasonRequest) return
+    setReasonSubmitting(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/payment-reason-requests/${reasonRequest.id}/mark-resolved/`)
+      upsertReasonRequest(data)
+      closeReasonModal()
+      setMessage('Payment reason request marked resolved.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to mark request resolved.'))
+    } finally {
+      setReasonSubmitting(false)
+    }
+  }
+
+  const downloadBill = async (installment) => {
+    if (!installment) return
+    setDocumentActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.get(`/installments/${installment.id}/download-bill/`, {
+        responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${installment.document_number || `payment-document-${installment.id}`}.html`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to download bill.'))
+    } finally {
+      setDocumentActionId(null)
+    }
+  }
+
+  const sendBill = async (row, installment) => {
+    if (!installment) return
+    setDocumentActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
+      setMessage(data.whatsapp_sent ? `Bill sent to ${row.student_name}.` : data.whatsapp_error || 'Bill send request failed.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to send bill.'))
+    } finally {
+      setDocumentActionId(null)
+    }
+  }
+
   const sendReminder = async (row) => {
     setSendingId(row.id)
     setMessage('')
@@ -406,6 +478,7 @@ export default function PaymentsListPage() {
   const actionControls = (row, compact = false) => {
     const nextPending = nextPendingInstallment(row)
     const reason = nextPending ? activeReasonRequestFor(row, nextPending.index) : null
+    const generatedDocument = latestGeneratedDocument(row)
     const buttonClass = compact
       ? 'whitespace-nowrap rounded-2xl px-4 py-3 text-sm font-semibold'
       : 'inline-flex whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold'
@@ -434,7 +507,7 @@ export default function PaymentsListPage() {
     }
 
     return (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap">
         {Number(row.balance || 0) > 0 ? (
           <button
             type="button"
@@ -449,9 +522,25 @@ export default function PaymentsListPage() {
         )}
         {reason?.status === 'pending_response' && (
           <button type="button" onClick={() => openReasonRequest(reason)} className={secondaryClass}>
-            Respond to Admin
+            Respond Reason
           </button>
         )}
+        <button
+          type="button"
+          onClick={() => downloadBill(generatedDocument)}
+          disabled={!generatedDocument || documentActionId === generatedDocument?.id}
+          className={`${secondaryClass} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          Download Bill
+        </button>
+        <button
+          type="button"
+          onClick={() => sendBill(row, generatedDocument)}
+          disabled={!generatedDocument || documentActionId === generatedDocument?.id}
+          className={`${secondaryClass} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          {documentActionId === generatedDocument?.id ? 'Sending...' : 'Send Bill'}
+        </button>
       </div>
     )
   }
@@ -633,21 +722,21 @@ export default function PaymentsListPage() {
                 {
                   key: 'student',
                   header: 'Student',
-                  width: 'minmax(150px,1.25fr)',
+                  width: 'minmax(190px,1.25fr)',
                   render: (row) => (
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
                         <OwnerDot user={row.counselor_user} />
-                        <Link to={`/payments/${row.id}`} className="min-w-0 truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
+                        <Link to={`/payments/${row.id}`} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.student_name}</Link>
                       </div>
-                      <p className="mt-1 truncate text-xs text-slate-500">{row.student_phone || row.student_number || '-'}</p>
+                      <p className="mt-1 text-xs font-medium text-slate-500">{row.student_number || row.student_phone || '-'}</p>
                     </div>
                   ),
                 },
                 {
                   key: 'course',
                   header: 'Course',
-                  width: 'minmax(170px,220px)',
+                  width: 'minmax(190px,240px)',
                   render: (row) => (
                     <span className="block max-w-[220px] overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [overflow-wrap:anywhere] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
                       {row.course_name || '-'}
@@ -665,13 +754,23 @@ export default function PaymentsListPage() {
                 { key: 'dueAmount', header: 'Due', width: '105px', render: (row) => <span className={`font-semibold ${isOverduePayment(row) ? 'text-rose-700' : 'text-slate-900'}`}>Rs {money(nextDueAmount(row))}</span> },
                 { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-black text-slate-950">Rs {money(row.balance)}</span> },
                 { key: 'dueDate', header: 'Due Date', width: '120px', render: (row) => <span className={isOverduePayment(row) ? 'font-bold text-rose-700' : 'text-slate-700'}>{formatDate(nextPendingInstallment(row)?.due_date || row.next_payment_date)}</span> },
-                { key: 'status', header: 'Status', width: '115px', render: (row) => <StatusBadge tone={row.status === 'paid' ? 'green' : row.status === 'partial' ? 'amber' : 'red'}>{statusLabel(row.status)}</StatusBadge> },
+                { key: 'status', header: 'Status', width: '130px', render: (row) => <StatusBadge tone={row.status === 'paid' ? 'green' : row.status === 'partial' ? 'amber' : 'red'}>{statusLabel(row.status)}</StatusBadge> },
+                {
+                  key: 'reasonStatus',
+                  header: 'Reason',
+                  width: '160px',
+                  render: (row) => {
+                    const status = paymentReasonStatus(row)
+                    return status ? <StatusBadge tone={status.tone}>{status.label}</StatusBadge> : <span className="text-slate-400">-</span>
+                  },
+                },
                 {
                   key: 'actions',
                   header: 'Actions',
-                  width: 'minmax(120px,0.9fr)',
+                  width: isSuperAdmin ? '180px' : '340px',
+                  sticky: true,
                   render: (row) => (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex min-w-max flex-wrap justify-end gap-2">
                       {actionControls(row)}
                     </div>
                   ),
@@ -796,6 +895,16 @@ export default function PaymentsListPage() {
                         Reject
                       </button>
                     </div>
+                  )}
+                  {isSuperAdmin && ['approved', 'pending_admin_approval'].includes(reasonRequest.status) && (
+                    <button
+                      type="button"
+                      onClick={markReasonResolved}
+                      disabled={reasonSubmitting}
+                      className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      Mark Resolved
+                    </button>
                   )}
                 </>
               )}
