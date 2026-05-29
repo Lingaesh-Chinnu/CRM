@@ -1901,22 +1901,61 @@ def session_duration_seconds(session, end_limit=None):
 def usage_seconds_for(user, start_date, end_date):
     start_dt = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
     end_dt = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+    now = timezone.now()
+    effective_end_dt = min(end_dt, now)
+    if effective_end_dt <= start_dt:
+        return 0, {}
     sessions = UserSessionLog.objects.filter(
         user=user,
-        login_at__lte=end_dt,
+        login_at__lte=effective_end_dt,
         last_seen_at__gte=start_dt,
-    )
-    total = 0
-    daily = {}
+    ).only('login_at', 'logout_at', 'last_seen_at', 'is_active_session').order_by('login_at', 'last_seen_at')
+    intervals = []
     for session in sessions:
+        if not session.login_at:
+            continue
+        raw_end = session.logout_at or session.last_seen_at
+        if not raw_end:
+            continue
+        if session.is_active_session:
+            raw_end = min(raw_end, now)
+        if raw_end <= session.login_at:
+            continue
         session_start = max(session.login_at, start_dt)
-        session_end = min(session.logout_at or session.last_seen_at or timezone.now(), end_dt)
+        session_end = min(raw_end, effective_end_dt)
         if session_end <= session_start:
             continue
-        seconds = int((session_end - session_start).total_seconds())
-        total += seconds
-        day_key = timezone.localtime(session_start).date().isoformat()
-        daily[day_key] = daily.get(day_key, 0) + seconds
+        intervals.append((session_start, session_end))
+    if not intervals:
+        return 0, {}
+
+    merged = []
+    for interval_start, interval_end in sorted(intervals):
+        if not merged or interval_start > merged[-1][1]:
+            merged.append([interval_start, interval_end])
+        else:
+            merged[-1][1] = max(merged[-1][1], interval_end)
+
+    total = 0
+    daily = {}
+    for interval_start, interval_end in merged:
+        cursor = interval_start
+        while cursor < interval_end:
+            local_cursor = timezone.localtime(cursor)
+            day_end = timezone.make_aware(datetime.combine(local_cursor.date(), datetime.max.time()))
+            slice_end = min(interval_end, day_end)
+            seconds = max(int((slice_end - cursor).total_seconds()), 0)
+            if seconds:
+                day_key = local_cursor.date().isoformat()
+                daily[day_key] = daily.get(day_key, 0) + seconds
+                total += seconds
+            cursor = slice_end + timedelta(microseconds=1)
+
+    max_window_seconds = max(int((effective_end_dt - start_dt).total_seconds()), 0)
+    if total > max_window_seconds:
+        total = max_window_seconds
+    for day_key, seconds in list(daily.items()):
+        daily[day_key] = min(seconds, 86400)
     return total, daily
 
 

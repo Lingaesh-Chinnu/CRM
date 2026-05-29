@@ -318,8 +318,11 @@ export default function ReportsPage() {
                           <p className="text-xs font-bold text-slate-500">{percentage(row.conversion_percent)}</p>
                         </div>
                         <p className="mt-2 text-2xl font-black text-slate-950">{row.count}</p>
-                        <div className="mt-3 h-2 rounded-full bg-slate-200">
-                          <div className="h-2 rounded-full" style={{ width: `${Math.max(Number(row.conversion_percent || 0), 8)}%`, backgroundColor: colors.dark }} />
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-2 max-w-full rounded-full"
+                            style={{ width: `${Math.min(Math.max(Number(row.conversion_percent || 0), 8), 100)}%`, backgroundColor: colors.dark }}
+                          />
                         </div>
                       </div>
                     )
