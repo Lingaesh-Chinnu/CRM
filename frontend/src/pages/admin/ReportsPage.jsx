@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 
 function currency(value) {
@@ -19,6 +19,36 @@ function monthLabel(value) {
   return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
 }
 
+function trendPoints(rows) {
+  const values = rows || []
+  const maxValue = Math.max(...values.map((item) => Number(item.value || 0)), 1)
+  return values.map((item, index) => {
+    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100
+    const y = 38 - ((Number(item.value || 0) / maxValue) * 32)
+    return `${x},${y}`
+  }).join(' ')
+}
+
+function MiniTrend({ rows }) {
+  return (
+    <svg viewBox="0 0 100 42" className="h-24 w-full overflow-visible">
+      <polyline points={trendPoints(rows)} fill="none" stroke="#0f172a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function AnalyticsCard({ label, value, change }) {
+  return (
+    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-black tracking-tight text-slate-950">{value}</p>
+      <p className={`mt-2 text-xs font-bold ${Number(change || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+        {Number(change || 0) >= 0 ? '+' : ''}{Number(change || 0).toFixed(0)}% from last month
+      </p>
+    </div>
+  )
+}
+
 export default function ReportsPage() {
   const today = new Date()
   const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`)
@@ -27,6 +57,15 @@ export default function ReportsPage() {
   const [ratingRows, setRatingRows] = useState([])
   const [funnelRows, setFunnelRows] = useState([])
   const [branchRows, setBranchRows] = useState([])
+  const [analytics, setAnalytics] = useState(null)
+  const [analyticsFilters, setAnalyticsFilters] = useState({
+    branch: '',
+    user: '',
+    course: '',
+    source: '',
+    date_from: '',
+    date_to: '',
+  })
 
   const fetchReport = async (selectedMonth = month) => {
     const { data } = await api.get(`/reports/user-performance/?month=${selectedMonth}`)
@@ -49,14 +88,38 @@ export default function ReportsPage() {
     setBranchRows(branchRes.data || [])
   }
 
+  const fetchAnalytics = async () => {
+    const params = { month }
+    Object.entries(analyticsFilters).forEach(([key, value]) => {
+      if (value) params[key] = value
+    })
+    const { data } = await api.get('/reports/analytics-dashboard/', { params })
+    setAnalytics(data)
+  }
+
   useEffect(() => {
     fetchReport(month)
     fetchAutomationReports()
+    fetchAnalytics()
   }, [month])
 
   useEffect(() => {
     fetchRatings()
   }, [])
+
+  const visibleUsers = useMemo(() => {
+    const users = analytics?.filters?.users || []
+    if (!analyticsFilters.branch) return users
+    return users.filter((item) => String(item.branch_id || '') === String(analyticsFilters.branch))
+  }, [analytics, analyticsFilters.branch])
+
+  const updateAnalyticsFilter = (key, value) => {
+    setAnalyticsFilters((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === 'branch' ? { user: '' } : {}),
+    }))
+  }
 
   const totals = rows.reduce(
     (accumulator, row) => {
@@ -118,6 +181,135 @@ export default function ReportsPage() {
           </button>
         </div>
       </section>
+
+      <section className="space-y-5 rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Analytics Dashboard</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Business performance analytics</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Filter lead, walk-in, enrollment, revenue, follow-up, counselor, and branch performance.
+            </p>
+          </div>
+          <button onClick={fetchAnalytics} className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+            Apply Filters
+          </button>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <select value={analyticsFilters.branch} onChange={(event) => updateAnalyticsFilter('branch', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="">All branches</option>
+            {(analytics?.filters?.branches || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select value={analyticsFilters.user} onChange={(event) => updateAnalyticsFilter('user', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="">All counselors</option>
+            {visibleUsers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select value={analyticsFilters.course} onChange={(event) => updateAnalyticsFilter('course', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="">All courses</option>
+            {(analytics?.filters?.courses || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+          <select value={analyticsFilters.source} onChange={(event) => updateAnalyticsFilter('source', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="">All sources</option>
+            {(analytics?.filters?.sources || []).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <input type="date" value={analyticsFilters.date_from} onChange={(event) => updateAnalyticsFilter('date_from', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+          <input type="date" value={analyticsFilters.date_to} onChange={(event) => updateAnalyticsFilter('date_to', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+        </div>
+      </section>
+
+      {analytics && (
+        <>
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <AnalyticsCard label="Leads" value={analytics.metrics.leads} change={analytics.changes.leads} />
+            <AnalyticsCard label="Walk-ins" value={analytics.metrics.walkins} change={analytics.changes.walkins} />
+            <AnalyticsCard label="Enrollments" value={analytics.metrics.enrollments} change={analytics.changes.enrollments} />
+            <AnalyticsCard label="Revenue" value={currency(analytics.metrics.revenue)} change={analytics.changes.revenue} />
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-4">
+            {[
+              ['Leads trend', analytics.trends.leads],
+              ['Walk-in trend', analytics.trends.walkins],
+              ['Enrollment trend', analytics.trends.enrollments],
+              ['Revenue trend', analytics.trends.revenue],
+            ].map(([label, trend]) => (
+              <div key={label} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+                <div className="mt-4 rounded-2xl bg-slate-50 p-4">
+                  <MiniTrend rows={trend} />
+                </div>
+              </div>
+            ))}
+          </section>
+
+          <section className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Conversion Funnel</p>
+              <div className="mt-5 space-y-3">
+                {analytics.funnel.map((row) => (
+                  <div key={row.stage} className="rounded-2xl bg-slate-50 p-4">
+                    <div className="flex items-center justify-between">
+                      <p className="font-bold text-slate-950">{row.stage}</p>
+                      <p className="text-xs font-bold text-slate-500">{percentage(row.conversion_percent)}</p>
+                    </div>
+                    <p className="mt-2 text-2xl font-black text-slate-950">{row.count}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Follow-up Efficiency</p>
+                <p className="mt-2 text-2xl font-black text-slate-950">{percentage(analytics.followup_efficiency.completion_ratio)}</p>
+                <p className="mt-2 text-sm text-slate-500">{analytics.followup_efficiency.pending_followups} pending follow-ups</p>
+              </div>
+            </div>
+
+            <div className="grid gap-6">
+              <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <div className="border-b border-slate-200 px-6 py-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counselor Comparison</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="grid min-w-[860px] grid-cols-[1.4fr_0.7fr_0.7fr_0.8fr_0.9fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    <div>Counselor</div><div>Leads</div><div>Walk-ins</div><div>Enrolls</div><div>Conv.</div><div>Revenue</div>
+                  </div>
+                  {analytics.counselor_comparison.map((row) => (
+                    <div key={row.user_id} className="grid min-w-[860px] grid-cols-[1.4fr_0.7fr_0.7fr_0.8fr_0.9fr_1fr] gap-4 border-b border-slate-100 px-6 py-4 text-sm text-slate-700">
+                      <div><p className="font-bold text-slate-950">{row.name}</p><p className="text-xs text-slate-500">{row.branch_name}</p></div>
+                      <div>{row.leads}</div><div>{row.walkins}</div><div>{row.enrollments}</div><div>{percentage(row.conversion_ratio)}</div><div>{currency(row.revenue)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+                <div className="border-b border-slate-200 px-6 py-5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Branch Comparison</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="grid min-w-[760px] grid-cols-[1.4fr_0.7fr_0.8fr_0.9fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    <div>Branch</div><div>Leads</div><div>Enrolls</div><div>Conv.</div><div>Revenue</div>
+                  </div>
+                  {analytics.branch_comparison.map((row) => (
+                    <div key={row.branch_id} className="grid min-w-[760px] grid-cols-[1.4fr_0.7fr_0.8fr_0.9fr_1fr] gap-4 border-b border-slate-100 px-6 py-4 text-sm text-slate-700">
+                      <div className="font-bold text-slate-950">{row.branch_name}</div><div>{row.leads}</div><div>{row.enrollments}</div><div>{percentage(row.conversion_ratio)}</div><div>{currency(row.revenue)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Performance Insights</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {analytics.insights.map((item) => (
+                <p key={item} className="rounded-2xl bg-slate-50 px-4 py-3 text-sm font-semibold leading-6 text-slate-700">{item}</p>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">

@@ -27,7 +27,8 @@ from views import (
     DeleteCandidatesView,
     ExportLeadsExcelView, ExportEnrollmentsExcelView,
     UserPerformanceReportView, UserRatingReportView, ConversionFunnelReportView,
-    BranchPerformanceComparisonReportView, PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
+    BranchPerformanceComparisonReportView, PerformanceHubView, AdminAnalyticsDashboardView,
+    PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
     RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView,
 )
@@ -88,6 +89,8 @@ api_urlpatterns = [
     path('reports/user-ratings/', UserRatingReportView.as_view(), name='user-rating-report'),
     path('reports/conversion-funnel/', ConversionFunnelReportView.as_view(), name='conversion-funnel-report'),
     path('reports/branch-performance/', BranchPerformanceComparisonReportView.as_view(), name='branch-performance-report'),
+    path('performance-hub/', PerformanceHubView.as_view(), name='performance-hub'),
+    path('reports/analytics-dashboard/', AdminAnalyticsDashboardView.as_view(), name='admin-analytics-dashboard'),
     path('admin/user-monitoring/', UserMonitoringView.as_view(), name='user-monitoring'),
     path('phone-numbers/<str:record_type>/<int:record_id>/', PhoneNumberUpdateView.as_view(), name='phone-number-update'),
 

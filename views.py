@@ -52,12 +52,13 @@ from django.shortcuts import render
 from django.db import IntegrityError, connection, transaction
 from django.db.utils import OperationalError, ProgrammingError
 from django.db.models import Sum, Count, Q, F, Exists, OuterRef, Subquery
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import base64
@@ -1827,6 +1828,396 @@ class UserPerformanceReportView(APIView):
 
         serializer = UserPerformanceReportSerializer(report_rows, many=True)
         return Response(serializer.data)
+
+
+def month_bounds_for(value=None):
+    today = timezone.localdate()
+    if value:
+        try:
+            year, month = [int(part) for part in str(value).split('-', 1)]
+            start = today.replace(year=year, month=month, day=1)
+        except (TypeError, ValueError):
+            start = today.replace(day=1)
+    else:
+        start = today.replace(day=1)
+    return start, start.replace(day=monthrange(start.year, start.month)[1])
+
+
+def previous_month_bounds(start_date):
+    previous_end = start_date - timedelta(days=1)
+    previous_start = previous_end.replace(day=1)
+    return previous_start, previous_end
+
+
+def date_range_from_request(request):
+    start_date = parse_date(str(request.query_params.get('date_from') or '').strip())
+    end_date = parse_date(str(request.query_params.get('date_to') or '').strip())
+    if start_date and end_date:
+        return start_date, end_date
+    if start_date:
+        return start_date, timezone.localdate()
+    if end_date:
+        return end_date.replace(day=1), end_date
+    return month_bounds_for(request.query_params.get('month'))
+
+
+def pct_change(current, previous):
+    current_value = float(current or 0)
+    previous_value = float(previous or 0)
+    if previous_value == 0:
+        return 100.0 if current_value > 0 else 0.0
+    return round(((current_value - previous_value) / previous_value) * 100, 2)
+
+
+def ratio(numerator, denominator):
+    denominator_value = float(denominator or 0)
+    if denominator_value <= 0:
+        return 0.0
+    return round((float(numerator or 0) / denominator_value) * 100, 2)
+
+
+def seconds_to_duration(total_seconds):
+    total_seconds = max(int(total_seconds or 0), 0)
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    if hours:
+        return f'{hours}h {minutes}m'
+    return f'{minutes}m'
+
+
+def session_duration_seconds(session, end_limit=None):
+    login_at = session.login_at
+    end_at = session.logout_at or session.last_seen_at or timezone.now()
+    if session.is_active_session:
+        end_at = min(timezone.now(), end_at)
+    if end_limit:
+        end_at = min(end_at, end_limit)
+    return max(int((end_at - login_at).total_seconds()), 0)
+
+
+def usage_seconds_for(user, start_date, end_date):
+    start_dt = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+    end_dt = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+    sessions = UserSessionLog.objects.filter(
+        user=user,
+        login_at__lte=end_dt,
+        last_seen_at__gte=start_dt,
+    )
+    total = 0
+    daily = {}
+    for session in sessions:
+        session_start = max(session.login_at, start_dt)
+        session_end = min(session.logout_at or session.last_seen_at or timezone.now(), end_dt)
+        if session_end <= session_start:
+            continue
+        seconds = int((session_end - session_start).total_seconds())
+        total += seconds
+        day_key = timezone.localtime(session_start).date().isoformat()
+        daily[day_key] = daily.get(day_key, 0) + seconds
+    return total, daily
+
+
+def count_by_date(queryset, date_field, start_date, end_date):
+    rows = (
+        queryset
+        .filter(**{f'{date_field}__date__gte': start_date, f'{date_field}__date__lte': end_date})
+        .annotate(day=TruncDate(date_field))
+        .values('day')
+        .annotate(count=Count('id'))
+        .order_by('day')
+    )
+    return {row['day'].isoformat(): row['count'] for row in rows if row.get('day')}
+
+
+def enrollment_value(queryset):
+    return queryset.aggregate(total=Sum('net_payable_fee'))['total'] or 0
+
+
+def performance_metrics(scope, start_date, end_date):
+    leads = scope['leads'].filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+    walkins = scope['walkins'].filter(visit_date__gte=start_date, visit_date__lte=end_date)
+    enrollments = scope['enrollments'].filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+    followups = scope['followups'].filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+    pending_leads = scope['leads'].filter(next_follow_up_date__lt=timezone.localdate()).exclude(status__in=[
+        Lead.Status.ENROLLED,
+        Lead.Status.CONVERTED,
+        Lead.Status.CONVERTED_TO_WALKIN,
+        Lead.Status.LOST,
+        Lead.Status.DROPPED,
+    ])
+    pending_walkins = scope['walkins'].filter(follow_up_date__lt=timezone.localdate()).exclude(status__in=[
+        WalkIn.Status.CONVERTED,
+        WalkIn.Status.NOT_INTERESTED,
+    ])
+    leads_count = leads.count()
+    walkins_count = walkins.count()
+    enrollments_count = enrollments.count()
+    converted_walkins = walkins.filter(status=WalkIn.Status.CONVERTED).count()
+    revenue = enrollment_value(enrollments)
+    return {
+        'leads': leads_count,
+        'walkins': walkins_count,
+        'walkins_converted': converted_walkins,
+        'enrollments': enrollments_count,
+        'conversion_ratio': ratio(enrollments_count, leads_count),
+        'pending_followups': pending_leads.count() + pending_walkins.count(),
+        'total_followups': followups.count(),
+        'revenue': revenue,
+    }
+
+
+def user_scope(user):
+    return {
+        'leads': Lead.objects.filter(Q(created_by=user) | Q(assigned_to=user), is_deleted=False).distinct(),
+        'walkins': WalkIn.objects.filter(Q(created_by=user) | Q(assigned_to=user), is_deleted=False).distinct(),
+        'enrollments': Enrollment.objects.filter(Q(created_by=user) | Q(enrolled_by=user), is_deleted=False).distinct(),
+        'followups': FollowUp.objects.filter(updated_by=user),
+    }
+
+
+def branch_scope(branch):
+    return {
+        'leads': Lead.objects.filter(branch=branch, is_deleted=False),
+        'walkins': WalkIn.objects.filter(branch=branch, is_deleted=False),
+        'enrollments': Enrollment.objects.filter(branch=branch, is_deleted=False),
+        'followups': FollowUp.objects.filter(updated_by__branch=branch),
+    }
+
+
+def average_followup_response_seconds(user, start_date, end_date):
+    followups = FollowUp.objects.filter(
+        updated_by=user,
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+    ).order_by('record_type', 'record_id', 'created_at')
+    first_followups = {}
+    for item in followups:
+        first_followups.setdefault((item.record_type, item.record_id), item.created_at)
+    if not first_followups:
+        return 0
+    lead_ids = [record_id for record_type, record_id in first_followups if record_type == FollowUp.RecordType.LEAD]
+    walkin_ids = [record_id for record_type, record_id in first_followups if record_type == FollowUp.RecordType.WALKIN]
+    created_lookup = {
+        (FollowUp.RecordType.LEAD, item.id): item.created_at
+        for item in Lead.objects.filter(id__in=lead_ids).only('id', 'created_at')
+    }
+    created_lookup.update({
+        (FollowUp.RecordType.WALKIN, item.id): item.created_at
+        for item in WalkIn.objects.filter(id__in=walkin_ids).only('id', 'created_at')
+    })
+    durations = []
+    for key, first_at in first_followups.items():
+        created_at = created_lookup.get(key)
+        if created_at and first_at >= created_at:
+            durations.append((first_at - created_at).total_seconds())
+    return int(sum(durations) / len(durations)) if durations else 0
+
+
+class PerformanceHubView(APIView):
+    """Current user's private performance analytics plus branch summary."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        user = request.user
+        start_date, end_date = date_range_from_request(request)
+        previous_start, previous_end = previous_month_bounds(start_date)
+        personal_scope = user_scope(user)
+        branch = user.branch
+        branch_data_scope = branch_scope(branch) if branch else {
+            'leads': Lead.objects.none(),
+            'walkins': WalkIn.objects.none(),
+            'enrollments': Enrollment.objects.none(),
+            'followups': FollowUp.objects.none(),
+        }
+        current = performance_metrics(personal_scope, start_date, end_date)
+        previous = performance_metrics(personal_scope, previous_start, previous_end)
+        branch_current = performance_metrics(branch_data_scope, start_date, end_date)
+        branch_previous = performance_metrics(branch_data_scope, previous_start, previous_end)
+        today = timezone.localdate()
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+        today_seconds, today_daily = usage_seconds_for(user, today, today)
+        week_seconds, _ = usage_seconds_for(user, week_start, today)
+        month_seconds, month_daily = usage_seconds_for(user, month_start, today)
+        range_seconds, daily_usage = usage_seconds_for(user, start_date, end_date)
+        current['crm_usage_time'] = seconds_to_duration(range_seconds)
+        current['avg_followup_response_time'] = seconds_to_duration(average_followup_response_seconds(user, start_date, end_date))
+        comparison = []
+        for key, label in [
+            ('leads', 'Leads'),
+            ('walkins', 'Walk-ins'),
+            ('enrollments', 'Enrollments'),
+            ('conversion_ratio', 'Conversion %'),
+            ('revenue', 'Revenue'),
+        ]:
+            comparison.append({
+                'key': key,
+                'label': label,
+                'this_month': current[key],
+                'last_month': previous[key],
+                'change_percent': pct_change(current[key], previous[key]),
+            })
+        insights = []
+        revenue_change = pct_change(current['revenue'], previous['revenue'])
+        conversion_change = pct_change(current['conversion_ratio'], previous['conversion_ratio'])
+        insights.append(f'{abs(revenue_change):.0f}% {"improvement" if revenue_change >= 0 else "decline"} in revenue from last month.')
+        insights.append(f'Conversion rate {"improved" if conversion_change >= 0 else "reduced"} this month.')
+        return Response({
+            'period': {'start': start_date, 'end': end_date},
+            'personal': current,
+            'monthly_comparison': comparison,
+            'usage': {
+                'today_seconds': today_seconds,
+                'today_display': seconds_to_duration(today_seconds),
+                'week_seconds': week_seconds,
+                'week_display': seconds_to_duration(week_seconds),
+                'month_seconds': month_seconds,
+                'month_display': seconds_to_duration(month_seconds),
+                'range_seconds': range_seconds,
+                'range_display': seconds_to_duration(range_seconds),
+                'daily': [
+                    {'date': key, 'seconds': value, 'display': seconds_to_duration(value)}
+                    for key, value in sorted((daily_usage or today_daily or month_daily).items())
+                ],
+            },
+            'branch_overview': {
+                **branch_current,
+                'branch_id': branch.id if branch else None,
+                'branch_name': branch.name if branch else '',
+                'growth_percent': pct_change(branch_current['enrollments'], branch_previous['enrollments']),
+            },
+            'insights': insights,
+        })
+
+
+class AdminAnalyticsDashboardView(APIView):
+    """Filtered business analytics for super admin reports."""
+    permission_classes = [IsSuperAdmin]
+
+    def _filtered_scope(self, request):
+        start_date, end_date = date_range_from_request(request)
+        branch = request.query_params.get('branch')
+        user_id = request.query_params.get('user')
+        course = request.query_params.get('course')
+        source = request.query_params.get('source')
+        leads = Lead.objects.filter(is_deleted=False)
+        walkins = WalkIn.objects.filter(is_deleted=False)
+        enrollments = Enrollment.objects.filter(is_deleted=False)
+        followups = FollowUp.objects.all()
+        if branch:
+            leads = leads.filter(branch_id=branch)
+            walkins = walkins.filter(branch_id=branch)
+            enrollments = enrollments.filter(branch_id=branch)
+            followups = followups.filter(updated_by__branch_id=branch)
+        if user_id:
+            leads = leads.filter(Q(created_by_id=user_id) | Q(assigned_to_id=user_id))
+            walkins = walkins.filter(Q(created_by_id=user_id) | Q(assigned_to_id=user_id))
+            enrollments = enrollments.filter(Q(created_by_id=user_id) | Q(enrolled_by_id=user_id))
+            followups = followups.filter(updated_by_id=user_id)
+        if course:
+            leads = leads.filter(course_id=course)
+            walkins = walkins.filter(course_id=course)
+            enrollments = enrollments.filter(course_id=course)
+        if source:
+            leads = leads.filter(source=source)
+            walkins = walkins.filter(source=source)
+            enrollments = enrollments.filter(source=source)
+        return start_date, end_date, {
+            'leads': leads,
+            'walkins': walkins,
+            'enrollments': enrollments,
+            'followups': followups,
+        }
+
+    def get(self, request):
+        start_date, end_date, scope = self._filtered_scope(request)
+        previous_start, previous_end = previous_month_bounds(start_date)
+        metrics = performance_metrics(scope, start_date, end_date)
+        previous = performance_metrics(scope, previous_start, previous_end)
+        lead_trend = count_by_date(scope['leads'], 'created_at', start_date, end_date)
+        walkin_trend = {
+            row['visit_date'].isoformat(): row['count']
+            for row in scope['walkins'].filter(visit_date__gte=start_date, visit_date__lte=end_date)
+                .values('visit_date').annotate(count=Count('id')).order_by('visit_date')
+        }
+        enrollment_trend = {
+            row['enrollment_date'].isoformat(): row['count']
+            for row in scope['enrollments'].filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+                .values('enrollment_date').annotate(count=Count('id')).order_by('enrollment_date')
+        }
+        revenue_trend = {
+            row['enrollment_date'].isoformat(): row['total'] or 0
+            for row in scope['enrollments'].filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+                .values('enrollment_date').annotate(total=Sum('net_payable_fee')).order_by('enrollment_date')
+        }
+        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
+        branch_filter = request.query_params.get('branch')
+        if branch_filter:
+            users = users.filter(branch_id=branch_filter)
+        user_filter = request.query_params.get('user')
+        if user_filter:
+            users = users.filter(id=user_filter)
+        counselor_rows = []
+        for user in users:
+            row_scope = user_scope(user)
+            row_metrics = performance_metrics(row_scope, start_date, end_date)
+            counselor_rows.append({
+                'user_id': user.id,
+                'name': user.full_name,
+                'branch_name': user.branch.name if user.branch else '',
+                **row_metrics,
+            })
+        counselor_rows.sort(key=lambda item: (-item['enrollments'], -float(item['revenue'] or 0), item['name']))
+        branch_rows = []
+        for branch in Branch.objects.filter(is_active=True).order_by('name'):
+            row_metrics = performance_metrics(branch_scope(branch), start_date, end_date)
+            branch_rows.append({
+                'branch_id': branch.id,
+                'branch_name': branch.name,
+                **row_metrics,
+            })
+        followup_total = metrics['total_followups']
+        followup_pending = metrics['pending_followups']
+        insights = [
+            f'{abs(pct_change(metrics["revenue"], previous["revenue"])):.0f}% {"improvement" if pct_change(metrics["revenue"], previous["revenue"]) >= 0 else "decline"} from last month.',
+            f'Conversion rate is {metrics["conversion_ratio"]:.2f}% for the selected period.',
+        ]
+        return Response({
+            'period': {'start': start_date, 'end': end_date},
+            'metrics': metrics,
+            'changes': {
+                key: pct_change(metrics[key], previous[key])
+                for key in ['leads', 'walkins', 'enrollments', 'conversion_ratio', 'revenue']
+            },
+            'trends': {
+                'leads': [{'date': key, 'value': value} for key, value in sorted(lead_trend.items())],
+                'walkins': [{'date': key, 'value': value} for key, value in sorted(walkin_trend.items())],
+                'enrollments': [{'date': key, 'value': value} for key, value in sorted(enrollment_trend.items())],
+                'revenue': [{'date': key, 'value': value} for key, value in sorted(revenue_trend.items())],
+            },
+            'funnel': [
+                {'stage': 'Leads', 'count': metrics['leads'], 'conversion_percent': 100},
+                {'stage': 'Walk-ins', 'count': metrics['walkins'], 'conversion_percent': ratio(metrics['walkins'], metrics['leads'])},
+                {'stage': 'Enrollments', 'count': metrics['enrollments'], 'conversion_percent': ratio(metrics['enrollments'], metrics['leads'])},
+            ],
+            'followup_efficiency': {
+                'total_followups': followup_total,
+                'pending_followups': followup_pending,
+                'completion_ratio': ratio(max(followup_total - followup_pending, 0), followup_total),
+            },
+            'counselor_comparison': counselor_rows[:30],
+            'branch_comparison': branch_rows,
+            'filters': {
+                'branches': BranchSerializer(Branch.objects.filter(is_active=True), many=True).data,
+                'users': [
+                    {'id': user.id, 'name': user.full_name, 'branch_id': user.branch_id}
+                    for user in User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
+                ],
+                'courses': [{'id': item.id, 'name': item.name} for item in Course.objects.filter(is_active=True).order_by('name')],
+                'sources': [{'value': value, 'label': label} for value, label in Lead.Source.choices],
+            },
+            'insights': insights,
+        })
 
 
 class SessionHeartbeatView(APIView):

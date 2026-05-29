@@ -13,6 +13,7 @@ const navigation = [
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
   { name: 'Payments', href: '/payments', short: 'PY' },
   { name: 'Pending', href: '/pending/leads', short: 'PE', pending: true },
+  { name: 'Performance Hub', href: '/performance-hub', short: 'PH', staffOnly: true },
   { name: 'Team Board', href: '/team-board', short: 'TB' },
   { name: 'Counselor Requests', href: '/counselor-change-requests', short: 'CR' },
 ]
@@ -83,7 +84,7 @@ function SidebarContent({ onNavigate }) {
 
       <div className="flex-1 overflow-y-auto px-4 py-5">
         <nav className="space-y-2">
-          {navigation.map((item) => (
+          {navigation.filter((item) => !item.staffOnly || user?.role !== 'super_admin').map((item) => (
             item.pending ? (
               <div key={item.name} className="space-y-1">
                 <NavItem

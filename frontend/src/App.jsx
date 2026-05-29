@@ -39,6 +39,7 @@ import NotificationsPage from './pages/notifications/NotificationsPage'
 import TeamBoardPage from './pages/team/TeamBoardPage'
 import CounselorChangeRequestsPage from './pages/CounselorChangeRequestsPage'
 import PendingPage from './pages/pending/PendingPage'
+import PerformanceHubPage from './pages/performance/PerformanceHubPage'
 
 // Admin-only pages
 import CoursesPage   from './pages/admin/CoursesPage'
@@ -126,6 +127,7 @@ export default function App() {
         {/* Notifications */}
         <Route path="notifications"   element={<NotificationsPage />} />
         <Route path="team-board"      element={<TeamBoardPage />} />
+        <Route path="performance-hub" element={<PerformanceHubPage />} />
         <Route path="counselor-change-requests" element={<CounselorChangeRequestsPage />} />
         <Route path="pending/:module" element={<PendingPage />} />
 
