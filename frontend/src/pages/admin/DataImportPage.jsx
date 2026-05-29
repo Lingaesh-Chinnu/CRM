@@ -92,7 +92,7 @@ export default function DataImportPage() {
       setExportPreview(data)
     } catch (error) {
       setExportPreview(null)
-      setMessage(apiErrorMessage(error, 'Failed to preview export data.'))
+      setMessage('Export generation failed. Please try again.')
     } finally {
       setExportLoading(false)
     }
@@ -104,7 +104,7 @@ export default function DataImportPage() {
     try {
       await downloadExport('/admin-data-export/', exportParams(true), `${exportType}.xlsx`)
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to download export.'))
+      setMessage('Export generation failed. Please try again.')
     } finally {
       setExportLoading(false)
     }

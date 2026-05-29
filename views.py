@@ -3875,8 +3875,12 @@ def valid_import_phone(value):
 def format_export_value(value):
     if value is None:
         return ''
-    if hasattr(value, 'isoformat'):
-        return value.isoformat()
+    if isinstance(value, bool):
+        return 'Yes' if value else 'No'
+    if hasattr(value, 'strftime'):
+        if hasattr(value, 'hour'):
+            return timezone.localtime(value).strftime('%Y-%m-%d %H:%M:%S') if timezone.is_aware(value) else value.strftime('%Y-%m-%d %H:%M:%S')
+        return value.strftime('%Y-%m-%d')
     return value
 
 
@@ -3897,9 +3901,10 @@ def export_tabular_response(filename, headers, rows, file_format='xlsx', sheet_t
         return export_tabular_response(filename, headers, rows, 'csv')
     workbook = openpyxl.Workbook()
     sheet = workbook.active
-    sheet.title = str(sheet_title or 'Export')[:31]
-    sheet.append(headers)
-    for row in rows:
+    safe_title = ''.join(char for char in str(sheet_title or 'Export') if char not in '[]:*?/\\')[:31] or 'Export'
+    sheet.title = safe_title
+    sheet.append([format_export_value(value) for value in headers])
+    for row in rows or []:
         sheet.append([format_export_value(value) for value in row])
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
@@ -4572,24 +4577,28 @@ def add_months(value, months):
 
 def data_export_date_bounds(period, date_from=None, date_to=None):
     today = timezone.localdate()
-    if period == 'today':
-        return today, today
-    if period == 'last_7_days':
-        return today - timedelta(days=6), today
-    if period == 'last_1_month':
-        return add_months(today, -1), today
-    if period == 'last_3_months':
-        return add_months(today, -3), today
-    if period == 'last_6_months':
-        return add_months(today, -6), today
-    if period == 'last_1_year':
-        return add_months(today, -12), today
-    if period == 'last_2_years':
-        return add_months(today, -24), today
-    if period == 'last_3_years':
-        return add_months(today, -36), today
+    relative_periods = {
+        'today': (today, today),
+        'last_7_days': (today - timedelta(days=6), today),
+        'last_1_month': (add_months(today, -1), today),
+        'last_3_months': (add_months(today, -3), today),
+        'last_6_months': (add_months(today, -6), today),
+        'last_1_year': (add_months(today, -12), today),
+        'last_2_years': (add_months(today, -24), today),
+        'last_3_years': (add_months(today, -36), today),
+    }
+    if period in relative_periods:
+        return relative_periods[period]
     if period == 'custom':
-        return parse_date(date_from or ''), parse_date(date_to or '')
+        try:
+            start_date = parse_date(date_from or '') if date_from else None
+            end_date = parse_date(date_to or '') if date_to else None
+        except (TypeError, ValueError):
+            logger.warning('Invalid admin data export custom date range: from=%s to=%s', date_from, date_to)
+            return None, None
+        if start_date and end_date and start_date > end_date:
+            return end_date, start_date
+        return start_date, end_date
     return None, None
 
 
@@ -4606,7 +4615,10 @@ def filter_by_date_range(queryset, field_name, start_date, end_date, is_datetime
 def data_export_filename(export_type, period, branch_id=None):
     parts = [export_type]
     if branch_id:
-        branch = Branch.objects.filter(pk=branch_id).first()
+        try:
+            branch = Branch.objects.filter(pk=int(branch_id)).first()
+        except (TypeError, ValueError):
+            branch = None
         if branch:
             parts.append(branch.name.lower().replace(' ', '_'))
     parts.append(period or timezone.localdate().strftime('%b_%Y').lower())
@@ -4614,7 +4626,7 @@ def data_export_filename(export_type, period, branch_id=None):
 
 
 def admin_template_export_response(request, export_type, filename):
-    headers, rows = AdminDataExportView().export_rows(request, export_type)
+    headers, rows, _total = AdminDataExportView().export_rows(request, export_type)
     return export_tabular_response(
         filename,
         headers,
@@ -4626,47 +4638,81 @@ def admin_template_export_response(request, export_type, filename):
 
 class AdminDataExportView(APIView):
     permission_classes = [IsSuperAdmin]
+    preview_limit = 10
 
     def get(self, request):
         export_type = request.query_params.get('type') or 'leads'
         if export_type not in DATA_EXPORT_TYPES:
-            return Response({'detail': 'Select a valid export type.'}, status=400)
-        if request.query_params.get('download') in ('1', 'true'):
-            headers, rows = self.export_rows(request, export_type)
-            filename = data_export_filename(export_type, request.query_params.get('period') or '', request.query_params.get('branch') or '')
-            return export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
-        headers, rows = self.export_rows(request, export_type)
-        return Response({
-            'type': export_type,
-            'label': DATA_EXPORT_TYPES[export_type],
-            'headers': headers,
-            'rows': rows[:10],
-            'total': len(rows),
-            'filters': self.filter_summary(request),
-        })
+            return Response({'success': False, 'message': 'Select a valid export type.'}, status=400)
+        try:
+            logger.info(
+                'Admin data export requested type=%s download=%s period=%s branch=%s user=%s',
+                export_type,
+                request.query_params.get('download') in ('1', 'true'),
+                request.query_params.get('period') or '',
+                request.query_params.get('branch') or '',
+                request.query_params.get('user') or '',
+            )
+            headers, rows, total = self.export_rows(request, export_type)
+            logger.info('Admin data export rows ready type=%s count=%s', export_type, total)
+            if request.query_params.get('download') in ('1', 'true'):
+                filename = data_export_filename(export_type, request.query_params.get('period') or '', request.query_params.get('branch') or '')
+                response = export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
+                logger.info('Admin data export Excel generated type=%s filename=%s', export_type, filename)
+                return response
+            return Response({
+                'success': True,
+                'type': export_type,
+                'label': DATA_EXPORT_TYPES[export_type],
+                'headers': headers,
+                'rows': rows[:self.preview_limit],
+                'total': total,
+                'filters': self.filter_summary(request),
+                'message': '' if total else 'No data found',
+            })
+        except Exception:
+            logger.exception('Unable to generate admin data export for type=%s', export_type)
+            return Response({'success': False, 'message': 'Unable to generate export.'}, status=400)
+
+    def safe_pk(self, value, label):
+        if value in (None, ''):
+            return ''
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning('Ignoring invalid admin data export %s filter: %s', label, value)
+            return ''
 
     def filter_summary(self, request):
         period = request.query_params.get('period') or ''
-        branch_id = request.query_params.get('branch') or ''
-        user_id = request.query_params.get('user') or ''
+        branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
+        user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
         branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
         user = User.objects.filter(pk=user_id).first() if user_id else None
         start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
         return {
             'period': (period or 'all_dates').replace('_', ' ').title(),
-            'date_from': start_date,
-            'date_to': end_date,
+            'date_from': format_export_value(start_date),
+            'date_to': format_export_value(end_date),
             'branch': branch.name if branch else 'All branches',
             'user': user.full_name if user else 'All users',
         }
 
     def filtered_queryset(self, request, export_type):
-        branch_id = request.query_params.get('branch') or ''
-        user_id = request.query_params.get('user') or ''
+        branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
+        user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
         start_date, end_date = data_export_date_bounds(
             request.query_params.get('period') or '',
             request.query_params.get('date_from') or '',
             request.query_params.get('date_to') or '',
+        )
+        logger.info(
+            'Admin data export filters type=%s start=%s end=%s branch=%s user=%s',
+            export_type,
+            start_date,
+            end_date,
+            branch_id or 'all',
+            user_id or 'all',
         )
         if export_type == 'leads':
             qs = visible_candidate_queryset(Lead.objects.select_related('branch', 'course', 'assigned_to', 'created_by'))
@@ -4703,7 +4749,8 @@ class AdminDataExportView(APIView):
                 qs = qs.filter(Q(enrollment__enrolled_by_id=user_id) | Q(collected_by_id=user_id)).distinct()
             return qs.order_by('-payment_date', '-id')
         if export_type == 'courses':
-            return Course.objects.all().order_by('name')
+            qs = Course.objects.all()
+            return qs.order_by('name')
         qs = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch').order_by('first_name', 'username')
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
@@ -4713,14 +4760,25 @@ class AdminDataExportView(APIView):
 
     def export_rows(self, request, export_type):
         queryset = self.filtered_queryset(request, export_type)
+        count = queryset.count()
+        logger.info('Admin data export queryset count type=%s count=%s', export_type, count)
         if export_type in ADMIN_IMPORT_SPECS:
             headers = import_template_headers(export_type)
             fields = [item['field'] for item in import_spec_fields(export_type)]
-            return headers, [
-                [self.import_compatible_value(export_type, record, field) for field in fields]
+            rows = [
+                [self.safe_cell(self.import_compatible_value(export_type, record, field)) for field in fields]
                 for record in queryset
             ]
-        return self.user_report_rows(request, queryset)
+            logger.info('Admin data export serializer status type=%s rows=%s', export_type, len(rows))
+            return headers, rows, count
+        headers, rows = self.user_report_rows(request, queryset)
+        logger.info('Admin data export serializer status type=%s rows=%s', export_type, len(rows))
+        return headers, rows, count
+
+    def safe_cell(self, value, numeric_default=None):
+        if value is None:
+            return 0 if numeric_default == 0 else ''
+        return format_export_value(value)
 
     def import_compatible_value(self, export_type, record, field):
         if export_type == 'leads':
@@ -4794,10 +4852,10 @@ class AdminDataExportView(APIView):
         if export_type == 'payments':
             enrollment = record.enrollment
             values = {
-                'student_number': enrollment.student_number,
-                'name': enrollment.name,
-                'phone': enrollment.phone,
-                'branch': enrollment.branch.name if enrollment.branch else '',
+                'student_number': enrollment.student_number if enrollment else '',
+                'name': enrollment.name if enrollment else '',
+                'phone': enrollment.phone if enrollment else '',
+                'branch': enrollment.branch.name if enrollment and enrollment.branch else '',
                 'amount': record.amount,
                 'payment_date': record.payment_date,
                 'payment_mode': record.get_payment_mode_display(),
@@ -4828,7 +4886,16 @@ class AdminDataExportView(APIView):
             pending_leads = pending_follow_up_queryset(leads, FollowUp.RecordType.LEAD, 'next_follow_up_date', LEAD_CLOSED_FOLLOW_UP_STATUSES).exclude(next_follow_up_date__isnull=True).count()
             pending_walkins = pending_follow_up_queryset(walkins, FollowUp.RecordType.WALKIN, 'follow_up_date', WALKIN_CLOSED_FOLLOW_UP_STATUSES).exclude(follow_up_date__isnull=True).count()
             conversions = leads.filter(converted_to_type__in=['walkin', 'enrollment']).count() + walkins.filter(converted_to_type='enrollment').count()
-            rows.append([user.full_name, user.branch.name if user.branch else '', leads.count(), walkins.count(), conversions, enrollments.count(), installments.aggregate(total=Sum('amount'))['total'] or 0, pending_leads + pending_walkins])
+            rows.append([
+                self.safe_cell(user.full_name),
+                self.safe_cell(user.branch.name if user.branch else ''),
+                leads.count(),
+                walkins.count(),
+                conversions,
+                enrollments.count(),
+                self.safe_cell(installments.aggregate(total=Sum('amount'))['total'] or 0, numeric_default=0),
+                pending_leads + pending_walkins,
+            ])
         return headers, rows
 
 
