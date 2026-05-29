@@ -143,14 +143,14 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
               {
                 key: 'walkInDate',
                 header: 'Walk-in Date',
-                width: '78px',
+                width: '66px',
                 className: 'flex items-center',
                 render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} timeValue={walkin.created_at || walkin.visit_date} />,
               },
               {
                 key: 'name',
                 header: 'Name',
-                width: 'minmax(130px,1.15fr)',
+                width: 'minmax(135px,1.1fr)',
                 className: 'flex items-center',
                 render: (walkin) => (
                   <div className="min-w-0">
@@ -163,21 +163,21 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                   </div>
                 ),
               },
-              { key: 'course', header: 'Course', width: 'minmax(110px,0.95fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-sm font-semibold text-slate-700">{walkin.course_name || 'Course pending'}</span> },
-              { key: 'status', header: 'Status', width: '112px', className: 'flex items-center', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
-              { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(104px,0.85fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
-              { key: 'nextFollowUp', header: 'Next Follow Up', width: '98px', className: 'flex items-center', render: (walkin) => <span className="whitespace-nowrap text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
+              { key: 'course', header: 'Course', width: 'minmax(105px,0.9fr)', className: 'flex items-center', render: (walkin) => <span className="overflow-hidden break-words text-sm font-semibold leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{walkin.course_name || 'Course pending'}</span> },
+              { key: 'status', header: 'Status', width: '102px', className: 'flex items-center', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
+              { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(88px,0.75fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
+              { key: 'nextFollowUp', header: 'Next Follow Up', width: '84px', className: 'flex items-center', render: (walkin) => <span className="whitespace-nowrap text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
               ...(canViewBranch ? [{
                 key: 'branch',
                 header: 'Branch',
-                width: 'minmax(88px,0.75fr)',
+                width: 'minmax(76px,0.65fr)',
                 className: 'flex items-center',
                 render: (walkin) => <span className="truncate text-sm font-semibold text-slate-700">{walkin.branch_name || '-'}</span>,
               }] : []),
               {
                 key: 'remark',
                 header: 'Latest Remark',
-                width: 'minmax(150px,1.35fr)',
+                width: 'minmax(120px,1.1fr)',
                 className: 'flex items-center',
                 render: (walkin) => (
                   <QuickFollowUpEdit

@@ -649,14 +649,14 @@ export default function LeadsListPage() {
                 {
                   key: 'created',
                   header: 'Created',
-                  width: '74px',
+                  width: '64px',
                   className: 'flex items-center',
                   render: (lead) => <CreatedStamp value={lead.created_at} />,
                 },
                 {
                   key: 'name',
                   header: 'Name',
-                  width: 'minmax(120px,1.1fr)',
+                  width: 'minmax(130px,1.1fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
@@ -665,21 +665,21 @@ export default function LeadsListPage() {
                         <OwnerDot user={lead.assigned_user} />
                         <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
                       </div>
-                      <p className="mt-1 truncate text-xs text-slate-500">{lead.course_name || 'Course not selected'}</p>
+                      <p className="mt-1 overflow-hidden break-words text-xs leading-4 text-slate-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{lead.course_name || 'Course not selected'}</p>
                     </div>
                   ),
                 },
                 {
                   key: 'phone',
                   header: 'Phone',
-                  width: '106px',
+                  width: '92px',
                   className: 'flex items-center',
                   render: (lead) => <span className="truncate text-sm font-semibold text-slate-800">{lead.phone || '-'}</span>,
                 },
                 {
                   key: 'source',
                   header: 'Source',
-                  width: 'minmax(96px,0.85fr)',
+                  width: 'minmax(82px,0.75fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <div className="min-w-0">
@@ -691,23 +691,23 @@ export default function LeadsListPage() {
                 {
                   key: 'status',
                   header: 'Status',
-                  width: '132px',
+                  width: '116px',
                   className: 'flex items-center',
                   render: (lead) => <StatusBadge tone={statusTone(lead.status)}>{lifecycleStatusLabel(lead)}</StatusBadge>,
                 },
-                { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(100px,0.8fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
-                { key: 'nextFollowUp', header: 'Next Follow Up', width: '94px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
+                { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(86px,0.7fr)', className: 'flex items-center', render: (lead) => <span className="truncate text-sm font-medium text-slate-700">{assignedUserName(lead)}</span> },
+                { key: 'nextFollowUp', header: 'Next Follow Up', width: '82px', className: 'flex items-center', render: (lead) => <span className="whitespace-nowrap text-sm font-semibold text-slate-700">{formatDateCompact(lead.next_follow_up_date)}</span> },
                 ...(isSuperAdmin ? [{
                   key: 'branch',
                   header: 'Branch',
-                  width: 'minmax(88px,0.75fr)',
+                  width: 'minmax(76px,0.65fr)',
                   className: 'flex items-center',
                   render: (lead) => <span className="truncate text-sm font-semibold text-slate-700">{lead.branch_name || '-'}</span>,
                 }] : []),
                 {
                   key: 'remark',
                   header: 'Latest Remark',
-                  width: 'minmax(150px,1.35fr)',
+                  width: 'minmax(120px,1.1fr)',
                   className: 'flex items-center',
                   render: (lead) => (
                     <QuickFollowUpEdit

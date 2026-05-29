@@ -80,7 +80,7 @@ from crm.models import (
     EnrollmentCounselorChangeHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
     get_default_installment_schedule, get_enrollment_installment_schedule, normalize_installment_schedule,
-    enrollment_payable_fee,
+    enrollment_payable_fee, PAYMENT_SPLIT_THRESHOLD,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -6011,7 +6011,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         return normalize_installment_schedule(schedule), ''
 
     def _ensure_enrollment_schedule(self, enrollment, split_count=None, lock=False):
-        if split_count is not None or not enrollment.payment_schedule:
+        payable_fee = int(round(float(enrollment_payable_fee(enrollment) or 0)))
+        if payable_fee < PAYMENT_SPLIT_THRESHOLD or split_count is not None or not enrollment.payment_schedule:
             schedule, error = self._schedule_from_split_count(enrollment, split_count or 2)
             if error:
                 raise ValueError(error)

@@ -20,7 +20,7 @@ export function TableActionLink({ to, children = 'Open' }) {
   return (
     <Link
       to={to}
-      className="inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50"
+      className="inline-flex items-center justify-center whitespace-nowrap rounded-xl border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-50"
     >
       {children}
     </Link>
@@ -34,16 +34,13 @@ export default function CRMTable({ columns, rows, keyField = 'id', emptyMessage 
     <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white">
       <div className="hidden min-[900px]:block">
         <div className="overflow-x-auto">
-          <div className="min-w-max">
+          <div className="min-w-full">
             <div
-              className="grid items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500"
+              className="grid items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500"
               style={{ gridTemplateColumns }}
             >
               {columns.map((column) => (
-                <div
-                  key={column.key}
-                  className={`${column.sticky ? 'sticky right-0 z-20 bg-slate-50 pl-4 shadow-[-12px_0_18px_-18px_rgba(15,23,42,0.7)]' : ''} ${column.headerClassName || ''}`}
-                >
+                <div key={column.key} className={column.headerClassName || ''}>
                   {column.header}
                 </div>
               ))}
@@ -55,14 +52,11 @@ export default function CRMTable({ columns, rows, keyField = 'id', emptyMessage 
                 {rows.map((row) => (
                   <div
                     key={row[keyField]}
-                    className="grid min-h-[68px] items-center gap-3 px-4 py-3 text-sm transition hover:bg-slate-50"
+                    className="grid min-h-[58px] items-center gap-2 px-3 py-2.5 text-[13px] transition hover:bg-slate-50"
                     style={{ gridTemplateColumns }}
                   >
                     {columns.map((column) => (
-                      <div
-                        key={column.key}
-                        className={`min-w-0 ${column.sticky ? 'sticky right-0 z-10 bg-white pl-4 shadow-[-12px_0_18px_-18px_rgba(15,23,42,0.7)]' : ''} ${column.className || ''}`}
-                      >
+                      <div key={column.key} className={`min-w-0 ${column.className || ''}`}>
                         {column.render ? column.render(row) : row[column.key]}
                       </div>
                     ))}

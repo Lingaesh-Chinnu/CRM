@@ -590,6 +590,64 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
 
+    def test_add_to_payment_uses_full_payment_for_course_fee_below_7000(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='MS Office Student',
+            phone='9000000126',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=5900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': 'Full Payment', 'amount': 5900, 'due_date': '2026-05-11'},
+        ])
+
+    def test_stale_split_schedule_is_ignored_for_course_fee_below_7000(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Summer Course Student',
+            phone='9000000128',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=6900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 1900, 'due_date': '2026-05-12'},
+            ],
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 1900, 'due_date': '2026-05-12'},
+            ],
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.get(f'/api/payments/{payment.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['payment_schedule'], [
+            {'label': 'Full Payment', 'amount': 6900, 'due_date': '2026-05-11'},
+        ])
+        self.assertEqual(response.data['installment_summary'][0]['label'], 'Full Payment')
+
     def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,

@@ -237,13 +237,13 @@ export default function StudentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'name', header: 'Student Name', width: 'minmax(160px,1.2fr)', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={`/students/${row.id}`} className="min-w-0 truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
-                { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => <span className="truncate text-slate-700">{compactValue(row.course_name, 'Course pending')}</span> },
-                { key: 'branch', header: 'Branch', width: '130px', render: (row) => <span className="truncate text-slate-700">{compactValue(row.branch_name, 'No branch')}</span> },
-                { key: 'status', header: 'Status', width: '110px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{studentStatusLabel(row.status)}</StatusBadge> },
-                { key: 'fees', header: 'Fees', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
-                { key: 'balance', header: 'Balance', width: '110px', render: (row) => <span className="font-semibold text-slate-900">{money(row.payment_balance)}</span> },
-                { key: 'counselor', header: 'Counselor', width: '140px', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
+                { key: 'name', header: 'Student Name', width: 'minmax(165px,1.2fr)', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={`/students/${row.id}`} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'course', header: 'Course', width: 'minmax(125px,1fr)', render: (row) => <span className="overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{compactValue(row.course_name, 'Course pending')}</span> },
+                { key: 'branch', header: 'Branch', width: 'minmax(82px,0.7fr)', render: (row) => <span className="truncate text-slate-700">{compactValue(row.branch_name, 'No branch')}</span> },
+                { key: 'status', header: 'Status', width: '92px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{studentStatusLabel(row.status)}</StatusBadge> },
+                { key: 'fees', header: 'Fees', width: '82px', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
+                { key: 'balance', header: 'Balance', width: '82px', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                { key: 'counselor', header: 'Counselor', width: 'minmax(88px,0.75fr)', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
               ]}
             />
           </div>

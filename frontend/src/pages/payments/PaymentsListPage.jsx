@@ -767,10 +767,9 @@ export default function PaymentsListPage() {
                 {
                   key: 'actions',
                   header: 'Actions',
-                  width: isSuperAdmin ? '180px' : '340px',
-                  sticky: true,
+                  width: isSuperAdmin ? '150px' : '300px',
                   render: (row) => (
-                    <div className="flex min-w-max flex-wrap justify-end gap-2">
+                    <div className="flex min-w-0 flex-wrap justify-end gap-2">
                       {actionControls(row)}
                     </div>
                   ),
