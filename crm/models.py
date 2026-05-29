@@ -353,6 +353,10 @@ class Lead(TimeStampedModel):
         OTHERS            = 'others',            'Others'
 
     class PreferredTiming(models.TextChoices):
+        MORNING = 'morning', 'Morning'
+        AFTERNOON = 'afternoon', 'Afternoon'
+        EVENING = 'evening', 'Evening'
+        WEEKEND = 'weekend', 'Weekend'
         WEEKDAY_MORNING = 'weekday_morning', 'Weekdays (Morning)'
         WEEKDAY_EVENING = 'weekday_evening', 'Weekdays (Evening)'
         WEEKENDS = 'weekends', 'Weekends'

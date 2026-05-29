@@ -4937,6 +4937,12 @@ class PublicLeadFormView(APIView):
         {'value': Lead.Qualification.HOUSEWIFE, 'label': 'Housewife'},
         {'value': Lead.Qualification.WORKING_PROFESSIONAL, 'label': 'Working Professional'},
     ]
+    preferred_timing_options = [
+        {'value': Lead.PreferredTiming.MORNING, 'label': 'Morning'},
+        {'value': Lead.PreferredTiming.AFTERNOON, 'label': 'Afternoon'},
+        {'value': Lead.PreferredTiming.EVENING, 'label': 'Evening'},
+        {'value': Lead.PreferredTiming.WEEKEND, 'label': 'Weekend'},
+    ]
 
     def get(self, request):
         branches = Branch.objects.filter(
@@ -4949,6 +4955,7 @@ class PublicLeadFormView(APIView):
             'courses': [{'id': course.id, 'name': course.name} for course in courses],
             'willing_to_join_options': self.willing_to_join_options,
             'qualification_options': self.qualification_options,
+            'preferred_timing_options': self.preferred_timing_options,
         })
 
     def post(self, request):
@@ -4957,9 +4964,7 @@ class PublicLeadFormView(APIView):
 
         name = str(request.data.get('full_name') or '').strip()
         phone = normalize_phone_number(request.data.get('mobile_number'))
-        city = str(request.data.get('city') or '').strip()
-        qualification = str(request.data.get('qualification') or '').strip()
-        willing_to_join = str(request.data.get('willing_to_join') or '').strip()
+        preferred_timing = str(request.data.get('preferred_timing') or '').strip()
         branch_id = request.data.get('branch')
         course_id = request.data.get('course_interested')
 
@@ -4983,12 +4988,9 @@ class PublicLeadFormView(APIView):
         if not course:
             return Response({'detail': 'Please select a valid course.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        valid_join = {item['value'] for item in self.willing_to_join_options}
-        valid_qualification = {item['value'] for item in self.qualification_options}
-        if willing_to_join not in valid_join:
-            return Response({'detail': 'Please select when willing to join.'}, status=status.HTTP_400_BAD_REQUEST)
-        if qualification not in valid_qualification:
-            return Response({'detail': 'Please select qualification.'}, status=status.HTTP_400_BAD_REQUEST)
+        valid_timing = {item['value'] for item in self.preferred_timing_options}
+        if preferred_timing not in valid_timing:
+            return Response({'detail': 'Please select preferred timing.'}, status=status.HTTP_400_BAD_REQUEST)
 
         duplicate_records = matching_candidate_phone_records(phone)
         existing_lead = Lead.objects.filter(phone=phone).order_by('-updated_at', '-created_at').first()
@@ -4996,7 +4998,8 @@ class PublicLeadFormView(APIView):
             existing_lead.next_follow_up_date = timezone.localdate()
             existing_lead.is_duplicate = True
             existing_lead.external_message = 'Duplicate public website lead submission.'
-            existing_lead.save(update_fields=['next_follow_up_date', 'is_duplicate', 'external_message', 'updated_at'])
+            existing_lead.preferred_timing = preferred_timing
+            existing_lead.save(update_fields=['next_follow_up_date', 'is_duplicate', 'external_message', 'preferred_timing', 'updated_at'])
             return Response({
                 'duplicate': True,
                 'detail': 'Thank you! Our team will contact you shortly.',
@@ -5013,13 +5016,11 @@ class PublicLeadFormView(APIView):
         lead = Lead.objects.create(
             name=name,
             phone=phone,
-            location=city,
             course=course,
             branch=branch,
             status=Lead.Status.NEW,
             source=Lead.Source.WEBSITE,
-            qualification=qualification,
-            willing_to_join=willing_to_join,
+            preferred_timing=preferred_timing,
             remarks='Public website lead form submission.',
             created_by=None,
             assigned_to=None,
