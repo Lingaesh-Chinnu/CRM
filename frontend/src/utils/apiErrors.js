@@ -29,6 +29,10 @@ export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
   }
   const detail = data?.detail
   if (detail) return detail
+  if (data?.errors) {
+    const errorText = messageFromValue(data.errors)
+    if (errorText) return errorText
+  }
   const message = data?.message
   if (message) return message
   if (data && typeof data === 'object') {

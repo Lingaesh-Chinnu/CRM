@@ -4564,7 +4564,19 @@ DATA_EXPORT_TYPES = {
     'payments': 'Payments',
     'courses': 'Courses',
     'users': 'Users Report',
+    'users_report': 'Users Report',
 }
+
+
+DATA_EXPORT_TYPE_ALIASES = {
+    'users_report': 'users_report',
+    'users': 'users',
+}
+
+
+def normalize_data_export_type(export_type):
+    export_type = str(export_type or 'leads').strip()
+    return DATA_EXPORT_TYPE_ALIASES.get(export_type, export_type)
 
 
 DATA_EXPORT_PERIODS = {
@@ -4672,17 +4684,23 @@ class AdminDataExportView(APIView):
 
     def export_request_context(self, request):
         download = str(self.request_value(request, 'download', default='')).lower() in ('1', 'true', 'yes')
+        request_data = getattr(request, 'data', {})
+        query_payload = dict(request.query_params.items())
+        print('AdminDataExport request.data:', request_data)
+        print('AdminDataExport query_params:', query_payload)
         return {
-            'export_type': str(self.request_value(request, 'exportType', 'type', default='leads')).strip(),
-            'period': normalize_data_export_period(self.request_value(request, 'dateFilter', 'period', default='last_1_month')),
-            'branch_id': self.safe_pk(self.request_value(request, 'branch', 'branchId', default=''), 'branch'),
-            'user_id': self.safe_pk(self.request_value(request, 'userId', 'user', default=''), 'user'),
+            'export_type': normalize_data_export_type(self.request_value(request, 'exportType', 'export_type', 'type', default='leads')),
+            'period': normalize_data_export_period(self.request_value(request, 'dateFilter', 'date_filter', 'period', default='last_1_month')),
+            'branch_id': self.safe_pk(self.request_value(request, 'branch', 'branchId', 'branch_id', default=''), 'branch'),
+            'user_id': self.safe_pk(self.request_value(request, 'userId', 'user_id', 'user', default=''), 'user'),
             'download': download,
             'raw': {
-                'exportType': self.request_value(request, 'exportType', 'type', default=''),
-                'dateFilter': self.request_value(request, 'dateFilter', 'period', default=''),
-                'branch': self.request_value(request, 'branch', 'branchId', default=''),
-                'userId': self.request_value(request, 'userId', 'user', default=''),
+                'request_data': request_data,
+                'query_params': query_payload,
+                'exportType': self.request_value(request, 'exportType', 'export_type', 'type', default=''),
+                'dateFilter': self.request_value(request, 'dateFilter', 'date_filter', 'period', default=''),
+                'branch': self.request_value(request, 'branch', 'branchId', 'branch_id', default=''),
+                'userId': self.request_value(request, 'userId', 'user_id', 'user', default=''),
             },
         }
 
@@ -4728,29 +4746,39 @@ class AdminDataExportView(APIView):
                 context['user_id'] or 'all',
                 context['raw'],
             )
-            headers, rows, total = self.export_rows(request, export_type, context)
-            logger.info('Admin data export rows ready type=%s count=%s', export_type, total)
             if context['download']:
-                filename = data_export_filename(export_type, period, context['branch_id'] or '')
-                response = export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
-                logger.info('Admin data export Excel generated type=%s filename=%s', export_type, filename)
-                return response
-            return Response({
-                'success': True,
-                'type': export_type,
-                'label': DATA_EXPORT_TYPES[export_type],
-                'headers': headers,
-                'rows': rows[:self.preview_limit],
-                'total': total,
-                'filters': self.filter_summary(request, context),
-                'message': '' if total else 'No records found for selected filters',
-            })
+                return self.download_response(request, context)
+            return self.preview_response(request, context)
         except Exception:
             logger.exception('Unable to generate admin data export for type=%s filters=%s', export_type, context)
             return Response({'success': False, 'message': 'Export generation failed.'}, status=400)
 
     def post(self, request):
         return self.get(request)
+
+    def preview_response(self, request, context):
+        export_type = context['export_type']
+        headers, rows, total = self.export_rows(request, export_type, context)
+        logger.info('Admin data export preview ready type=%s count=%s', export_type, total)
+        return Response({
+            'success': True,
+            'type': export_type,
+            'label': DATA_EXPORT_TYPES[export_type],
+            'headers': headers,
+            'rows': rows[:self.preview_limit],
+            'total': total,
+            'filters': self.filter_summary(request, context),
+            'message': '' if total else 'No records found for selected filters',
+        })
+
+    def download_response(self, request, context):
+        export_type = context['export_type']
+        headers, rows, total = self.export_rows(request, export_type, context)
+        logger.info('Admin data export download rows ready type=%s count=%s', export_type, total)
+        filename = data_export_filename(export_type, context['period'], context['branch_id'] or '')
+        response = export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
+        logger.info('Admin data export Excel generated type=%s filename=%s', export_type, filename)
+        return response
 
     def safe_pk(self, value, label):
         if value in (None, ''):

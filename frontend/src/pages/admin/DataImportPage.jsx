@@ -19,7 +19,7 @@ const exportTabs = [
   { value: 'students', label: 'Students Export' },
   { value: 'payments', label: 'Payments Export' },
   { value: 'courses', label: 'Courses Export' },
-  { value: 'users', label: 'Users Report Export' },
+  { value: 'users_report', label: 'Users Report Export' },
 ]
 
 const exportTypeValues = new Set(exportTabs.map((tab) => tab.value))
