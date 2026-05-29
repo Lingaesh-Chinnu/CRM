@@ -4567,6 +4567,29 @@ DATA_EXPORT_TYPES = {
 }
 
 
+DATA_EXPORT_PERIODS = {
+    'last_1_month': 'Last 1 Month',
+    'last_3_months': 'Last 3 Months',
+    'last_6_months': 'Last 6 Months',
+    'last_1_year': 'Last 1 Year',
+    'last_2_years': 'Last 2 Years',
+    'last_3_years': 'Last 3 Years',
+}
+
+
+DATA_EXPORT_PERIOD_ALIASES = {
+    'last_3_month': 'last_3_months',
+    'last_6_month': 'last_6_months',
+    'last_2_year': 'last_2_years',
+    'last_3_year': 'last_3_years',
+}
+
+
+def normalize_data_export_period(period):
+    period = str(period or 'last_1_month').strip()
+    return DATA_EXPORT_PERIOD_ALIASES.get(period, period)
+
+
 def add_months(value, months):
     month = value.month + months
     year = value.year + (month - 1) // 12
@@ -4576,10 +4599,9 @@ def add_months(value, months):
 
 
 def data_export_date_bounds(period, date_from=None, date_to=None):
+    period = normalize_data_export_period(period)
     today = timezone.localdate()
     relative_periods = {
-        'today': (today, today),
-        'last_7_days': (today - timedelta(days=6), today),
         'last_1_month': (add_months(today, -1), today),
         'last_3_months': (add_months(today, -3), today),
         'last_6_months': (add_months(today, -6), today),
@@ -4644,19 +4666,29 @@ class AdminDataExportView(APIView):
         export_type = request.query_params.get('type') or 'leads'
         if export_type not in DATA_EXPORT_TYPES:
             return Response({'success': False, 'message': 'Select a valid export type.'}, status=400)
+        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
+        if period not in DATA_EXPORT_PERIODS and period != 'custom':
+            logger.warning(
+                'Invalid admin data export period type=%s period=%s branch=%s user=%s',
+                export_type,
+                request.query_params.get('period') or '',
+                request.query_params.get('branch') or '',
+                request.query_params.get('user') or '',
+            )
+            return Response({'success': False, 'message': 'Invalid date filter.'}, status=400)
         try:
             logger.info(
                 'Admin data export requested type=%s download=%s period=%s branch=%s user=%s',
                 export_type,
                 request.query_params.get('download') in ('1', 'true'),
-                request.query_params.get('period') or '',
+                period,
                 request.query_params.get('branch') or '',
                 request.query_params.get('user') or '',
             )
             headers, rows, total = self.export_rows(request, export_type)
             logger.info('Admin data export rows ready type=%s count=%s', export_type, total)
             if request.query_params.get('download') in ('1', 'true'):
-                filename = data_export_filename(export_type, request.query_params.get('period') or '', request.query_params.get('branch') or '')
+                filename = data_export_filename(export_type, period, request.query_params.get('branch') or '')
                 response = export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
                 logger.info('Admin data export Excel generated type=%s filename=%s', export_type, filename)
                 return response
@@ -4672,7 +4704,7 @@ class AdminDataExportView(APIView):
             })
         except Exception:
             logger.exception('Unable to generate admin data export for type=%s', export_type)
-            return Response({'success': False, 'message': 'Unable to generate export.'}, status=400)
+            return Response({'success': False, 'message': 'Unable to generate export.'}, status=500)
 
     def safe_pk(self, value, label):
         if value in (None, ''):
@@ -4684,14 +4716,14 @@ class AdminDataExportView(APIView):
             return ''
 
     def filter_summary(self, request):
-        period = request.query_params.get('period') or ''
+        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
         branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
         user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
         branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
         user = User.objects.filter(pk=user_id).first() if user_id else None
         start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
         return {
-            'period': (period or 'all_dates').replace('_', ' ').title(),
+            'period': DATA_EXPORT_PERIODS.get(period, (period or 'all_dates').replace('_', ' ').title()),
             'date_from': format_export_value(start_date),
             'date_to': format_export_value(end_date),
             'branch': branch.name if branch else 'All branches',
@@ -4701,8 +4733,9 @@ class AdminDataExportView(APIView):
     def filtered_queryset(self, request, export_type):
         branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
         user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
+        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
         start_date, end_date = data_export_date_bounds(
-            request.query_params.get('period') or '',
+            period,
             request.query_params.get('date_from') or '',
             request.query_params.get('date_to') or '',
         )
@@ -4875,7 +4908,8 @@ class AdminDataExportView(APIView):
         return ''
 
     def user_report_rows(self, request, users):
-        start_date, end_date = data_export_date_bounds(request.query_params.get('period') or '', request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
+        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
+        start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
         headers = ['User', 'Branch', 'Leads Handled', 'Walkins Handled', 'Conversions', 'Enrollments', 'Payments Collected', 'Pending Followups']
         rows = []
         for user in users:

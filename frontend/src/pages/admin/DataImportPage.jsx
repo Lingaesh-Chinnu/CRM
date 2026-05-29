@@ -23,15 +23,12 @@ const exportTabs = [
 ]
 
 const periodOptions = [
-  { value: 'today', label: 'Today' },
-  { value: 'last_7_days', label: 'Last 7 Days' },
   { value: 'last_1_month', label: 'Last 1 Month' },
   { value: 'last_3_months', label: 'Last 3 Months' },
   { value: 'last_6_months', label: 'Last 6 Months' },
   { value: 'last_1_year', label: 'Last 1 Year' },
   { value: 'last_2_years', label: 'Last 2 Years' },
   { value: 'last_3_years', label: 'Last 3 Years' },
-  { value: 'custom', label: 'Custom Date Range' },
 ]
 
 function statusClass(status) {
