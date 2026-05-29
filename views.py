@@ -4704,7 +4704,7 @@ class AdminDataExportView(APIView):
             })
         except Exception:
             logger.exception('Unable to generate admin data export for type=%s', export_type)
-            return Response({'success': False, 'message': 'Unable to generate export.'}, status=500)
+            return Response({'success': False, 'message': 'Export generation failed.'}, status=400)
 
     def safe_pk(self, value, label):
         if value in (None, ''):
