@@ -22,6 +22,8 @@ const exportTabs = [
   { value: 'users', label: 'Users Report Export' },
 ]
 
+const exportTypeValues = new Set(exportTabs.map((tab) => tab.value))
+
 const periodOptions = [
   { value: 'last_1_month', label: 'Last 1 Month' },
   { value: 'last_3_months', label: 'Last 3 Months' },
@@ -30,6 +32,8 @@ const periodOptions = [
   { value: 'last_2_years', label: 'Last 2 Years' },
   { value: 'last_3_years', label: 'Last 3 Years' },
 ]
+
+const periodValues = new Set(periodOptions.map((option) => option.value))
 
 function statusClass(status) {
   if (status === 'matched') return 'text-emerald-700 bg-emerald-50 border-emerald-200'
@@ -51,6 +55,7 @@ export default function DataImportPage() {
   const [users, setUsers] = useState([])
   const [exportPreview, setExportPreview] = useState(null)
   const [exportLoading, setExportLoading] = useState(false)
+  const [exportStatus, setExportStatus] = useState('')
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [importSummary, setImportSummary] = useState(null)
@@ -71,37 +76,64 @@ export default function DataImportPage() {
       .catch((error) => setMessage(apiErrorMessage(error, 'Failed to load Data House setup.')))
   }, [])
 
-  const exportParams = (download = false) => ({
-    type: exportType,
-    period,
-    ...(branch ? { branch } : {}),
-    ...(user ? { user } : {}),
-    ...(period === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
-    ...(period === 'custom' && dateTo ? { date_to: dateTo } : {}),
-    ...(download ? { download: 1 } : {}),
-  })
+  const validateExportFilters = () => {
+    if (!exportTypeValues.has(exportType)) return 'Please select a valid export type.'
+    if (!periodValues.has(period)) return 'Please select a valid date filter.'
+    return ''
+  }
+
+  const exportParams = (download = false) => {
+    const params = {
+      exportType,
+      dateFilter: period,
+    }
+    if (branch) params.branch = branch
+    if (user) params.userId = user
+    if (dateFrom) params.dateFrom = dateFrom
+    if (dateTo) params.dateTo = dateTo
+    if (download) params.download = 1
+    return params
+  }
 
   const previewExport = async () => {
+    const validationError = validateExportFilters()
+    if (validationError) {
+      setMessage(validationError)
+      setExportStatus('')
+      setExportPreview(null)
+      return
+    }
     setExportLoading(true)
     setMessage('')
+    setExportStatus('')
     try {
       const { data } = await api.get('/admin-data-export/', { params: exportParams(false) })
       setExportPreview(data)
+      setExportStatus(data?.message || `Preview ready. ${data?.total || 0} records found.`)
     } catch (error) {
       setExportPreview(null)
-      setMessage('Export generation failed. Please try again.')
+      setExportStatus('')
+      setMessage(apiErrorMessage(error, 'Export generation failed. Please check filters and try again.'))
     } finally {
       setExportLoading(false)
     }
   }
 
   const downloadDataExport = async () => {
+    const validationError = validateExportFilters()
+    if (validationError) {
+      setMessage(validationError)
+      setExportStatus('')
+      return
+    }
     setExportLoading(true)
     setMessage('')
+    setExportStatus('')
     try {
       await downloadExport('/admin-data-export/', exportParams(true), `${exportType}.xlsx`)
+      setExportStatus('Excel export generated successfully.')
     } catch (error) {
-      setMessage('Export generation failed. Please try again.')
+      setMessage(apiErrorMessage(error, 'Export generation failed. Please check filters and try again.'))
     } finally {
       setExportLoading(false)
     }
@@ -392,40 +424,43 @@ export default function DataImportPage() {
                 onClick={() => {
                   setExportType(tab.value)
                   setExportPreview(null)
+                  setExportStatus('')
+                  setMessage('')
                 }}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold ${exportType === tab.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                className={`min-h-[46px] rounded-2xl px-4 py-3 text-sm font-semibold transition ${exportType === tab.value ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
               >
                 {tab.label}
               </button>
             ))}
           </div>
 
-          <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-6 grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
             <label>
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Date Filter</span>
-              <select value={period} onChange={(event) => { setPeriod(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+              <select value={period} onChange={(event) => { setPeriod(event.target.value); setExportPreview(null); setExportStatus(''); setMessage('') }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
                 {periodOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Branch</span>
-              <select value={branch} onChange={(event) => { setBranch(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+              <select value={branch} onChange={(event) => { setBranch(event.target.value); setExportPreview(null); setExportStatus(''); setMessage('') }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
                 <option value="">All branches</option>
                 {branches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             </label>
             <label>
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">User / Counselor</span>
-              <select value={user} onChange={(event) => { setUser(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+              <select value={user} onChange={(event) => { setUser(event.target.value); setExportPreview(null); setExportStatus(''); setMessage('') }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
                 <option value="">All users</option>
                 {users.map((item) => <option key={item.id} value={item.id}>{item.name || item.full_name || item.username}</option>)}
               </select>
             </label>
-            <div className="flex items-end gap-3">
-              <button type="button" onClick={previewExport} disabled={exportLoading} className="min-h-[48px] rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">
+            <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 xl:col-span-1 xl:flex xl:items-end">
+              <button type="button" onClick={previewExport} disabled={exportLoading} className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 xl:w-auto">
+                {exportLoading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true" />}
                 {exportLoading ? 'Loading...' : 'Preview'}
               </button>
-              <button type="button" onClick={downloadDataExport} disabled={exportLoading} className="min-h-[48px] rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+              <button type="button" onClick={downloadDataExport} disabled={exportLoading} className="inline-flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 xl:w-auto">
                 Download Excel
               </button>
             </div>
@@ -433,17 +468,18 @@ export default function DataImportPage() {
               <>
                 <label>
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
-                  <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+                  <input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setExportPreview(null); setExportStatus('') }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
                 </label>
                 <label>
                   <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
-                  <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setExportPreview(null) }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+                  <input type="date" value={dateTo} onChange={(event) => { setDateTo(event.target.value); setExportPreview(null); setExportStatus('') }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
                 </label>
               </>
             )}
           </div>
 
-          {message && <p className="mt-5 text-sm font-semibold text-slate-600">{message}</p>}
+          {message && <p className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{message}</p>}
+          {exportStatus && <p className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">{exportStatus}</p>}
 
           {exportPreview && (
             <div className="mt-6">
@@ -473,7 +509,7 @@ export default function DataImportPage() {
                     ))}
                     {exportPreview.rows.length === 0 && (
                       <tr>
-                        <td colSpan={Math.min(exportPreview.headers.length, 8)} className="px-4 py-8 text-center text-slate-500">No records match these filters.</td>
+                        <td colSpan={Math.min(exportPreview.headers.length, 8)} className="px-4 py-8 text-center text-slate-500">No records found for selected filters.</td>
                       </tr>
                     )}
                   </tbody>

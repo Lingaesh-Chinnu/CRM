@@ -29,6 +29,8 @@ export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
   }
   const detail = data?.detail
   if (detail) return detail
+  const message = data?.message
+  if (message) return message
   if (data && typeof data === 'object') {
     const fieldMessages = Object.entries(data)
       .map(([field, value]) => {

@@ -1,10 +1,24 @@
 import { api } from '../services/api'
 
 export async function downloadExport(endpoint, params, fallbackName) {
-  const response = await api.get(endpoint, {
-    params,
-    responseType: 'blob',
-  })
+  let response
+  try {
+    response = await api.get(endpoint, {
+      params,
+      responseType: 'blob',
+    })
+  } catch (error) {
+    const blob = error.response?.data
+    const contentType = blob?.type || error.response?.headers?.['content-type'] || ''
+    if (blob instanceof Blob && contentType.includes('application/json')) {
+      try {
+        error.response.data = JSON.parse(await blob.text())
+      } catch {
+        error.response.data = { message: 'Export generation failed.' }
+      }
+    }
+    throw error
+  }
   const disposition = response.headers['content-disposition'] || ''
   const filename = disposition.match(/filename="?([^"]+)"?/)?.[1] || fallbackName
   const url = window.URL.createObjectURL(response.data)

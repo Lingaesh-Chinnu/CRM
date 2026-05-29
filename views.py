@@ -4662,33 +4662,76 @@ class AdminDataExportView(APIView):
     permission_classes = [IsSuperAdmin]
     preview_limit = 10
 
+    def request_value(self, request, *keys, default=''):
+        source = request.query_params if request.method == 'GET' else request.data
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ''):
+                return value
+        return default
+
+    def export_request_context(self, request):
+        download = str(self.request_value(request, 'download', default='')).lower() in ('1', 'true', 'yes')
+        return {
+            'export_type': str(self.request_value(request, 'exportType', 'type', default='leads')).strip(),
+            'period': normalize_data_export_period(self.request_value(request, 'dateFilter', 'period', default='last_1_month')),
+            'branch_id': self.safe_pk(self.request_value(request, 'branch', 'branchId', default=''), 'branch'),
+            'user_id': self.safe_pk(self.request_value(request, 'userId', 'user', default=''), 'user'),
+            'download': download,
+            'raw': {
+                'exportType': self.request_value(request, 'exportType', 'type', default=''),
+                'dateFilter': self.request_value(request, 'dateFilter', 'period', default=''),
+                'branch': self.request_value(request, 'branch', 'branchId', default=''),
+                'userId': self.request_value(request, 'userId', 'user', default=''),
+            },
+        }
+
+    def validate_export_context(self, context):
+        errors = {}
+        if context['export_type'] not in DATA_EXPORT_TYPES:
+            errors['exportType'] = 'Select a valid export type.'
+        if context['period'] not in DATA_EXPORT_PERIODS and context['period'] != 'custom':
+            errors['dateFilter'] = 'Invalid date filter.'
+        if context['branch_id'] == 'invalid':
+            errors['branch'] = 'Select a valid branch.'
+        elif context['branch_id'] and not Branch.objects.filter(pk=context['branch_id']).exists():
+            errors['branch'] = 'Selected branch was not found.'
+        if context['user_id'] == 'invalid':
+            errors['userId'] = 'Select a valid user.'
+        elif context['user_id'] and not User.objects.filter(pk=context['user_id']).exists():
+            errors['userId'] = 'Selected user was not found.'
+        return errors
+
     def get(self, request):
-        export_type = request.query_params.get('type') or 'leads'
-        if export_type not in DATA_EXPORT_TYPES:
-            return Response({'success': False, 'message': 'Select a valid export type.'}, status=400)
-        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
-        if period not in DATA_EXPORT_PERIODS and period != 'custom':
+        context = self.export_request_context(request)
+        export_type = context['export_type']
+        period = context['period']
+        errors = self.validate_export_context(context)
+        if errors:
             logger.warning(
-                'Invalid admin data export period type=%s period=%s branch=%s user=%s',
+                'Invalid admin data export parameters type=%s period=%s branch=%s user=%s payload=%s errors=%s',
                 export_type,
-                request.query_params.get('period') or '',
-                request.query_params.get('branch') or '',
-                request.query_params.get('user') or '',
+                period,
+                context['raw'].get('branch') or '',
+                context['raw'].get('userId') or '',
+                context['raw'],
+                errors,
             )
-            return Response({'success': False, 'message': 'Invalid date filter.'}, status=400)
+            return Response({'success': False, 'message': 'Invalid export parameters.', 'errors': errors}, status=400)
         try:
             logger.info(
-                'Admin data export requested type=%s download=%s period=%s branch=%s user=%s',
+                'Admin data export requested type=%s download=%s period=%s branch=%s user=%s payload=%s',
                 export_type,
-                request.query_params.get('download') in ('1', 'true'),
+                context['download'],
                 period,
-                request.query_params.get('branch') or '',
-                request.query_params.get('user') or '',
+                context['branch_id'] or 'all',
+                context['user_id'] or 'all',
+                context['raw'],
             )
-            headers, rows, total = self.export_rows(request, export_type)
+            headers, rows, total = self.export_rows(request, export_type, context)
             logger.info('Admin data export rows ready type=%s count=%s', export_type, total)
-            if request.query_params.get('download') in ('1', 'true'):
-                filename = data_export_filename(export_type, period, request.query_params.get('branch') or '')
+            if context['download']:
+                filename = data_export_filename(export_type, period, context['branch_id'] or '')
                 response = export_tabular_response(filename, headers, rows, 'xlsx', DATA_EXPORT_TYPES[export_type])
                 logger.info('Admin data export Excel generated type=%s filename=%s', export_type, filename)
                 return response
@@ -4699,12 +4742,15 @@ class AdminDataExportView(APIView):
                 'headers': headers,
                 'rows': rows[:self.preview_limit],
                 'total': total,
-                'filters': self.filter_summary(request),
-                'message': '' if total else 'No data found',
+                'filters': self.filter_summary(request, context),
+                'message': '' if total else 'No records found for selected filters',
             })
         except Exception:
-            logger.exception('Unable to generate admin data export for type=%s', export_type)
+            logger.exception('Unable to generate admin data export for type=%s filters=%s', export_type, context)
             return Response({'success': False, 'message': 'Export generation failed.'}, status=400)
+
+    def post(self, request):
+        return self.get(request)
 
     def safe_pk(self, value, label):
         if value in (None, ''):
@@ -4712,16 +4758,21 @@ class AdminDataExportView(APIView):
         try:
             return int(value)
         except (TypeError, ValueError):
-            logger.warning('Ignoring invalid admin data export %s filter: %s', label, value)
-            return ''
+            logger.warning('Invalid admin data export %s filter: %s', label, value)
+            return 'invalid'
 
-    def filter_summary(self, request):
-        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
-        branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
-        user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
+    def filter_summary(self, request, context=None):
+        context = context or self.export_request_context(request)
+        period = context['period']
+        branch_id = context['branch_id']
+        user_id = context['user_id']
         branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
         user = User.objects.filter(pk=user_id).first() if user_id else None
-        start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
+        start_date, end_date = data_export_date_bounds(
+            period,
+            self.request_value(request, 'dateFrom', 'date_from', default=''),
+            self.request_value(request, 'dateTo', 'date_to', default=''),
+        )
         return {
             'period': DATA_EXPORT_PERIODS.get(period, (period or 'all_dates').replace('_', ' ').title()),
             'date_from': format_export_value(start_date),
@@ -4730,14 +4781,15 @@ class AdminDataExportView(APIView):
             'user': user.full_name if user else 'All users',
         }
 
-    def filtered_queryset(self, request, export_type):
-        branch_id = self.safe_pk(request.query_params.get('branch') or '', 'branch')
-        user_id = self.safe_pk(request.query_params.get('user') or '', 'user')
-        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
+    def filtered_queryset(self, request, export_type, context=None):
+        context = context or self.export_request_context(request)
+        branch_id = context['branch_id']
+        user_id = context['user_id']
+        period = context['period']
         start_date, end_date = data_export_date_bounds(
             period,
-            request.query_params.get('date_from') or '',
-            request.query_params.get('date_to') or '',
+            self.request_value(request, 'dateFrom', 'date_from', default=''),
+            self.request_value(request, 'dateTo', 'date_to', default=''),
         )
         logger.info(
             'Admin data export filters type=%s start=%s end=%s branch=%s user=%s',
@@ -4791,8 +4843,8 @@ class AdminDataExportView(APIView):
             qs = qs.filter(id=user_id)
         return qs
 
-    def export_rows(self, request, export_type):
-        queryset = self.filtered_queryset(request, export_type)
+    def export_rows(self, request, export_type, context=None):
+        queryset = self.filtered_queryset(request, export_type, context)
         count = queryset.count()
         logger.info('Admin data export queryset count type=%s count=%s', export_type, count)
         if export_type in ADMIN_IMPORT_SPECS:
@@ -4804,7 +4856,7 @@ class AdminDataExportView(APIView):
             ]
             logger.info('Admin data export serializer status type=%s rows=%s', export_type, len(rows))
             return headers, rows, count
-        headers, rows = self.user_report_rows(request, queryset)
+        headers, rows = self.user_report_rows(request, queryset, context)
         logger.info('Admin data export serializer status type=%s rows=%s', export_type, len(rows))
         return headers, rows, count
 
@@ -4907,9 +4959,14 @@ class AdminDataExportView(APIView):
             return values.get(field, '')
         return ''
 
-    def user_report_rows(self, request, users):
-        period = normalize_data_export_period(request.query_params.get('period') or 'last_1_month')
-        start_date, end_date = data_export_date_bounds(period, request.query_params.get('date_from') or '', request.query_params.get('date_to') or '')
+    def user_report_rows(self, request, users, context=None):
+        context = context or self.export_request_context(request)
+        period = context['period']
+        start_date, end_date = data_export_date_bounds(
+            period,
+            self.request_value(request, 'dateFrom', 'date_from', default=''),
+            self.request_value(request, 'dateTo', 'date_to', default=''),
+        )
         headers = ['User', 'Branch', 'Leads Handled', 'Walkins Handled', 'Conversions', 'Enrollments', 'Payments Collected', 'Pending Followups']
         rows = []
         for user in users:
