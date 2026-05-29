@@ -36,11 +36,11 @@ export default function CRMTable({ columns, rows, keyField = 'id', emptyMessage 
         <div className="overflow-x-auto">
           <div className="min-w-full">
             <div
-              className="grid items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500"
+              className="grid items-center border-b border-slate-200 bg-slate-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500"
               style={{ gridTemplateColumns }}
             >
               {columns.map((column) => (
-                <div key={column.key} className={column.headerClassName || ''}>
+                <div key={column.key} className={`min-w-0 px-1.5 ${column.headerClassName || ''}`}>
                   {column.header}
                 </div>
               ))}
@@ -48,16 +48,18 @@ export default function CRMTable({ columns, rows, keyField = 'id', emptyMessage 
             {rows.length === 0 ? (
               <div className="px-4 py-10 text-center text-sm font-medium text-slate-500">{emptyMessage}</div>
             ) : (
-              <div className="divide-y divide-slate-200">
+              <div>
                 {rows.map((row) => (
                   <div
                     key={row[keyField]}
-                    className="grid min-h-[58px] items-center gap-2 px-3 py-2.5 text-[13px] transition hover:bg-slate-50"
+                    className="grid min-h-[58px] items-stretch border-b border-slate-200 px-3 text-[13px] transition last:border-b-0 hover:bg-slate-50"
                     style={{ gridTemplateColumns }}
                   >
                     {columns.map((column) => (
-                      <div key={column.key} className={`min-w-0 ${column.className || ''}`}>
-                        {column.render ? column.render(row) : row[column.key]}
+                      <div key={column.key} className={`flex min-w-0 items-center border-b border-inherit px-1.5 py-2.5 ${column.className || ''}`}>
+                        <div className="min-w-0 flex-1">
+                          {column.render ? column.render(row) : row[column.key]}
+                        </div>
                       </div>
                     ))}
                   </div>
