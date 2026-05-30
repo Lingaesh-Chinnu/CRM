@@ -134,6 +134,7 @@ function formatDateTime(value) {
 }
 
 function conversionStatusLabel(lead) {
+  if (lead?.status_display) return lead.status_display
   if (lead?.converted_to_type === 'walkin') return 'Converted to Walk-in'
   if (lead?.converted_to_type === 'enrollment') return 'Enrolled'
   if (lead?.status === 'walk_in' || lead?.status === 'converted_to_walkin') return 'Converted to Walk-in'

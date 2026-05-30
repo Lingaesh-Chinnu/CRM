@@ -433,6 +433,66 @@ def safe_deferred_value(obj, field_name, default=''):
     return default if value is None else value
 
 
+def lead_has_enrollment(obj):
+    annotated = getattr(obj, 'has_enrollment_record', None)
+    if annotated is not None:
+        return bool(annotated)
+    try:
+        if obj.enrollments.exists():
+            return True
+    except Exception:
+        pass
+    try:
+        walkin = getattr(obj, 'walkin', None)
+        if walkin and getattr(walkin, 'enrollment', None):
+            return True
+    except Exception:
+        pass
+    if safe_deferred_value(obj, 'converted_to_type', '') == 'enrollment':
+        record_id = safe_deferred_value(obj, 'converted_record_id', None)
+        if record_id:
+            return Enrollment.objects.filter(pk=record_id, lead=obj).exists()
+    return False
+
+
+def lead_has_walkin(obj):
+    annotated = getattr(obj, 'has_walkin_record', None)
+    if annotated is not None:
+        return bool(annotated)
+    try:
+        if getattr(obj, 'walkin', None):
+            return True
+    except Exception:
+        pass
+    if safe_deferred_value(obj, 'converted_to_type', '') == 'walkin':
+        record_id = safe_deferred_value(obj, 'converted_record_id', None)
+        if record_id:
+            return WalkIn.objects.filter(pk=record_id, lead=obj).exists()
+    return False
+
+
+def effective_lead_status(obj):
+    if lead_has_enrollment(obj):
+        return Lead.Status.ENROLLED
+    if lead_has_walkin(obj):
+        return Lead.Status.CONVERTED_TO_WALKIN
+    stored_status = safe_deferred_value(obj, 'status', Lead.Status.NEW) or Lead.Status.NEW
+    if stored_status == Lead.Status.LOST:
+        return Lead.Status.LOST
+    return stored_status or Lead.Status.NEW
+
+
+def effective_lead_status_display(obj):
+    status = effective_lead_status(obj)
+    if status == Lead.Status.ENROLLED:
+        return 'Enrolled'
+    if status == Lead.Status.CONVERTED_TO_WALKIN:
+        return 'Converted to Walk-in'
+    if status == Lead.Status.NEW and safe_deferred_value(obj, 'source', '') == Lead.Source.MANUAL:
+        return 'Follow-up'
+    return dict(Lead.Status.choices).get(status, str(status).replace('_', ' ').title())
+
+
 class FollowUpSerializer(serializers.ModelSerializer):
     updated_by_name = serializers.SerializerMethodField()
 
@@ -457,6 +517,7 @@ class LeadListSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name', read_only=True)
     status = serializers.SerializerMethodField()
     lead_status = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     source = serializers.SerializerMethodField()
     source_display = serializers.SerializerMethodField()
     assigned_to_name = serializers.SerializerMethodField()
@@ -473,15 +534,19 @@ class LeadListSerializer(serializers.ModelSerializer):
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name','remarks',
                   'source_description','latest_follow_up_at',
-                  'status','lead_status','source','source_display','walkin_date','next_follow_up_date',
+                  'status','status_display','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
-                  'branch_name','created_by','imported_via_csv','is_important','created_at','updated_at']
+                  'branch_name','created_by','converted_to_type','converted_record_id',
+                  'imported_via_csv','is_important','created_at','updated_at']
 
     def get_status(self, obj):
-        return safe_deferred_value(obj, 'status', Lead.Status.NEW) or Lead.Status.NEW
+        return effective_lead_status(obj)
 
     def get_lead_status(self, obj):
         return self.get_status(obj)
+
+    def get_status_display(self, obj):
+        return effective_lead_status_display(obj)
 
     def get_source(self, obj):
         return safe_deferred_value(obj, 'source', '') or ''
@@ -578,6 +643,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     branch_name      = serializers.CharField(source='branch.name',         read_only=True)
     created_by_name  = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
     source_display   = serializers.CharField(source='get_source_display', read_only=True)
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
@@ -644,7 +710,11 @@ class LeadDetailSerializer(serializers.ModelSerializer):
         for field_name, default in defaults.items():
             if field_name in deferred:
                 instance.__dict__[field_name] = default
-        return super().to_representation(instance)
+        data = super().to_representation(instance)
+        data['status'] = effective_lead_status(instance)
+        data['lead_status'] = data['status']
+        data['status_display'] = effective_lead_status_display(instance)
+        return data
 
     def get_assigned_to_name(self, obj):
         try:
@@ -720,6 +790,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     def get_qualification_display(self, obj):
         return qualification_display_value(safe_deferred_value(obj, 'qualification', ''))
 
+    def get_status_display(self, obj):
+        return effective_lead_status_display(obj)
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         request = self.context.get('request')
@@ -734,6 +807,12 @@ class LeadDetailSerializer(serializers.ModelSerializer):
                     })
                 attrs['branch'] = user.branch
         branch = attrs.get('branch') or getattr(self.instance, 'branch', None)
+        requested_status = attrs.get('status')
+        if self.instance and requested_status == Lead.Status.LOST:
+            if lead_has_enrollment(self.instance):
+                attrs['status'] = Lead.Status.ENROLLED
+            elif lead_has_walkin(self.instance):
+                attrs['status'] = Lead.Status.CONVERTED_TO_WALKIN
         if branch and not getattr(branch, 'is_active', True):
             raise serializers.ValidationError({'branch': 'Select a valid active branch.'})
         assigned_to = attrs.get('assigned_to')

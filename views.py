@@ -1007,13 +1007,14 @@ WALKIN_CLOSED_FOLLOW_UP_STATUSES = [
 
 
 def automated_lead_status_display(lead):
-    if lead.converted_to_type == 'walkin' or lead.status == Lead.Status.CONVERTED_TO_WALKIN:
-        return 'Converted to Walk-in'
-    if lead.converted_to_type == 'enrollment' or lead.status in (Lead.Status.CONVERTED, Lead.Status.ENROLLED):
+    status_value = effective_lead_status(lead)
+    if status_value == Lead.Status.ENROLLED:
         return 'Enrolled'
-    if lead.status == Lead.Status.NEW and lead.source == Lead.Source.MANUAL:
+    if status_value == Lead.Status.CONVERTED_TO_WALKIN:
+        return 'Converted to Walk-in'
+    if status_value == Lead.Status.NEW and lead.source == Lead.Source.MANUAL:
         return 'Follow-up'
-    return lead.get_status_display()
+    return dict(Lead.Status.choices).get(status_value, lead.get_status_display())
 
 
 def automated_walkin_status_display(walkin):
@@ -2545,7 +2546,8 @@ class DiscountViewSet(viewsets.ModelViewSet):
 from crm.models import FollowUp, Lead, LeadImportHistory
 from serializers import (
     FollowUpSerializer, LeadListSerializer, LeadDetailSerializer,
-    LeadStaffUpdateSerializer, LeadImportHistorySerializer, LeadInboxSerializer
+    LeadStaffUpdateSerializer, LeadImportHistorySerializer, LeadInboxSerializer,
+    effective_lead_status,
 )
 import django_filters
 import csv
@@ -2565,6 +2567,7 @@ def create_follow_up_entry(record, record_type, request):
 
 
 class LeadFilter(django_filters.FilterSet):
+    status = django_filters.CharFilter(method='filter_status')
     name = django_filters.CharFilter(method='filter_name')
     phone = django_filters.CharFilter(method='filter_phone')
     source = django_filters.CharFilter(method='filter_source')
@@ -2601,6 +2604,20 @@ class LeadFilter(django_filters.FilterSet):
                 return queryset.none()
             return queryset.filter(imported_via_csv=True)
         return queryset.filter(source__iexact=value)
+
+    def filter_status(self, queryset, name, value):
+        value = (value or '').strip()
+        if not value:
+            return queryset
+        enrollment_lookup = Q(enrollments__isnull=False) | Q(walkin__enrollment__isnull=False)
+        walkin_lookup = Q(walkin__isnull=False)
+        if value in (Lead.Status.ENROLLED, Lead.Status.CONVERTED):
+            return queryset.filter(enrollment_lookup).distinct()
+        if value in (Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.WALK_IN):
+            return queryset.filter(walkin_lookup).exclude(enrollment_lookup).distinct()
+        if value == Lead.Status.LOST:
+            return queryset.filter(status=Lead.Status.LOST).exclude(enrollment_lookup).exclude(walkin_lookup).distinct()
+        return queryset.filter(status=value).exclude(enrollment_lookup).exclude(walkin_lookup).distinct()
 
     def filter_next_follow_up_date_from(self, queryset, name, value):
         if not value or 'next_follow_up_date' in missing_model_columns(Lead, ['next_follow_up_date']):
@@ -2658,6 +2675,15 @@ class LeadViewSet(viewsets.ModelViewSet):
             qs = qs.annotate(
                 latest_follow_up_remark=Subquery(latest_follow_up.values('remarks')[:1]),
                 latest_follow_up_at=Subquery(latest_follow_up.values('created_at')[:1]),
+                has_walkin_record=Exists(
+                    WalkIn.objects.filter(lead_id=OuterRef('pk'), is_deleted=False)
+                ),
+                has_enrollment_record=Exists(
+                    Enrollment.objects.filter(
+                        Q(lead_id=OuterRef('pk')) | Q(walkin__lead_id=OuterRef('pk')),
+                        is_deleted=False,
+                    )
+                ),
             )
         else:
             related = ['course', 'branch', 'assigned_to', 'created_by']
@@ -2687,6 +2713,23 @@ class LeadViewSet(viewsets.ModelViewSet):
                 timezone.localdate(),
             )
         return qs
+
+    def _reconcile_lead_lifecycle_status(self, lead):
+        next_status = effective_lead_status(lead)
+        if next_status not in (Lead.Status.ENROLLED, Lead.Status.CONVERTED_TO_WALKIN) or lead.status == next_status:
+            return lead
+        lead.status = next_status
+        lead.next_follow_up_date = None
+        if next_status == Lead.Status.ENROLLED:
+            lead.remarks = lead.remarks or 'Joined'
+            lead.converted_to_type = lead.converted_to_type or 'enrollment'
+        else:
+            lead.converted_to_type = lead.converted_to_type or 'walkin'
+        lead.save(update_fields=[
+            'status', 'next_follow_up_date', 'remarks',
+            'converted_to_type', 'updated_at',
+        ])
+        return lead
 
     @action(detail=True, methods=['post'], url_path='toggle-important')
     def toggle_important(self, request, pk=None):
@@ -3158,8 +3201,10 @@ class LeadViewSet(viewsets.ModelViewSet):
                 return result
             return Response(self.get_serializer(converted_lead).data)
         self.perform_update(serializer)
-        response = Response(serializer.data)
         lead.refresh_from_db()
+        self._reconcile_lead_lifecycle_status(lead)
+        lead.refresh_from_db()
+        response = Response(self.get_serializer(lead).data)
         if (
             old_next_follow_up_date != lead.next_follow_up_date
             or lead.status in LEAD_CLOSED_FOLLOW_UP_STATUSES

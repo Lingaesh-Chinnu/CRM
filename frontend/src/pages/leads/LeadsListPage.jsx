@@ -76,6 +76,7 @@ function statusTone(status) {
 }
 
 function lifecycleStatusLabel(lead) {
+  if (lead?.status_display) return lead.status_display
   if (lead?.converted_to_type === 'walkin' || lead?.status === 'converted_to_walkin' || lead?.status === 'walk_in') return 'Converted to Walk-in'
   if (lead?.converted_to_type === 'enrollment' || lead?.status === 'converted' || lead?.status === 'enrolled') return 'Enrolled'
   if (lead?.status === 'not_interested') return 'Not Interested'
