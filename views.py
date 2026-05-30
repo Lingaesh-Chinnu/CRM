@@ -4570,12 +4570,12 @@ DATA_EXPORT_TYPES = {
 
 DATA_EXPORT_TYPE_ALIASES = {
     'users_report': 'users_report',
-    'users': 'users',
+    'users': 'users_report',
 }
 
 
 def normalize_data_export_type(export_type):
-    export_type = str(export_type or 'leads').strip()
+    export_type = str(export_type or '').strip()
     return DATA_EXPORT_TYPE_ALIASES.get(export_type, export_type)
 
 
@@ -4674,29 +4674,37 @@ class AdminDataExportView(APIView):
     permission_classes = [IsSuperAdmin]
     preview_limit = 10
 
+    def request_payload(self, request):
+        query_params = getattr(request, 'query_params', {})
+        request_data = getattr(request, 'data', {})
+        return {
+            'request_data': dict(request_data.items()) if hasattr(request_data, 'items') else request_data,
+            'query_params': dict(query_params.items()) if hasattr(query_params, 'items') else query_params,
+        }
+
     def request_value(self, request, *keys, default=''):
-        source = request.query_params if request.method == 'GET' else request.data
-        for key in keys:
-            value = source.get(key)
-            if value not in (None, ''):
-                return value
+        sources = []
+        for source in (getattr(request, 'data', None), getattr(request, 'query_params', None)):
+            if source is not None and source not in sources:
+                sources.append(source)
+        for source in sources:
+            for key in keys:
+                value = source.get(key)
+                if value not in (None, ''):
+                    return value
         return default
 
     def export_request_context(self, request):
         download = str(self.request_value(request, 'download', default='')).lower() in ('1', 'true', 'yes')
-        request_data = getattr(request, 'data', {})
-        query_payload = dict(request.query_params.items())
-        print('AdminDataExport request.data:', request_data)
-        print('AdminDataExport query_params:', query_payload)
+        payload = self.request_payload(request)
         return {
-            'export_type': normalize_data_export_type(self.request_value(request, 'exportType', 'export_type', 'type', default='leads')),
-            'period': normalize_data_export_period(self.request_value(request, 'dateFilter', 'date_filter', 'period', default='last_1_month')),
+            'export_type': normalize_data_export_type(self.request_value(request, 'exportType', 'export_type', 'type', default='')),
+            'period': normalize_data_export_period(self.request_value(request, 'dateFilter', 'date_filter', 'period', default='')),
             'branch_id': self.safe_pk(self.request_value(request, 'branch', 'branchId', 'branch_id', default=''), 'branch'),
             'user_id': self.safe_pk(self.request_value(request, 'userId', 'user_id', 'user', default=''), 'user'),
             'download': download,
             'raw': {
-                'request_data': request_data,
-                'query_params': query_payload,
+                **payload,
                 'exportType': self.request_value(request, 'exportType', 'export_type', 'type', default=''),
                 'dateFilter': self.request_value(request, 'dateFilter', 'date_filter', 'period', default=''),
                 'branch': self.request_value(request, 'branch', 'branchId', 'branch_id', default=''),
@@ -4706,9 +4714,13 @@ class AdminDataExportView(APIView):
 
     def validate_export_context(self, context):
         errors = {}
-        if context['export_type'] not in DATA_EXPORT_TYPES:
+        if not context['raw'].get('exportType'):
+            errors['exportType'] = 'Export type is required.'
+        elif context['export_type'] not in DATA_EXPORT_TYPES:
             errors['exportType'] = 'Select a valid export type.'
-        if context['period'] not in DATA_EXPORT_PERIODS and context['period'] != 'custom':
+        if not context['raw'].get('dateFilter'):
+            errors['dateFilter'] = 'Date filter is required.'
+        elif context['period'] not in DATA_EXPORT_PERIODS and context['period'] != 'custom':
             errors['dateFilter'] = 'Invalid date filter.'
         if context['branch_id'] == 'invalid':
             errors['branch'] = 'Select a valid branch.'
@@ -4724,6 +4736,8 @@ class AdminDataExportView(APIView):
         context = self.export_request_context(request)
         export_type = context['export_type']
         period = context['period']
+        logger.info('Admin data export request payload=%s', context['raw'])
+        logger.info('Admin data export type=%s', export_type or '(missing)')
         errors = self.validate_export_context(context)
         if errors:
             logger.warning(
@@ -4735,7 +4749,11 @@ class AdminDataExportView(APIView):
                 context['raw'],
                 errors,
             )
-            return Response({'success': False, 'message': 'Invalid export parameters.', 'errors': errors}, status=400)
+            return Response({
+                'success': False,
+                'message': 'Invalid export parameters.',
+                'errors': errors,
+            }, status=400)
         try:
             logger.info(
                 'Admin data export requested type=%s download=%s period=%s branch=%s user=%s payload=%s',
@@ -4749,9 +4767,14 @@ class AdminDataExportView(APIView):
             if context['download']:
                 return self.download_response(request, context)
             return self.preview_response(request, context)
-        except Exception:
+        except Exception as exc:
             logger.exception('Unable to generate admin data export for type=%s filters=%s', export_type, context)
-            return Response({'success': False, 'message': 'Export generation failed.'}, status=400)
+            label = DATA_EXPORT_TYPES.get(export_type, 'data')
+            return Response({
+                'success': False,
+                'message': f'Unable to generate {label} export: {exc}',
+                'error': str(exc),
+            }, status=400)
 
     def post(self, request):
         return self.get(request)

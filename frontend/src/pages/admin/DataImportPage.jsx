@@ -35,6 +35,16 @@ const periodOptions = [
 
 const periodValues = new Set(periodOptions.map((option) => option.value))
 
+function exportFilterValue(value) {
+  return value == null ? '' : String(value)
+}
+
+function debugAdminExport(label, value) {
+  if (import.meta.env.DEV) {
+    console.debug(`[AdminDataExport] ${label}`, value)
+  }
+}
+
 function statusClass(status) {
   if (status === 'matched') return 'text-emerald-700 bg-emerald-50 border-emerald-200'
   if (status === 'missing') return 'text-rose-700 bg-rose-50 border-rose-200'
@@ -77,18 +87,18 @@ export default function DataImportPage() {
   }, [])
 
   const validateExportFilters = () => {
-    if (!exportTypeValues.has(exportType)) return 'Please select a valid export type.'
-    if (!periodValues.has(period)) return 'Please select a valid date filter.'
+    if (!exportType || !exportTypeValues.has(exportType)) return 'Please select a valid export type.'
+    if (!period || !periodValues.has(period)) return 'Please select a valid date filter.'
     return ''
   }
 
   const exportParams = (download = false) => {
     const params = {
-      exportType,
-      dateFilter: period,
+      exportType: exportFilterValue(exportType),
+      dateFilter: exportFilterValue(period),
+      branch: exportFilterValue(branch),
+      userId: exportFilterValue(user),
     }
-    if (branch) params.branch = branch
-    if (user) params.userId = user
     if (dateFrom) params.dateFrom = dateFrom
     if (dateTo) params.dateTo = dateTo
     if (download) params.download = 1
@@ -107,10 +117,14 @@ export default function DataImportPage() {
     setMessage('')
     setExportStatus('')
     try {
-      const { data } = await api.get('/admin-data-export/', { params: exportParams(false) })
+      const params = exportParams(false)
+      debugAdminExport('preview request payload', params)
+      const { data } = await api.get('/admin-data-export/', { params })
+      debugAdminExport('preview API response', data)
       setExportPreview(data)
       setExportStatus(data?.message || `Preview ready. ${data?.total || 0} records found.`)
     } catch (error) {
+      debugAdminExport('preview error response body', error.response?.data || error.message)
       setExportPreview(null)
       setExportStatus('')
       setMessage(apiErrorMessage(error, 'Export generation failed. Please check filters and try again.'))
@@ -130,9 +144,17 @@ export default function DataImportPage() {
     setMessage('')
     setExportStatus('')
     try {
-      await downloadExport('/admin-data-export/', exportParams(true), `${exportType}.xlsx`)
+      const params = exportParams(true)
+      debugAdminExport('download request payload', params)
+      const response = await downloadExport('/admin-data-export/', params, `${exportType}.xlsx`)
+      debugAdminExport('download API response', {
+        contentType: response?.headers?.['content-type'],
+        contentDisposition: response?.headers?.['content-disposition'],
+        size: response?.data?.size,
+      })
       setExportStatus('Excel export generated successfully.')
     } catch (error) {
+      debugAdminExport('download error response body', error.response?.data || error.message)
       setMessage(apiErrorMessage(error, 'Export generation failed. Please check filters and try again.'))
     } finally {
       setExportLoading(false)

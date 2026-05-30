@@ -29,6 +29,7 @@ export async function downloadExport(endpoint, params, fallbackName) {
   link.click()
   link.remove()
   window.URL.revokeObjectURL(url)
+  return response
 }
 
 export function ExportMenu({ onExport, exporting }) {
