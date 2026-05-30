@@ -4916,96 +4916,115 @@ class AdminDataExportView(APIView):
             return 0 if numeric_default == 0 else ''
         return format_export_value(value)
 
+    def export_attr(self, record, field, default=''):
+        return getattr(record, field, default)
+
+    def export_related_attr(self, record, relation, field, default=''):
+        related = getattr(record, relation, None)
+        return getattr(related, field, default) if related else default
+
+    def export_display_value(self, record, field):
+        value = getattr(record, field, '')
+        if value in (None, ''):
+            return ''
+        display_method = getattr(record, f'get_{field}_display', None)
+        if callable(display_method):
+            try:
+                return display_method()
+            except AttributeError:
+                return value
+        return value
+
     def import_compatible_value(self, export_type, record, field):
         if export_type == 'leads':
             values = {
-                'name': record.name,
-                'phone': record.phone,
-                'course': record.course.name if record.course else '',
-                'branch': record.branch.name if record.branch else '',
-                'source': record.get_source_display() if record.source else '',
-                'source_description': record.source_description,
-                'next_follow_up_date': record.next_follow_up_date,
-                'remarks': record.remarks,
-                'assigned_to': record.assigned_to.full_name if record.assigned_to else '',
-                'dob': record.dob,
-                'email': record.email,
-                'location': record.location,
-                'pincode': record.pincode,
-                'qualification': record.get_qualification_display() if record.qualification else '',
-                'degree': record.degree,
-                'preferred_timing': record.get_preferred_timing_display() if record.preferred_timing else '',
-                'walkin_date': record.walkin_date,
+                'name': self.export_attr(record, 'name'),
+                'phone': self.export_attr(record, 'phone'),
+                'course': self.export_related_attr(record, 'course', 'name'),
+                'branch': self.export_related_attr(record, 'branch', 'name'),
+                'source': self.export_display_value(record, 'source'),
+                'source_description': self.export_attr(record, 'source_description'),
+                'next_follow_up_date': self.export_attr(record, 'next_follow_up_date'),
+                'remarks': self.export_attr(record, 'remarks'),
+                'assigned_to': self.export_related_attr(record, 'assigned_to', 'full_name'),
+                'dob': self.export_attr(record, 'dob'),
+                'email': self.export_attr(record, 'email'),
+                'location': self.export_attr(record, 'location'),
+                'pincode': self.export_attr(record, 'pincode'),
+                'qualification': self.export_attr(record, 'qualification'),
+                'degree': self.export_attr(record, 'degree'),
+                'preferred_timing': self.export_display_value(record, 'preferred_timing'),
+                'walkin_date': self.export_attr(record, 'walkin_date'),
             }
             return values.get(field, '')
         if export_type == 'walkins':
             values = {
-                'name': record.name,
-                'phone': record.phone,
-                'course': record.course.name if record.course else '',
-                'branch': record.branch.name if record.branch else '',
-                'source': record.get_source_display() if record.source else '',
-                'visit_date': record.visit_date,
-                'follow_up_date': record.follow_up_date,
-                'remarks': record.remarks,
-                'assigned_to': record.assigned_to.full_name if record.assigned_to else '',
-                'dob': record.dob,
-                'email': record.email,
-                'location': record.location,
-                'pincode': record.pincode,
-                'qualification': record.get_qualification_display() if record.qualification else '',
-                'degree': record.degree,
-                'preferred_timing': record.get_preferred_timing_display() if record.preferred_timing else '',
-                'demo_class': 'Yes' if record.demo_class else 'No',
-                'status': record.get_status_display(),
+                'name': self.export_attr(record, 'name'),
+                'phone': self.export_attr(record, 'phone'),
+                'course': self.export_related_attr(record, 'course', 'name'),
+                'branch': self.export_related_attr(record, 'branch', 'name'),
+                'source': self.export_display_value(record, 'source'),
+                'visit_date': self.export_attr(record, 'visit_date'),
+                'follow_up_date': self.export_attr(record, 'follow_up_date'),
+                'remarks': self.export_attr(record, 'remarks'),
+                'assigned_to': self.export_related_attr(record, 'assigned_to', 'full_name'),
+                'dob': self.export_attr(record, 'dob'),
+                'email': self.export_attr(record, 'email'),
+                'location': self.export_attr(record, 'location'),
+                'pincode': self.export_attr(record, 'pincode'),
+                'qualification': self.export_display_value(record, 'qualification'),
+                'degree': self.export_attr(record, 'degree'),
+                'preferred_timing': self.export_display_value(record, 'preferred_timing'),
+                'demo_class': 'Yes' if self.export_attr(record, 'demo_class') else 'No',
+                'status': self.export_display_value(record, 'status'),
             }
             return values.get(field, '')
         if export_type in ('enrollments', 'students'):
             values = {
-                'student_number': record.student_number,
-                'name': record.name,
-                'phone': record.phone,
-                'course': record.course.name if record.course else '',
-                'branch': record.branch.name if record.branch else '',
-                'enrollment_date': record.enrollment_date,
+                'student_number': self.export_attr(record, 'student_number'),
+                'name': self.export_attr(record, 'name'),
+                'phone': self.export_attr(record, 'phone'),
+                'course': self.export_related_attr(record, 'course', 'name'),
+                'branch': self.export_related_attr(record, 'branch', 'name'),
+                'enrollment_date': self.export_attr(record, 'enrollment_date'),
                 'actual_fees': enrollment_payable_fee(record),
-                'assigned_to': record.enrolled_by.full_name if record.enrolled_by else '',
-                'status': record.get_status_display(),
-                'email': record.email,
-                'dob': record.dob,
-                'location': record.location,
-                'pincode': record.pincode,
-                'qualification': record.qualification,
-                'degree': record.degree,
-                'source': record.get_source_display() if record.source else '',
-                'preferred_timing': record.get_preferred_timing_display() if record.preferred_timing else '',
-                'discount_amount': record.discount_amount,
-                'discount_reason': record.discount_reason,
-                'start_date': record.start_date,
-                'batch_timing': record.batch_timing,
+                'assigned_to': self.export_related_attr(record, 'enrolled_by', 'full_name'),
+                'status': self.export_display_value(record, 'status'),
+                'email': self.export_attr(record, 'email'),
+                'dob': self.export_attr(record, 'dob'),
+                'location': self.export_attr(record, 'location'),
+                'pincode': self.export_attr(record, 'pincode'),
+                'qualification': self.export_attr(record, 'qualification'),
+                'degree': self.export_attr(record, 'degree'),
+                'source': self.export_display_value(record, 'source'),
+                'preferred_timing': self.export_display_value(record, 'preferred_timing'),
+                'discount_amount': self.export_attr(record, 'discount_amount'),
+                'discount_reason': self.export_attr(record, 'discount_reason'),
+                'start_date': self.export_attr(record, 'start_date'),
+                'batch_timing': self.export_attr(record, 'batch_timing'),
             }
             return values.get(field, '')
         if export_type == 'payments':
-            enrollment = record.enrollment
+            enrollment = getattr(record, 'enrollment', None)
             values = {
-                'student_number': enrollment.student_number if enrollment else '',
-                'name': enrollment.name if enrollment else '',
-                'phone': enrollment.phone if enrollment else '',
-                'branch': enrollment.branch.name if enrollment and enrollment.branch else '',
-                'amount': record.amount,
-                'payment_date': record.payment_date,
-                'payment_mode': record.get_payment_mode_display(),
-                'reference_number': record.reference_number,
-                'notes': record.notes,
+                'student_number': getattr(enrollment, 'student_number', '') if enrollment else '',
+                'name': getattr(enrollment, 'name', '') if enrollment else '',
+                'phone': getattr(enrollment, 'phone', '') if enrollment else '',
+                'branch': getattr(getattr(enrollment, 'branch', None), 'name', '') if enrollment else '',
+                'amount': self.export_attr(record, 'amount'),
+                'payment_date': self.export_attr(record, 'payment_date'),
+                'payment_mode': self.export_display_value(record, 'payment_mode'),
+                'reference_number': self.export_attr(record, 'reference_number'),
+                'notes': self.export_attr(record, 'notes'),
             }
             return values.get(field, '')
         if export_type == 'courses':
             values = {
-                'name': record.name,
-                'duration_months': record.duration_months,
-                'actual_fees': record.actual_fees,
-                'discount_amount': record.discount_amount,
-                'is_active': 'Active' if record.is_active else 'Inactive',
+                'name': self.export_attr(record, 'name'),
+                'duration_months': self.export_attr(record, 'duration_months'),
+                'actual_fees': self.export_attr(record, 'actual_fees'),
+                'discount_amount': self.export_attr(record, 'discount_amount'),
+                'is_active': 'Active' if self.export_attr(record, 'is_active') else 'Inactive',
             }
             return values.get(field, '')
         return ''
