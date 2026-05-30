@@ -42,6 +42,24 @@ function formatDate(value, fallback = 'Not provided') {
   })
 }
 
+function money(value) {
+  return Number(value || 0).toLocaleString('en-IN')
+}
+
+function latestGeneratedBill(paymentInfo) {
+  const bills = [...(paymentInfo?.installments || [])]
+    .filter((installment) => installment.bill_number || installment.document_status === 'bill_generated')
+    .sort((a, b) => {
+      const dateCompare = String(a.payment_date || '').localeCompare(String(b.payment_date || ''))
+      return dateCompare || Number(a.id || 0) - Number(b.id || 0)
+    })
+  return bills[bills.length - 1] || null
+}
+
+function nextPendingInstallment(paymentInfo) {
+  return (paymentInfo?.installment_summary || []).find((item) => Number(item.pending_amount || 0) > 0) || null
+}
+
 function DetailCard({ label, value }) {
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
@@ -61,6 +79,8 @@ export default function StudentDetailPage() {
   const [loadError, setLoadError] = useState('')
   const [message, setMessage] = useState('')
   const [statusSaving, setStatusSaving] = useState(false)
+  const [billActionId, setBillActionId] = useState(null)
+  const [sendingBillId, setSendingBillId] = useState(null)
   const [showCourseChange, setShowCourseChange] = useState(false)
   const isSuperAdmin = user?.role === 'super_admin'
 
@@ -133,6 +153,40 @@ export default function StudentDetailPage() {
     }
   }
 
+  const openBill = async (installment) => {
+    if (!installment) return
+    setBillActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.get(`/installments/${installment.id}/view-bill/`, {
+        responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(data)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to open bill.'))
+    } finally {
+      setBillActionId(null)
+    }
+  }
+
+  const sendBill = async (installment) => {
+    if (!installment || sendingBillId) return
+    setSendingBillId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
+      setMessage(data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to send bill.'))
+    } finally {
+      setSendingBillId(null)
+    }
+  }
+
+  const latestBill = latestGeneratedBill(row.payment_info)
+  const nextPending = nextPendingInstallment(row.payment_info)
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -192,6 +246,57 @@ export default function StudentDetailPage() {
       />
 
       <CandidateTimeline candidate={row} />
+
+      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h2 className="text-xl font-black tracking-tight text-slate-950">Billing</h2>
+            <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Paid</p>
+                <p className="mt-1 font-black text-slate-950">Rs {money(row.payment_info?.paid_amount)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Pending</p>
+                <p className="mt-1 font-black text-slate-950">Rs {money(row.payment_info?.balance)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Next Amount</p>
+                <p className="mt-1 font-black text-slate-950">Rs {money(nextPending?.pending_amount)}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Next Date</p>
+                <p className="mt-1 font-black text-slate-950">{formatDate(nextPending?.due_date || row.payment_info?.next_payment_date, 'Not set')}</p>
+              </div>
+            </div>
+            {latestBill ? (
+              <p className="mt-4 text-sm font-semibold text-slate-500">
+                Latest bill: {latestBill.document_number || latestBill.bill_number} / {formatDate(latestBill.bill_generated_at || latestBill.payment_date, 'Not set')}
+              </p>
+            ) : (
+              <p className="mt-4 text-sm font-semibold text-slate-500">No generated bill is available for this student yet.</p>
+            )}
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row lg:flex-col xl:flex-row">
+            <button
+              type="button"
+              onClick={() => openBill(latestBill)}
+              disabled={!latestBill || billActionId === latestBill?.id}
+              className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {billActionId === latestBill?.id ? 'Opening...' : 'View Bill'}
+            </button>
+            <button
+              type="button"
+              onClick={() => sendBill(latestBill)}
+              disabled={!latestBill || sendingBillId === latestBill?.id}
+              className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {sendingBillId === latestBill?.id ? 'Sending...' : 'Send Bill'}
+            </button>
+          </div>
+        </div>
+      </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-2xl bg-slate-50 p-4">

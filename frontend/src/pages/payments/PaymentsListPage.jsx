@@ -106,13 +106,6 @@ function latestReasonRequestFor(row, installmentIndex) {
   return null
 }
 
-function latestGeneratedDocument(row) {
-  const documents = orderedInstallments(row).filter((installment) => (
-    installment.bill_is_generated || installment.bill_number || installment.document_status === 'bill_generated'
-  ))
-  return documents[documents.length - 1] || null
-}
-
 function feeReminderMessage(row) {
   return `Hi ${row.student_name},
 
@@ -147,7 +140,6 @@ export default function PaymentsListPage() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(navigationMessage)
   const [sendingId, setSendingId] = useState(null)
-  const [documentActionId, setDocumentActionId] = useState(null)
   const [reasonRequest, setReasonRequest] = useState(null)
   const [reasonContext, setReasonContext] = useState(null)
   const [reasonForm, setReasonForm] = useState({ message: '', promised_payment_date: '' })
@@ -417,43 +409,6 @@ export default function PaymentsListPage() {
     }
   }
 
-  const downloadBill = async (installment) => {
-    if (!installment) return
-    setDocumentActionId(installment.id)
-    setMessage('')
-    try {
-      const { data } = await api.get(`/installments/${installment.id}/download-bill/`, {
-        responseType: 'blob',
-      })
-      const url = window.URL.createObjectURL(data)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `${installment.document_number || `payment-document-${installment.id}`}.html`
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to download bill.'))
-    } finally {
-      setDocumentActionId(null)
-    }
-  }
-
-  const sendBill = async (row, installment) => {
-    if (!installment) return
-    setDocumentActionId(installment.id)
-    setMessage('')
-    try {
-      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
-      setMessage(data.whatsapp_sent ? `Bill sent to ${row.student_name}.` : data.whatsapp_error || 'Bill send request failed.')
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to send bill.'))
-    } finally {
-      setDocumentActionId(null)
-    }
-  }
-
   const sendReminder = async (row) => {
     setSendingId(row.id)
     setMessage('')
@@ -480,7 +435,6 @@ export default function PaymentsListPage() {
   const actionControls = (row, compact = false) => {
     const nextPending = nextPendingInstallment(row)
     const reason = nextPending ? latestReasonRequestFor(row, nextPending.index) : (row.latest_reason_request || null)
-    const generatedDocument = latestGeneratedDocument(row)
     const buttonClass = compact
       ? 'whitespace-nowrap rounded-2xl px-4 py-3 text-sm font-semibold'
       : 'inline-flex whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold'
@@ -491,7 +445,7 @@ export default function PaymentsListPage() {
       if (reason) {
         return (
           <button type="button" onClick={() => openReasonRequest(reason, row, nextPending)} className={primaryClass}>
-            View Conversation
+            View Response
           </button>
         )
       }
@@ -500,7 +454,7 @@ export default function PaymentsListPage() {
       }
       return (
         <button type="button" onClick={() => openAskReason(row, nextPending)} disabled={reasonSubmitting} className={primaryClass}>
-          Ask Reason
+          Reminder
         </button>
       )
     }
@@ -521,25 +475,9 @@ export default function PaymentsListPage() {
         )}
         {reason && (
           <button type="button" onClick={() => openReasonRequest(reason, row, nextPending)} className={secondaryClass}>
-            View Conversation
+            View Response
           </button>
         )}
-        <button
-          type="button"
-          onClick={() => downloadBill(generatedDocument)}
-          disabled={!generatedDocument || documentActionId === generatedDocument?.id}
-          className={`${secondaryClass} disabled:cursor-not-allowed disabled:opacity-50`}
-        >
-          Download Bill
-        </button>
-        <button
-          type="button"
-          onClick={() => sendBill(row, generatedDocument)}
-          disabled={!generatedDocument || documentActionId === generatedDocument?.id}
-          className={`${secondaryClass} disabled:cursor-not-allowed disabled:opacity-50`}
-        >
-          {documentActionId === generatedDocument?.id ? 'Sending...' : 'Send Bill'}
-        </button>
       </div>
     )
   }
@@ -757,7 +695,7 @@ export default function PaymentsListPage() {
                 {
                   key: 'actions',
                   header: 'Actions',
-                  width: isSuperAdmin ? '150px' : '300px',
+                  width: isSuperAdmin ? '150px' : '190px',
                   render: (row) => (
                     <div className="flex min-w-0 flex-wrap justify-end gap-2">
                       {actionControls(row)}
@@ -792,7 +730,7 @@ export default function PaymentsListPage() {
                 <div className="pr-10">
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Payment Reason Conversation</p>
                   <h3 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-                    {reasonRequest ? 'View Conversation' : 'Ask Reason'}
+                    {reasonRequest ? 'View Response' : 'Reminder'}
                   </h3>
                 </div>
               </div>

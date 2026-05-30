@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
-import toast from 'react-hot-toast'
 import { api } from '../../services/api'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 
@@ -121,7 +120,6 @@ export default function PaymentDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [billActionId, setBillActionId] = useState(null)
-  const [sendingBillId, setSendingBillId] = useState(null)
   const [message, setMessage] = useState('')
   const [schedule, setSchedule] = useState([])
   const { user } = useSelector((state) => state.auth)
@@ -207,52 +205,6 @@ export default function PaymentDetailPage() {
       setMessage(error.response?.data?.detail || `Failed to generate ${type}.`)
     } finally {
       setBillActionId(null)
-    }
-  }
-
-  const openBill = async (installmentId, mode) => {
-    setBillActionId(installmentId)
-    setMessage('')
-    try {
-      const { data } = await api.get(`/installments/${installmentId}/${mode === 'download' ? 'download-bill' : 'view-bill'}/`, {
-        responseType: 'blob',
-      })
-      const url = window.URL.createObjectURL(data)
-      if (mode === 'download') {
-        const link = document.createElement('a')
-        link.href = url
-        link.download = `payment-document-${installmentId}.html`
-        document.body.appendChild(link)
-        link.click()
-        link.remove()
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer')
-      }
-    } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to open bill.')
-    } finally {
-      setBillActionId(null)
-    }
-  }
-
-  const sendBill = async (installment) => {
-    if (sendingBillId) return
-    setSendingBillId(installment.id)
-    setMessage('')
-    try {
-      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
-      const nextMessage = data.whatsapp_sent
-        ? `${installment.document_type_display || 'Document'} sent to ${payment.student_name}.`
-        : data.whatsapp_error || 'Bill send request failed.'
-      setMessage(nextMessage)
-      if (data.whatsapp_sent) toast.success(nextMessage)
-      else toast.error(nextMessage)
-    } catch (error) {
-      const nextMessage = error.response?.data?.detail || 'Failed to send bill.'
-      setMessage(nextMessage)
-      toast.error(nextMessage)
-    } finally {
-      setSendingBillId(null)
     }
   }
 
@@ -456,12 +408,11 @@ export default function PaymentDetailPage() {
                       <th className="w-[18%] px-4 py-3">Installment</th>
                       <th className="w-[10%] px-4 py-3">Status</th>
                       <th className="w-[14%] px-4 py-3">Reference</th>
-                      <th className="w-[12%] px-4 py-3 text-right">Actions</th>
+                      {isSuperAdmin && <th className="w-[12%] px-4 py-3 text-right">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
                     {paymentHistory.map((installment) => {
-                      const documentLabel = installment.document_type_display || 'Pending Approval'
                       const documentStatus = installment.document_status_display || 'Pending Approval'
                       return (
                         <tr key={installment.id}>
@@ -476,9 +427,10 @@ export default function PaymentDetailPage() {
                           <td className="break-words px-4 py-4 align-top text-slate-700 [word-break:break-word]">{installment.installment_label || `${installment.installment_index} Installment`}</td>
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
                           <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
+                          {isSuperAdmin && (
                           <td className="px-4 py-4 align-top">
                             <div className="ml-auto flex w-full flex-col gap-2">
-                              {isSuperAdmin && !installment.bill_number ? (
+                              {!installment.bill_number ? (
                                 <>
                                   <button
                                     type="button"
@@ -500,7 +452,7 @@ export default function PaymentDetailPage() {
                                   ) : null}
                                 </>
                               ) : null}
-                              {isSuperAdmin && installment.bill_number ? (
+                              {installment.bill_number ? (
                                 <button
                                   type="button"
                                   onClick={() => generateDocument(installment.id, 'bill')}
@@ -510,38 +462,9 @@ export default function PaymentDetailPage() {
                                   {billActionId === installment.id ? 'Generating...' : 'Re-generate Bill'}
                                 </button>
                               ) : null}
-                              {installment.document_is_generated || installment.bill_is_generated ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => openBill(installment.id, 'view')}
-                                    disabled={billActionId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                                  >
-                                    View {documentLabel}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => openBill(installment.id, 'download')}
-                                    disabled={billActionId === installment.id}
-                                    className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                                  >
-                                    Download {documentLabel}
-                                  </button>
-                                  {!isSuperAdmin && (
-                                    <button
-                                      type="button"
-                                      onClick={() => sendBill(installment)}
-                                      disabled={billActionId === installment.id || sendingBillId === installment.id}
-                                      className="w-full whitespace-nowrap rounded-xl border border-cyan-200 bg-cyan-50 px-2 py-2 text-xs font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
-                                    >
-                                      {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
-                                    </button>
-                                  )}
-                                </>
-                              ) : null}
                             </div>
                           </td>
+                          )}
                         </tr>
                       )
                     })}
@@ -550,7 +473,6 @@ export default function PaymentDetailPage() {
               </div>
               <div className="divide-y divide-slate-200 md:hidden">
                 {paymentHistory.map((installment) => {
-                  const documentLabel = installment.document_type_display || 'Bill'
                   const documentStatus = installment.document_status_display || 'Pending Approval'
                   return (
                     <div key={installment.id} className="p-5">
@@ -569,8 +491,9 @@ export default function PaymentDetailPage() {
                         <div><span className="font-semibold text-slate-900">Reference: </span>{installment.reference_number || 'Not provided'}</div>
                         {installment.document_number ? <div><span className="font-semibold text-slate-900">Document: </span>{installment.document_number}</div> : null}
                       </div>
+                      {isSuperAdmin && (
                       <div className="mt-4 flex w-full flex-col gap-2">
-                        {isSuperAdmin && !installment.bill_number ? (
+                        {!installment.bill_number ? (
                           <>
                             <button
                               type="button"
@@ -592,7 +515,7 @@ export default function PaymentDetailPage() {
                             ) : null}
                           </>
                         ) : null}
-                        {isSuperAdmin && installment.bill_number ? (
+                        {installment.bill_number ? (
                           <button
                             type="button"
                             onClick={() => generateDocument(installment.id, 'bill')}
@@ -602,37 +525,8 @@ export default function PaymentDetailPage() {
                             {billActionId === installment.id ? 'Generating...' : 'Re-generate Bill'}
                           </button>
                         ) : null}
-                        {installment.document_is_generated || installment.bill_is_generated ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => openBill(installment.id, 'view')}
-                              disabled={billActionId === installment.id}
-                              className="w-full whitespace-nowrap rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                            >
-                              View {documentLabel}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => openBill(installment.id, 'download')}
-                              disabled={billActionId === installment.id}
-                              className="w-full whitespace-nowrap rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-                            >
-                              Download {documentLabel}
-                            </button>
-                            {!isSuperAdmin && (
-                              <button
-                                type="button"
-                                onClick={() => sendBill(installment)}
-                                disabled={billActionId === installment.id || sendingBillId === installment.id}
-                                className="w-full whitespace-nowrap rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100 disabled:opacity-60"
-                              >
-                                {sendingBillId === installment.id ? 'Sending...' : `Send ${documentLabel}`}
-                              </button>
-                            )}
-                          </>
-                        ) : null}
                       </div>
+                      )}
                     </div>
                   )
                 })}

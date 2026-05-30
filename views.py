@@ -8315,6 +8315,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         total_fees = Decimal(str(payment.total_fees or 0))
         balance = max(total_fees - paid_amount, Decimal('0'))
         included = [installment] if is_bill else [installment]
+        installment_summary = payment_installment_summary(payment)
+        next_schedule = self._next_payment_schedule(payment)
         return {
             'document_type': 'bill' if is_bill else 'receipt',
             'document_number': self._document_number(installment),
@@ -8334,7 +8336,21 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'total_fees': self._snapshot_decimal(total_fees),
             'paid_amount': self._snapshot_decimal(paid_amount),
             'balance': self._snapshot_decimal(balance),
+            'pending_amount': self._snapshot_decimal(balance),
+            'next_payment_amount': next_schedule.get('pending_amount') if next_schedule else self._snapshot_decimal(0),
+            'next_payment_date': next_schedule.get('due_date') if next_schedule else '',
             'bill_total': self._snapshot_decimal(sum((item.amount for item in included), Decimal('0'))),
+            'payment_schedule': [
+                {
+                    'label': item.get('label') or f"{item.get('index') or ''} Installment".strip(),
+                    'due_date': self._receipt_date(item.get('due_date')),
+                    'amount': self._snapshot_decimal(item.get('required_amount') or 0),
+                    'paid_amount': self._snapshot_decimal(item.get('paid_amount') or 0),
+                    'pending_amount': self._snapshot_decimal(item.get('pending_amount') or 0),
+                    'status': str(item.get('status') or 'pending').replace('_', ' ').title(),
+                }
+                for item in installment_summary
+            ],
             'included_installments': [
                 {
                     'id': item.id,
@@ -8346,7 +8362,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 }
                 for item in included
             ],
-            'next_payment_schedule': self._next_payment_schedule(payment),
+            'next_payment_schedule': next_schedule,
         }
 
     def _build_bill_html(self, installment, snapshot=None):
@@ -8358,27 +8374,23 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
         branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_address_lines)
         branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
-        schedule = get_payment_installment_schedule(payment)
-
-        paid_running_total = 0
         schedule_rows = []
-        snapshot_rows = snapshot.get('included_installments') or []
-        if snapshot_rows:
-            iterable_rows = snapshot_rows
-        else:
-            iterable_rows = schedule
-        for item in iterable_rows:
-            if snapshot_rows:
-                label = item.get('label') or 'Installment'
-                due_date_display = item.get('payment_date') or 'Not set'
-                amount = Decimal(str(item.get('amount') or 0))
-                row_status = 'Paid'
-            else:
-                paid_running_total += int(float(item.get('amount') or 0))
-                label = item.get('label') or 'Installment'
-                due_date_display = self._receipt_date(item.get('due_date'))
-                amount = Decimal(str(item.get('amount') or 0))
-                row_status = 'Paid' if payment.paid_amount >= paid_running_total else 'Upcoming'
+        schedule = snapshot.get('payment_schedule') or []
+        if not schedule:
+            schedule = [
+                {
+                    'label': item.get('label') or 'Installment',
+                    'due_date': self._receipt_date(item.get('due_date')),
+                    'amount': self._snapshot_decimal(item.get('amount') or 0),
+                    'status': 'Upcoming',
+                }
+                for item in get_payment_installment_schedule(payment)
+            ]
+        for item in schedule:
+            label = item.get('label') or 'Installment'
+            due_date_display = item.get('due_date') or 'Not set'
+            amount = Decimal(str(item.get('amount') or 0))
+            row_status = item.get('status') or 'Upcoming'
             status_class = 'paid' if row_status == 'Paid' else 'upcoming'
             schedule_rows.append(
                 f"""
@@ -8531,7 +8543,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         </div>
       </div>
       <div class="section">
-        <h2>{'Billed Payment Entry' if snapshot_rows else 'Next Payment Schedule'}</h2>
+        <h2>Payment Schedule</h2>
         <table>
           <thead>
             <tr>
@@ -8734,9 +8746,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 draw.text((x, row_y + 26 + (line_index * 22)), line, fill='black', font=font)
 
         table_y = y + 6 * row_height + 30
-        draw.text((margin, table_y), 'BILLED PAYMENT ENTRY', fill='black', font=title_font)
+        draw.text((margin, table_y), 'PAYMENT SCHEDULE', fill='black', font=title_font)
         table_y += 34
-        headers = ['INSTALLMENT', 'PAYMENT DATE', 'AMOUNT', 'MODE']
+        headers = ['INSTALLMENT', 'DUE DATE', 'AMOUNT', 'STATUS']
         col_widths = [420, 230, 230, 180]
         x = margin
         for header, col_width_item in zip(headers, col_widths):
@@ -8744,12 +8756,12 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             draw.text((x + 12, table_y + 14), header, fill=slate, font=label_font)
             x += col_width_item
         y_row = table_y + 42
-        for item in (snapshot.get('included_installments') or [])[:8]:
+        for item in (snapshot.get('payment_schedule') or [])[:8]:
             values = [
                 item.get('label') or '',
-                item.get('payment_date') or '',
+                item.get('due_date') or '',
                 f"Rs {Decimal(str(item.get('amount') or 0)):,.2f}",
-                item.get('payment_mode') or '',
+                item.get('status') or '',
             ]
             x = margin
             for value, col_width_item in zip(values, col_widths):
@@ -8807,17 +8819,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
         return response
 
-    @action(detail=True, methods=['get'], url_path='download-bill')
-    def download_bill(self, request, pk=None):
-        installment = self.get_object()
-        document_number = self._document_number(installment)
-        if not document_number:
-            return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
-
-        response = HttpResponse(self._immutable_document_html(installment), content_type='text/html; charset=utf-8')
-        response['Content-Disposition'] = f'attachment; filename="{document_number}.html"'
-        return response
-
     @action(detail=True, methods=['post'], url_path='send-bill')
     def send_bill(self, request, pk=None):
         installment = self.get_object()
@@ -8828,6 +8829,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         enrollment = installment.enrollment
         document_label = 'Bill' if installment.bill_number else 'Receipt'
         filename = f'{document_number}.pdf'
+        installment.document_snapshot = self._build_document_snapshot(installment)
+        installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
+        installment.save(update_fields=['document_snapshot', 'document_html'])
         try:
             pdf_bytes = self._build_document_pdf(installment)
         except RuntimeError as exc:
@@ -8849,10 +8853,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             related_id=installment.id,
         )
         return Response({
-            'detail': f'{document_label} send request processed.',
+            'detail': 'Bill sent successfully.' if document_label == 'Bill' else f'{document_label} send request processed.',
             'phone': enrollment.phone,
             'document_number': document_number,
             'whatsapp_message': caption,
+            'sent_at': timezone.now(),
             **whatsapp_send_payload(log),
         })
 
