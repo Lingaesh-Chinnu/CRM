@@ -8439,7 +8439,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
     def _branch_header_payload(self, branch):
         return {
-            'branch_name': branch.name if branch and branch.name else 'Indra Institute of Education',
+            'branch_name': branch.name if branch and branch.name else 'Branch not set',
             'branch_address_lines': self._branch_address_lines(branch),
             'branch_phone': branch.phone if branch and branch.phone else 'Phone number not set',
         }
@@ -8525,7 +8525,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch_header = self._branch_header_payload(branch)
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
         branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_address_lines)
-        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         schedule_rows = []
         schedule = snapshot.get('payment_schedule') or []
         if not schedule:
@@ -8615,15 +8614,15 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       * {{ box-sizing: border-box; }}
       body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
       .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
-      .header {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 18px; align-items: center; padding: 11px 22px; background: #1E3A5F; color: white; }}
-      .logo {{ display: flex; align-items: center; justify-content: flex-start; }}
+      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 142px; padding: 14px 24px; background: #1E3A5F; color: white; }}
+      .logo {{ position: absolute; left: 22px; top: 18px; display: flex; align-items: center; justify-content: flex-start; }}
       .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
-      .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 68px; }}
-      .brand h1 {{ margin: 0 0 3px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
-      .brand .tagline {{ margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; }}
-      .brand .address {{ margin: 0 0 4px; }}
-      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.22; color: #F8FAFC; }}
-      .brand .phone {{ margin: 0; font-size: 11px; line-height: 1.2; color: #F8FAFC; }}
+      .brand {{ width: 100%; min-width: 0; padding: 0 86px; text-align: center; }}
+      .brand h1 {{ margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; line-height: 1.15; }}
+      .brand .tagline {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
+      .brand .branch-name {{ margin: 0 0 5px; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #F8FAFC; line-height: 1.2; }}
+      .brand .address {{ margin: 0; }}
+      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.24; color: #F8FAFC; }}
       .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
       .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
       .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
@@ -8665,12 +8664,12 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           {'<img src="' + logo_src + '" alt="Indra Institute of Education logo">' if logo_src else ''}
         </div>
         <div class="brand">
-          <h1>{escape(branch_name)}</h1>
+          <h1>INDRA INSTITUTE OF EDUCATION</h1>
           <div class="tagline">IT Training &amp; Testing Services</div>
+          <div class="branch-name">{escape(branch_name)}</div>
           <div class="address">
             {branch_address_html}
           </div>
-          <p class="phone">{escape(branch_phone)}</p>
         </div>
       </div>
       <div class="receipt-bar">
@@ -8802,8 +8801,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         return Response(PaymentInstallmentSerializer(installment).data)
 
     def _immutable_document_html(self, installment):
-        if installment.document_html:
-            return installment.document_html
         snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
         html = self._build_bill_html(installment, snapshot)
         installment.document_snapshot = snapshot
@@ -8824,7 +8821,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch_header = self._branch_header_payload(branch)
         branch_name = snapshot.get('branch_name') or branch_header['branch_name']
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
-        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         document_number = snapshot.get('document_number') or self._document_number(installment)
         document_title = 'OFFICIAL PAYMENT BILL' if snapshot.get('document_type') == 'bill' else 'PAYMENT RECEIPT'
         document_label = 'Bill No' if snapshot.get('document_type') == 'bill' else 'Receipt No'
@@ -8840,7 +8836,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         title_font = ImageFont.load_default()
         label_font = ImageFont.load_default()
 
-        draw.rectangle((0, 0, width, 170), fill=navy)
+        header_height = 220
+        draw.rectangle((0, 0, width, header_height), fill=navy)
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
             Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'brand-logo.png',
@@ -8849,21 +8846,24 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             if logo_path.exists():
                 logo = Image.open(logo_path).convert('RGBA')
                 logo.thumbnail((112, 112))
-                page.paste(logo, (margin, 28), logo)
+                page.paste(logo, (margin, 34), logo)
                 break
 
-        def center_text(text, y, fill='white'):
-            bbox = draw.textbbox((0, 0), text, font=title_font)
-            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=title_font)
+        def center_text(text, y, fill='white', selected_font=None):
+            selected_font = selected_font or title_font
+            bbox = draw.textbbox((0, 0), text, font=selected_font)
+            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=selected_font)
 
-        center_text(str(branch_name).upper(), 34)
-        center_text('IT Training & Testing Services', 66)
-        for line_index, line in enumerate(branch_address_lines[:2]):
-            center_text(str(line), 98 + (line_index * 26))
-        if branch_phone:
-            center_text(str(branch_phone), 150)
+        center_text('INDRA INSTITUTE OF EDUCATION', 32)
+        center_text('IT Training & Testing Services', 64)
+        center_text(str(branch_name or 'Branch not set').upper(), 98)
+        address_lines = []
+        for line in branch_address_lines:
+            address_lines.extend(wrap_text(draw, str(line), font, width - 360) or [str(line)])
+        for line_index, line in enumerate(address_lines[:4]):
+            center_text(str(line), 128 + (line_index * 22), selected_font=font)
 
-        y = 170
+        y = header_height
         draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
         draw.text((margin, y + 24), document_title, fill='black', font=title_font)
         number_label = f'{document_label}: {document_number or ""}'
@@ -9029,7 +9029,7 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
     ordering = ['-payment_date', '-created_at']
 
     def get_queryset(self):
-        return AdminReceipt.objects.select_related('generated_by').all()
+        return AdminReceipt.objects.select_related('generated_by__branch').all()
 
     def _generate_receipt_number(self):
         year = timezone.localdate().year
@@ -9070,9 +9070,30 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
                 return f"data:image/png;base64,{base64.b64encode(logo_path.read_bytes()).decode('ascii')}"
         return ''
 
+    def _branch_header_payload(self, branch):
+        lines = []
+        if branch:
+            lines = [line.strip() for line in str(branch.address or '').splitlines() if line.strip()]
+            city_line = ', '.join([
+                value for value in [
+                    str(branch.city or '').strip(),
+                    str(branch.state or '').strip(),
+                    str(branch.pincode or '').strip(),
+                ]
+                if value
+            ])
+            if city_line:
+                lines.append(city_line)
+        return {
+            'branch_name': branch.name if branch and branch.name else 'Branch not set',
+            'branch_address_lines': lines or ['Branch address not set'],
+        }
+
     def _build_receipt_html(self, receipt):
         logo_src = self._logo_src()
         generated_by = receipt.generated_by.full_name if receipt.generated_by else 'Admin'
+        branch_header = self._branch_header_payload(receipt.generated_by.branch if receipt.generated_by_id and receipt.generated_by else None)
+        branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_header['branch_address_lines'])
         amount = Decimal(str(receipt.amount or 0))
         notes_row = ''
         if receipt.notes:
@@ -9086,15 +9107,15 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
       * {{ box-sizing: border-box; }}
       body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
       .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
-      .header {{ display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 18px; align-items: center; padding: 11px 22px; background: #1E3A5F; color: white; }}
-      .logo {{ display: flex; align-items: center; justify-content: flex-start; }}
+      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 142px; padding: 14px 24px; background: #1E3A5F; color: white; }}
+      .logo {{ position: absolute; left: 22px; top: 18px; display: flex; align-items: center; justify-content: flex-start; }}
       .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
-      .brand {{ align-self: center; min-width: 0; text-align: center; padding-right: 68px; }}
-      .brand h1 {{ margin: 0 0 3px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; }}
-      .brand .tagline {{ margin: 0 0 4px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; }}
-      .brand .address {{ margin: 0 0 4px; }}
-      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.22; color: #F8FAFC; }}
-      .brand .phone {{ margin: 0; font-size: 11px; line-height: 1.2; color: #F8FAFC; }}
+      .brand {{ width: 100%; min-width: 0; padding: 0 86px; text-align: center; }}
+      .brand h1 {{ margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; line-height: 1.15; }}
+      .brand .tagline {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
+      .brand .branch-name {{ margin: 0 0 5px; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #F8FAFC; line-height: 1.2; }}
+      .brand .address {{ margin: 0; }}
+      .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.24; color: #F8FAFC; }}
       .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
       .receipt-title {{ font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.14em; color: #111827; line-height: 1.1; }}
       .receipt-no {{ font-size: 12px; font-weight: 800; color: #1E3A5F; line-height: 1.1; }}
@@ -9124,13 +9145,12 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
           {'<img src="' + logo_src + '" alt="Indra Institute of Education logo">' if logo_src else ''}
         </div>
         <div class="brand">
-          <h1>Indra Institute of Education</h1>
+          <h1>INDRA INSTITUTE OF EDUCATION</h1>
           <div class="tagline">IT Training &amp; Testing Services</div>
+          <div class="branch-name">{escape(branch_header['branch_name'])}</div>
           <div class="address">
-            <p>First Floor, AAKIFAH 2017 Complex, Palghat Main Road,</p>
-            <p>Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008</p>
+            {branch_address_html}
           </div>
-          <p class="phone">Phone number not set</p>
         </div>
       </div>
       <div class="receipt-bar">
@@ -9178,7 +9198,9 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         title_font = ImageFont.load_default()
         label_font = ImageFont.load_default()
 
-        draw.rectangle((0, 0, width, 170), fill=navy)
+        branch_header = self._branch_header_payload(receipt.generated_by.branch if receipt.generated_by_id and receipt.generated_by else None)
+        header_height = 220
+        draw.rectangle((0, 0, width, header_height), fill=navy)
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
             Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'brand-logo.png',
@@ -9187,19 +9209,24 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
             if logo_path.exists():
                 logo = Image.open(logo_path).convert('RGBA')
                 logo.thumbnail((112, 112))
-                page.paste(logo, (margin, 28), logo)
+                page.paste(logo, (margin, 34), logo)
                 break
 
-        def center_text(text, y, fill='white'):
-            bbox = draw.textbbox((0, 0), text, font=title_font)
-            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=title_font)
+        def center_text(text, y, fill='white', selected_font=None):
+            selected_font = selected_font or title_font
+            bbox = draw.textbbox((0, 0), text, font=selected_font)
+            draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=selected_font)
 
         center_text('INDRA INSTITUTE OF EDUCATION', 34)
         center_text('IT Training & Testing Services', 66)
-        center_text('First Floor, AAKIFAH 2017 Complex, Palghat Main Road,', 98)
-        center_text('Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008', 124)
+        center_text(str(branch_header['branch_name']).upper(), 98)
+        address_lines = []
+        for line in branch_header['branch_address_lines']:
+            address_lines.extend(wrap_text(draw, str(line), font, width - 360) or [str(line)])
+        for line_index, line in enumerate(address_lines[:4]):
+            center_text(str(line), 128 + (line_index * 22), selected_font=font)
 
-        y = 170
+        y = header_height
         draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
         draw.text((margin, y + 24), 'PAYMENT RECEIPT', fill='black', font=title_font)
         receipt_label = f'Receipt No: {receipt.receipt_number}'
