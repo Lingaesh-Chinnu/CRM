@@ -846,11 +846,18 @@ def _split_integer_amount(total_amount, parts):
 
 
 def _installment_label(index):
-    return {
+    known = {
         1: '1st Installment',
         2: '2nd Installment',
         3: '3rd Installment',
-    }.get(index, f'{index}th Installment')
+    }
+    if index in known:
+        return known[index]
+    if 10 <= index % 100 <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(index % 10, 'th')
+    return f'{index}{suffix} Installment'
 
 
 def normalize_installment_schedule(schedule):
@@ -878,7 +885,7 @@ def get_default_installment_schedule(enrollment, split_count=2):
             'due_date': enrollment_date,
         }]
 
-    split_count = 3 if int(split_count or 2) >= 3 else 2
+    split_count = min(max(int(split_count or 2), 2), 12)
     remaining = max(final_fees - ENROLLMENT_PAYMENT_AMOUNT, 0)
     rows = [{'label': 'Enrollment', 'amount': ENROLLMENT_PAYMENT_AMOUNT, 'due_date': enrollment_date}]
     due_date = first_due_date

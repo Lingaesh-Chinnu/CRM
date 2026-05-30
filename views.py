@@ -7047,7 +7047,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             split_count = int(request.data.get('split_count') or 2)
         except (TypeError, ValueError):
             split_count = 2
-        split_count = 3 if split_count >= 3 else 2
+        split_count = min(max(split_count, 2), 12)
         try:
             self._ensure_enrollment_schedule(enrollment, split_count=split_count, lock=False)
         except ValueError as exc:
@@ -7068,19 +7068,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
-            self._ensure_enrollment_schedule(enrollment, lock=True)
+            self._ensure_enrollment_schedule(enrollment, lock=False)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
-        signing.status = RulesSigningRequest.Status.SENT
-        signing.sent_at = timezone.now()
-        signing.sent_by = request.user
-        signing.save(update_fields=['status', 'sent_at', 'sent_by', 'updated_at'])
-        if enrollment.status != Enrollment.Status.ENROLLED:
-            enrollment.status = Enrollment.Status.RULES_SENT
-            enrollment.save(update_fields=['status', 'updated_at'])
-
         signing_path = f'{app_url(f"IIE-Rules-Regulations/{signing.token}")}/'
         signing_link = request.build_absolute_uri(signing_path)
         default_message = (
@@ -7108,20 +7100,87 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             'institute_name': 'IIE',
         }
         message = render_whatsapp_template(template.message_body if template else default_message, values)
-        log = send_candidate_message(
-            candidate_name=enrollment.name,
-            phone=enrollment.phone,
-            message_type=WhatsAppMessage.MsgType.RULES_FORM_LINK,
-            message_body=template.message_body if template else default_message,
-            template=template,
-            values=values,
-            sent_by=request.user,
-            related_model='enrollment',
-            related_id=enrollment.id,
-            dedupe=False,
+        logger.info(
+            'Rules & Regulations send requested: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s enrollment_id=%s',
+            enrollment.student_number or enrollment.id,
+            enrollment.name,
+            enrollment.phone,
+            template.id if template else None,
+            enrollment.id,
         )
+        try:
+            log = send_candidate_message(
+                candidate_name=enrollment.name,
+                phone=enrollment.phone,
+                message_type=WhatsAppMessage.MsgType.RULES_FORM_LINK,
+                message_body=template.message_body if template else default_message,
+                template=template,
+                values=values,
+                sent_by=request.user,
+                related_model='enrollment',
+                related_id=enrollment.id,
+                dedupe=False,
+            )
+        except Exception as exc:
+            logger.exception(
+                'Rules & Regulations send crashed: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s enrollment_id=%s',
+                enrollment.student_number or enrollment.id,
+                enrollment.name,
+                enrollment.phone,
+                template.id if template else None,
+                enrollment.id,
+            )
+            return Response({
+                'detail': f'Rules & Regulations send failed: {exc}',
+                'signing_link': signing_link,
+                'whatsapp_message': message,
+                'phone': enrollment.phone,
+                'status': signing.status,
+                'enrollment_status': enrollment.status,
+            }, status=status.HTTP_502_BAD_GATEWAY)
+
+        logger.info(
+            'Rules & Regulations send response: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
+            enrollment.student_number or enrollment.id,
+            enrollment.name,
+            enrollment.phone,
+            template.id if template else None,
+            log.id,
+            log.status,
+            log.error_message,
+            log.provider_response,
+        )
+        if log.status != WhatsAppMessage.MsgStatus.SENT:
+            detail = log.error_message or 'WhatsApp provider did not accept the Rules & Regulations message.'
+            logger.error(
+                'Rules & Regulations send failed: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s whatsapp_log_id=%s error=%s response=%s',
+                enrollment.student_number or enrollment.id,
+                enrollment.name,
+                enrollment.phone,
+                template.id if template else None,
+                log.id,
+                detail,
+                log.provider_response,
+            )
+            return Response({
+                'detail': detail,
+                'signing_link': signing_link,
+                'whatsapp_message': message,
+                'phone': enrollment.phone,
+                'status': signing.status,
+                'enrollment_status': enrollment.status,
+                **whatsapp_send_payload(log),
+            }, status=status.HTTP_502_BAD_GATEWAY)
+        signing.status = RulesSigningRequest.Status.SENT
+        signing.sent_at = timezone.now()
+        signing.sent_by = request.user
+        signing.save(update_fields=['status', 'sent_at', 'sent_by', 'updated_at'])
+        if enrollment.status != Enrollment.Status.ENROLLED:
+            enrollment.status = Enrollment.Status.RULES_SENT
+            enrollment.save(update_fields=['status', 'updated_at'])
+        self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
-            'detail': 'Rules & Regulation form link generated.',
+            'detail': 'Rules & Regulations sent successfully.',
             'signing_link': signing_link,
             'whatsapp_message': message,
             'phone': enrollment.phone,
@@ -8524,7 +8583,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch = enrollment.branch
         branch_header = self._branch_header_payload(branch)
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
+        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_address_lines)
+        branch_phone_html = f'<p>{escape(str(branch_phone))}</p>' if branch_phone else ''
         schedule_rows = []
         schedule = snapshot.get('payment_schedule') or []
         if not schedule:
@@ -8614,13 +8675,12 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       * {{ box-sizing: border-box; }}
       body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
       .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
-      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 142px; padding: 14px 24px; background: #1E3A5F; color: white; }}
+      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 126px; padding: 12px 24px; background: #1E3A5F; color: white; }}
       .logo {{ position: absolute; left: 22px; top: 18px; display: flex; align-items: center; justify-content: flex-start; }}
       .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
       .brand {{ width: 100%; min-width: 0; padding: 0 86px; text-align: center; }}
       .brand h1 {{ margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; line-height: 1.15; }}
-      .brand .tagline {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
-      .brand .branch-name {{ margin: 0 0 5px; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #F8FAFC; line-height: 1.2; }}
+      .brand .tagline {{ margin: 0 0 7px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
       .brand .address {{ margin: 0; }}
       .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.24; color: #F8FAFC; }}
       .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
@@ -8666,9 +8726,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         <div class="brand">
           <h1>INDRA INSTITUTE OF EDUCATION</h1>
           <div class="tagline">IT Training &amp; Testing Services</div>
-          <div class="branch-name">{escape(branch_name)}</div>
           <div class="address">
             {branch_address_html}
+            {branch_phone_html}
           </div>
         </div>
       </div>
@@ -8819,8 +8879,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
         branch = installment.enrollment.branch
         branch_header = self._branch_header_payload(branch)
-        branch_name = snapshot.get('branch_name') or branch_header['branch_name']
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
+        branch_phone = snapshot.get('branch_phone') or branch_header['branch_phone']
         document_number = snapshot.get('document_number') or self._document_number(installment)
         document_title = 'OFFICIAL PAYMENT BILL' if snapshot.get('document_type') == 'bill' else 'PAYMENT RECEIPT'
         document_label = 'Bill No' if snapshot.get('document_type') == 'bill' else 'Receipt No'
@@ -8836,7 +8896,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         title_font = ImageFont.load_default()
         label_font = ImageFont.load_default()
 
-        header_height = 220
+        header_height = 190
         draw.rectangle((0, 0, width, header_height), fill=navy)
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
@@ -8856,12 +8916,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
         center_text('INDRA INSTITUTE OF EDUCATION', 32)
         center_text('IT Training & Testing Services', 64)
-        center_text(str(branch_name or 'Branch not set').upper(), 98)
         address_lines = []
         for line in branch_address_lines:
             address_lines.extend(wrap_text(draw, str(line), font, width - 360) or [str(line)])
+        if branch_phone:
+            address_lines.append(str(branch_phone))
         for line_index, line in enumerate(address_lines[:4]):
-            center_text(str(line), 128 + (line_index * 22), selected_font=font)
+            center_text(str(line), 98 + (line_index * 22), selected_font=font)
 
         y = header_height
         draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
@@ -9087,6 +9148,7 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         return {
             'branch_name': branch.name if branch and branch.name else 'Branch not set',
             'branch_address_lines': lines or ['Branch address not set'],
+            'branch_phone': branch.phone if branch and branch.phone else 'Phone number not set',
         }
 
     def _build_receipt_html(self, receipt):
@@ -9094,6 +9156,7 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         generated_by = receipt.generated_by.full_name if receipt.generated_by else 'Admin'
         branch_header = self._branch_header_payload(receipt.generated_by.branch if receipt.generated_by_id and receipt.generated_by else None)
         branch_address_html = ''.join(f'<p>{escape(str(line))}</p>' for line in branch_header['branch_address_lines'])
+        branch_phone_html = f'<p>{escape(str(branch_header["branch_phone"]))}</p>' if branch_header.get('branch_phone') else ''
         amount = Decimal(str(receipt.amount or 0))
         notes_row = ''
         if receipt.notes:
@@ -9107,13 +9170,12 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
       * {{ box-sizing: border-box; }}
       body {{ font-family: Libertine, "Linux Libertine", "Libertinus Serif", Georgia, "Times New Roman", serif; color: #111827; margin: 14px; background: #F8FAFC; }}
       .sheet {{ max-width: 780px; margin: 0 auto; border: 1px solid #CBD5E1; background: white; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); }}
-      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 142px; padding: 14px 24px; background: #1E3A5F; color: white; }}
+      .header {{ position: relative; display: flex; align-items: center; justify-content: center; min-height: 126px; padding: 12px 24px; background: #1E3A5F; color: white; }}
       .logo {{ position: absolute; left: 22px; top: 18px; display: flex; align-items: center; justify-content: flex-start; }}
       .logo img {{ width: auto; height: 48px; object-fit: contain; display: block; }}
       .brand {{ width: 100%; min-width: 0; padding: 0 86px; text-align: center; }}
       .brand h1 {{ margin: 0 0 4px; font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: white; line-height: 1.15; }}
-      .brand .tagline {{ margin: 0 0 8px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
-      .brand .branch-name {{ margin: 0 0 5px; font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: #F8FAFC; line-height: 1.2; }}
+      .brand .tagline {{ margin: 0 0 7px; font-size: 12.5px; font-weight: 600; color: #F8FAFC; line-height: 1.2; }}
       .brand .address {{ margin: 0; }}
       .brand .address p {{ margin: 1px 0; font-size: 10.8px; line-height: 1.24; color: #F8FAFC; }}
       .receipt-bar {{ display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 38px; padding: 9px 18px; border-bottom: 1px solid #CBD5E1; background: #ffffff; }}
@@ -9147,9 +9209,9 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         <div class="brand">
           <h1>INDRA INSTITUTE OF EDUCATION</h1>
           <div class="tagline">IT Training &amp; Testing Services</div>
-          <div class="branch-name">{escape(branch_header['branch_name'])}</div>
           <div class="address">
             {branch_address_html}
+            {branch_phone_html}
           </div>
         </div>
       </div>
@@ -9199,7 +9261,7 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         label_font = ImageFont.load_default()
 
         branch_header = self._branch_header_payload(receipt.generated_by.branch if receipt.generated_by_id and receipt.generated_by else None)
-        header_height = 220
+        header_height = 190
         draw.rectangle((0, 0, width, header_height), fill=navy)
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
@@ -9219,12 +9281,13 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
 
         center_text('INDRA INSTITUTE OF EDUCATION', 34)
         center_text('IT Training & Testing Services', 66)
-        center_text(str(branch_header['branch_name']).upper(), 98)
         address_lines = []
         for line in branch_header['branch_address_lines']:
             address_lines.extend(wrap_text(draw, str(line), font, width - 360) or [str(line)])
+        if branch_header.get('branch_phone'):
+            address_lines.append(str(branch_header['branch_phone']))
         for line_index, line in enumerate(address_lines[:4]):
-            center_text(str(line), 128 + (line_index * 22), selected_font=font)
+            center_text(str(line), 98 + (line_index * 22), selected_font=font)
 
         y = header_height
         draw.rectangle((0, y, width, y + 70), fill='white', outline=border)

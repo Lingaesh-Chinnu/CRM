@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
-import { openWhatsApp } from '../../utils/whatsappTemplates'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
@@ -40,11 +39,16 @@ function splitAmount(total, parts) {
 }
 
 function installmentLabel(index) {
-  return {
+  const known = {
     1: '1st Installment',
     2: '2nd Installment',
     3: '3rd Installment',
-  }[index] || `${index}th Installment`
+  }
+  if (known[index]) return known[index]
+  const suffix = index % 100 >= 10 && index % 100 <= 20
+    ? 'th'
+    : ({ 1: 'st', 2: 'nd', 3: 'rd' }[index % 10] || 'th')
+  return `${index}${suffix} Installment`
 }
 
 function buildSchedule(row, startDate, splitCount = 2) {
@@ -56,7 +60,7 @@ function buildSchedule(row, startDate, splitCount = 2) {
   }
   let dueDate = courseStartDate
   const rows = [{ label: 'Enrollment', amount: 5000, due_date: enrollmentDate, paid_amount: 0, pending_amount: 5000, status: 'pending' }]
-  splitAmount(finalFees - 5000, splitCount >= 3 ? 3 : 2).forEach((amount, index) => {
+  splitAmount(finalFees - 5000, Math.min(Math.max(Number(splitCount || 2), 2), 12)).forEach((amount, index) => {
     rows.push({ label: installmentLabel(index + 1), amount, due_date: dueDate, paid_amount: 0, pending_amount: amount, status: 'pending' })
     dueDate = addOneMonth(dueDate) || dueDate
   })
@@ -175,7 +179,8 @@ export default function EnrollmentDetailPage() {
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
         setPhone(data.phone || '')
-        setSplitCount((data.installment_schedule || []).some((item) => item.label === '3rd Installment') ? 3 : 2)
+        const installmentCount = Math.max((data.installment_schedule || []).length - 1, 2)
+        setSplitCount(Math.min(installmentCount, 12))
       })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
   }, [id, isSuperAdmin])
@@ -222,10 +227,9 @@ export default function EnrollmentDetailPage() {
       })
 
       if (data.whatsapp_sent) {
-        setMessage('Rules & Regulation signing link sent on WhatsApp.')
+        setMessage(data.detail || 'Rules & Regulations sent successfully.')
       } else {
-        openWhatsApp(data.phone || updatedEnrollment.phone || row.phone, data.whatsapp_message)
-        setMessage(data.whatsapp_error ? `Automatic WhatsApp failed. Opened WhatsApp Web fallback. ${data.whatsapp_error}` : 'Rules & Regulation signing link is ready and opened in WhatsApp Web.')
+        setMessage(data.whatsapp_error || data.detail || 'Failed to send Rules & Regulations.')
       }
     } catch (error) {
       const data = error.response?.data
@@ -346,11 +350,12 @@ export default function EnrollmentDetailPage() {
         start_date: startDate || null,
         batch_timing: batchTiming || '',
       })
-      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, { split_count: 3 })
+      const nextSplitCount = Math.min(Math.max(Number(splitCount || 2) + 1, 3), 12)
+      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, { split_count: nextSplitCount })
       setRow(data)
       setStartDate(data.start_date || '')
       setBatchTiming(data.batch_timing || '')
-      setSplitCount(3)
+      setSplitCount(nextSplitCount)
       setMessage('Payment split updated.')
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to update payment split.'))
@@ -402,7 +407,7 @@ export default function EnrollmentDetailPage() {
   const schedule = row.installment_schedule?.length && !editingDetails
     ? row.installment_schedule
     : buildSchedule(row, startDate, splitCount)
-  const canAddSplit = finalFees >= 7000 && splitCount < 3 && !row.payment_schedule_locked && !isFinalEnrollment
+  const canAddSplit = finalFees >= 7000 && splitCount < 12 && !row.payment_schedule_locked && !isFinalEnrollment
 
   return (
     <div className="space-y-6">
