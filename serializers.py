@@ -1545,7 +1545,7 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 from decimal import Decimal
 
-from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, get_payment_installment_schedule
+from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, WhatsAppMessage, get_payment_installment_schedule
 
 
 def payment_installment_summary(payment):
@@ -1581,6 +1581,9 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
     collected_by_name = serializers.CharField(source='collected_by.full_name', read_only=True)
     bill_generated_by_name = serializers.CharField(source='bill_generated_by.full_name', read_only=True)
     bill_is_generated = serializers.SerializerMethodField()
+    bill_last_sent_at = serializers.SerializerMethodField()
+    bill_last_sent_at_display = serializers.SerializerMethodField()
+    bill_last_sent_by_name = serializers.SerializerMethodField()
     document_number = serializers.SerializerMethodField()
     document_is_generated = serializers.SerializerMethodField()
     document_type_display = serializers.SerializerMethodField()
@@ -1641,6 +1644,39 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
 
     def get_bill_is_generated(self, obj):
         return bool(obj.bill_number and obj.bill_generated_at)
+
+    def _latest_bill_send(self, obj):
+        if not obj.bill_number:
+            return None
+        return (
+            WhatsAppMessage.objects
+            .filter(
+                related_model='payment_installment',
+                related_id=obj.id,
+                status=WhatsAppMessage.MsgStatus.SENT,
+            )
+            .select_related('sent_by')
+            .order_by('-sent_at', '-created_at')
+            .first()
+        )
+
+    def get_bill_last_sent_at(self, obj):
+        log = self._latest_bill_send(obj)
+        if not log:
+            return None
+        return log.sent_at or log.created_at
+
+    def get_bill_last_sent_at_display(self, obj):
+        sent_at = self.get_bill_last_sent_at(obj)
+        if not sent_at:
+            return ''
+        return timezone.localtime(sent_at).strftime('%d-%b-%Y %I:%M %p')
+
+    def get_bill_last_sent_by_name(self, obj):
+        log = self._latest_bill_send(obj)
+        if not log or not log.sent_by:
+            return ''
+        return log.sent_by.full_name or log.sent_by.username
 
     def get_document_number(self, obj):
         if obj.bill_number:

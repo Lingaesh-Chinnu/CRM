@@ -194,15 +194,47 @@ export default function PaymentDetailPage() {
     }
   }
 
-  const generateDocument = async (installmentId, type) => {
+  const generateBill = async (installmentId) => {
     setBillActionId(installmentId)
     setMessage('')
     try {
-      await api.post(`/installments/${installmentId}/${type === 'bill' ? 'generate-bill' : 'generate-receipt'}/`)
-      setMessage(type === 'bill' ? 'Bill generated successfully.' : 'Receipt generated successfully.')
+      await api.post(`/installments/${installmentId}/generate-bill/`)
+      setMessage('Bill generated successfully.')
       await loadPayment()
     } catch (error) {
-      setMessage(error.response?.data?.detail || `Failed to generate ${type}.`)
+      setMessage(error.response?.data?.detail || 'Failed to generate bill.')
+    } finally {
+      setBillActionId(null)
+    }
+  }
+
+  const openBill = async (installment) => {
+    if (!installment) return
+    setBillActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.get(`/installments/${installment.id}/view-bill/`, {
+        responseType: 'blob',
+      })
+      const url = window.URL.createObjectURL(data)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to open bill.')
+    } finally {
+      setBillActionId(null)
+    }
+  }
+
+  const sendBill = async (installment) => {
+    if (!installment) return
+    setBillActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
+      setMessage(data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || data.detail || 'Bill send request failed.')
+      await loadPayment()
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to send bill.')
     } finally {
       setBillActionId(null)
     }
@@ -408,7 +440,7 @@ export default function PaymentDetailPage() {
                       <th className="w-[18%] px-4 py-3">Installment</th>
                       <th className="w-[10%] px-4 py-3">Status</th>
                       <th className="w-[14%] px-4 py-3">Reference</th>
-                      {isSuperAdmin && <th className="w-[12%] px-4 py-3 text-right">Actions</th>}
+                      <th className="w-[14%] px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200">
@@ -427,44 +459,50 @@ export default function PaymentDetailPage() {
                           <td className="break-words px-4 py-4 align-top text-slate-700 [word-break:break-word]">{installment.installment_label || `${installment.installment_index} Installment`}</td>
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
                           <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
-                          {isSuperAdmin && (
                           <td className="px-4 py-4 align-top">
                             <div className="ml-auto flex w-full flex-col gap-2">
-                              {!installment.bill_number ? (
+                              {isSuperAdmin ? (
+                                !installment.bill_number && installment.installment_status === 'paid' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => generateBill(installment.id)}
+                                    disabled={billActionId === installment.id}
+                                    className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                  >
+                                    {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
+                                  </button>
+                                ) : null
+                              ) : null}
+                              {installment.bill_number ? (
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => generateDocument(installment.id, 'receipt')}
+                                    onClick={() => openBill(installment)}
                                     disabled={billActionId === installment.id}
                                     className="w-full whitespace-nowrap rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                                   >
-                                    {billActionId === installment.id ? 'Generating...' : installment.receipt_number ? 'Re-generate Receipt' : 'Generate Receipt'}
+                                    {billActionId === installment.id ? 'Opening...' : 'View Bill'}
                                   </button>
-                                  {installment.installment_status === 'paid' ? (
+                                  {!isSuperAdmin ? (
                                     <button
                                       type="button"
-                                      onClick={() => generateDocument(installment.id, 'bill')}
+                                      onClick={() => sendBill(installment)}
                                       disabled={billActionId === installment.id}
                                       className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                                     >
-                                      {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
+                                      {billActionId === installment.id ? 'Sending...' : 'Send Bill'}
                                     </button>
                                   ) : null}
                                 </>
                               ) : null}
-                              {installment.bill_number ? (
-                                <button
-                                  type="button"
-                                  onClick={() => generateDocument(installment.id, 'bill')}
-                                  disabled={billActionId === installment.id}
-                                  className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-                                >
-                                  {billActionId === installment.id ? 'Generating...' : 'Re-generate Bill'}
-                                </button>
+                              {installment.bill_last_sent_at_display ? (
+                                <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+                                  <p><span className="font-semibold text-slate-700">Last Sent:</span> {installment.bill_last_sent_at_display}</p>
+                                  <p><span className="font-semibold text-slate-700">Sent By:</span> {installment.bill_last_sent_by_name || '-'}</p>
+                                </div>
                               ) : null}
                             </div>
                           </td>
-                          )}
                         </tr>
                       )
                     })}
@@ -491,42 +529,48 @@ export default function PaymentDetailPage() {
                         <div><span className="font-semibold text-slate-900">Reference: </span>{installment.reference_number || 'Not provided'}</div>
                         {installment.document_number ? <div><span className="font-semibold text-slate-900">Document: </span>{installment.document_number}</div> : null}
                       </div>
-                      {isSuperAdmin && (
                       <div className="mt-4 flex w-full flex-col gap-2">
-                        {!installment.bill_number ? (
+                        {isSuperAdmin ? (
+                          !installment.bill_number && installment.installment_status === 'paid' ? (
+                            <button
+                              type="button"
+                              onClick={() => generateBill(installment.id)}
+                              disabled={billActionId === installment.id}
+                              className="w-full whitespace-nowrap rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                            >
+                              {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
+                            </button>
+                          ) : null
+                        ) : null}
+                        {installment.bill_number ? (
                           <>
                             <button
                               type="button"
-                              onClick={() => generateDocument(installment.id, 'receipt')}
+                              onClick={() => openBill(installment)}
                               disabled={billActionId === installment.id}
                               className="w-full whitespace-nowrap rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                             >
-                              {billActionId === installment.id ? 'Generating...' : installment.receipt_number ? 'Re-generate Receipt' : 'Generate Receipt'}
+                              {billActionId === installment.id ? 'Opening...' : 'View Bill'}
                             </button>
-                            {installment.installment_status === 'paid' ? (
+                            {!isSuperAdmin ? (
                               <button
                                 type="button"
-                                onClick={() => generateDocument(installment.id, 'bill')}
+                                onClick={() => sendBill(installment)}
                                 disabled={billActionId === installment.id}
                                 className="w-full whitespace-nowrap rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                               >
-                                {billActionId === installment.id ? 'Generating...' : 'Generate Bill'}
+                                {billActionId === installment.id ? 'Sending...' : 'Send Bill'}
                               </button>
                             ) : null}
                           </>
                         ) : null}
-                        {installment.bill_number ? (
-                          <button
-                            type="button"
-                            onClick={() => generateDocument(installment.id, 'bill')}
-                            disabled={billActionId === installment.id}
-                            className="w-full whitespace-nowrap rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-                          >
-                            {billActionId === installment.id ? 'Generating...' : 'Re-generate Bill'}
-                          </button>
+                        {installment.bill_last_sent_at_display ? (
+                          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-500">
+                            <p><span className="font-semibold text-slate-700">Last Sent:</span> {installment.bill_last_sent_at_display}</p>
+                            <p><span className="font-semibold text-slate-700">Sent By:</span> {installment.bill_last_sent_by_name || '-'}</p>
+                          </div>
                         ) : null}
                       </div>
-                      )}
                     </div>
                   )
                 })}

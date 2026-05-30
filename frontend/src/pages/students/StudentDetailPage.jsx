@@ -177,6 +177,27 @@ export default function StudentDetailPage() {
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
       setMessage(data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')
+      if (data.whatsapp_sent) {
+        setRow((current) => {
+          const installments = (current?.payment_info?.installments || []).map((item) => (
+            Number(item.id) === Number(installment.id)
+              ? {
+                ...item,
+                bill_last_sent_at: data.sent_at,
+                bill_last_sent_at_display: data.sent_at_display || item.bill_last_sent_at_display,
+                bill_last_sent_by_name: data.sent_by || item.bill_last_sent_by_name,
+              }
+              : item
+          ))
+          return {
+            ...current,
+            payment_info: {
+              ...(current?.payment_info || {}),
+              installments,
+            },
+          }
+        })
+      }
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to send bill.'))
     } finally {
@@ -270,9 +291,15 @@ export default function StudentDetailPage() {
               </div>
             </div>
             {latestBill ? (
-              <p className="mt-4 text-sm font-semibold text-slate-500">
-                Latest bill: {latestBill.document_number || latestBill.bill_number} / {formatDate(latestBill.bill_generated_at || latestBill.payment_date, 'Not set')}
-              </p>
+              <div className="mt-4 space-y-1 text-sm font-semibold text-slate-500">
+                <p>Latest bill: {latestBill.document_number || latestBill.bill_number} / {formatDate(latestBill.bill_generated_at || latestBill.payment_date, 'Not set')}</p>
+                {latestBill.bill_last_sent_at_display ? (
+                  <>
+                    <p>Last Sent: {latestBill.bill_last_sent_at_display}</p>
+                    <p>Sent By: {latestBill.bill_last_sent_by_name || '-'}</p>
+                  </>
+                ) : null}
+              </div>
             ) : (
               <p className="mt-4 text-sm font-semibold text-slate-500">No generated bill is available for this student yet.</p>
             )}
@@ -286,14 +313,16 @@ export default function StudentDetailPage() {
             >
               {billActionId === latestBill?.id ? 'Opening...' : 'View Bill'}
             </button>
-            <button
-              type="button"
-              onClick={() => sendBill(latestBill)}
-              disabled={!latestBill || sendingBillId === latestBill?.id}
-              className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {sendingBillId === latestBill?.id ? 'Sending...' : 'Send Bill'}
-            </button>
+            {!isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => sendBill(latestBill)}
+                disabled={!latestBill || sendingBillId === latestBill?.id}
+                className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {sendingBillId === latestBill?.id ? 'Sending...' : 'Send Bill'}
+              </button>
+            )}
           </div>
         </div>
       </section>

@@ -14,140 +14,212 @@ function monthValue(date) {
   return date.toISOString().slice(0, 7)
 }
 
-const metricColors = {
-  leads: { light: '#93c5fd', dark: '#1d4ed8', soft: 'bg-blue-50', text: 'text-blue-800' },
-  walkins: { light: '#fcd34d', dark: '#b45309', soft: 'bg-amber-50', text: 'text-amber-800' },
-  enrollments: { light: '#86efac', dark: '#047857', soft: 'bg-emerald-50', text: 'text-emerald-800' },
-  conversion_ratio: { light: '#cbd5e1', dark: '#334155', soft: 'bg-slate-100', text: 'text-slate-800' },
-  revenue: { light: '#c4b5fd', dark: '#6d28d9', soft: 'bg-violet-50', text: 'text-violet-800' },
-}
-
-function MetricCard({ label, value, subtext }) {
-  return (
-    <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
-      <p className="mt-3 text-2xl font-black tracking-tight text-slate-950">{value}</p>
-      {subtext ? <p className="mt-2 text-sm font-medium text-slate-500">{subtext}</p> : null}
-    </div>
-  )
-}
-
 function formatMetricValue(row, value) {
   if (row.key === 'revenue') return money(value)
   if (row.key === 'conversion_ratio') return percent(value)
   return Number(value || 0).toLocaleString('en-IN')
 }
 
-function MiniMetricVisual({ row, colors }) {
+const metricColors = {
+  leads: { light: '#bfdbfe', dark: '#2563eb', bg: 'bg-blue-50', text: 'text-blue-800' },
+  walkins: { light: '#fed7aa', dark: '#ea580c', bg: 'bg-orange-50', text: 'text-orange-800' },
+  walkins_converted: { light: '#fed7aa', dark: '#ea580c', bg: 'bg-orange-50', text: 'text-orange-800' },
+  enrollments: { light: '#bbf7d0', dark: '#16a34a', bg: 'bg-emerald-50', text: 'text-emerald-800' },
+  conversion_ratio: { light: '#cbd5e1', dark: '#334155', bg: 'bg-slate-100', text: 'text-slate-800' },
+  revenue: { light: '#ddd6fe', dark: '#7c3aed', bg: 'bg-violet-50', text: 'text-violet-800' },
+}
+
+function changeTone(change) {
+  return Number(change || 0) >= 0
+    ? 'bg-emerald-50 text-emerald-700'
+    : 'bg-rose-50 text-rose-700'
+}
+
+function ChangeBadge({ value }) {
+  const change = Number(value || 0)
+  return (
+    <span className={`inline-flex min-w-[74px] items-center justify-center rounded-md px-2.5 py-1 text-xs font-bold ${changeTone(change)}`}>
+      {change >= 0 ? '^' : 'v'} {Math.abs(change).toFixed(0)}%
+    </span>
+  )
+}
+
+function BarPair({ row, colors, tall = false }) {
   const current = Number(row.this_month || 0)
   const previous = Number(row.last_month || 0)
   const maxValue = Math.max(current, previous, 1)
-  const currentHeight = Math.max((current / maxValue) * 100, current > 0 ? 12 : 3)
-  const previousHeight = Math.max((previous / maxValue) * 100, previous > 0 ? 12 : 3)
-  const isRevenue = row.key === 'revenue'
+  const previousHeight = Math.max((previous / maxValue) * 100, previous > 0 ? 10 : 3)
+  const currentHeight = Math.max((current / maxValue) * 100, current > 0 ? 10 : 3)
+
   return (
-    <div className={`rounded-2xl bg-slate-50 px-4 pb-3 pt-4 ${isRevenue ? 'min-h-[190px]' : 'min-h-[132px]'}`}>
-      <div className={`flex items-end justify-center gap-7 ${isRevenue ? 'h-36' : 'h-24'}`}>
-        <div className="flex h-full w-16 flex-col items-center justify-end gap-2">
-          <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-t-2xl">
-            <div
-              className="w-9 max-w-full rounded-t-2xl transition-[height] duration-500 ease-out"
-              style={{ height: `${Math.min(previousHeight, 100)}%`, background: colors.light }}
-            />
+    <div className={`grid grid-cols-2 items-end gap-5 rounded-lg bg-slate-50 px-5 pb-4 pt-5 ${tall ? 'h-56' : 'h-40'}`}>
+      {[
+        ['Last', previous, previousHeight, colors.light],
+        ['This', current, currentHeight, colors.dark],
+      ].map(([label, value, height, color]) => (
+        <div key={label} className="flex h-full min-w-0 flex-col items-center justify-end gap-2">
+          <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-md bg-white">
+            <div className="w-10 max-w-full rounded-t-md" style={{ height: `${Math.min(height, 100)}%`, backgroundColor: color }} />
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Last</span>
-        </div>
-        <div className="flex h-full w-16 flex-col items-center justify-end gap-2">
-          <div className="flex h-full w-full items-end justify-center overflow-hidden rounded-t-2xl">
-            <div
-              className="w-9 max-w-full rounded-t-2xl transition-[height] duration-500 ease-out"
-              style={{
-                height: `${Math.min(currentHeight, 100)}%`,
-                background: isRevenue ? `linear-gradient(180deg, ${colors.light}, ${colors.dark})` : colors.dark,
-              }}
-            />
+          <div className="w-full min-w-0 text-center">
+            <p className="text-xs font-semibold text-slate-500">{label}</p>
+            <p className="truncate text-xs font-bold text-slate-800">{formatMetricValue(row, value)}</p>
           </div>
-          <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">This</span>
         </div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3 text-center text-xs font-bold text-slate-700">
-        <span className="truncate">{formatMetricValue(row, previous)}</span>
-        <span className="truncate">{formatMetricValue(row, current)}</span>
-      </div>
+      ))}
     </div>
   )
 }
 
-function ComparisonCards({ rows }) {
+function ComparisonCard({ row }) {
+  const colors = metricColors[row.key] || metricColors.conversion_ratio
   return (
-    <div className="grid auto-rows-fr gap-4 md:grid-cols-2">
-      {(rows || []).map((row) => {
-        const colors = metricColors[row.key] || metricColors.conversion_ratio
-        const positive = Number(row.change_percent || 0) >= 0
-        const isRevenue = row.key === 'revenue'
-        return (
-          <div
-            key={row.key}
-            className={`flex min-h-[190px] flex-col justify-between rounded-[24px] border border-slate-200 p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] ${
-              isRevenue ? 'bg-gradient-to-br from-white via-violet-50 to-white md:col-span-2' : 'bg-white'
-            }`}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{row.label}</p>
-                <p className={`mt-3 ${isRevenue ? 'text-3xl' : 'text-2xl'} font-black tracking-tight text-slate-950`}>
-                  {formatMetricValue(row, row.this_month)}
-                </p>
-              </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${positive ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                {positive ? '↑' : '↓'} {positive ? '+' : ''}{Number(row.change_percent || 0).toFixed(0)}%
-              </span>
-            </div>
-            <div className="mt-5">
-              <MiniMetricVisual row={row} colors={colors} />
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold text-slate-500">
-              <span>Last Month: {formatMetricValue(row, row.last_month)}</span>
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: colors.dark }} />
-            </div>
-          </div>
-        )
-      })}
-    </div>
+    <article className="flex min-h-[250px] flex-col justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-slate-500">{row.label}</p>
+          <p className="mt-2 truncate text-2xl font-black text-slate-950">{formatMetricValue(row, row.this_month)}</p>
+        </div>
+        <ChangeBadge value={row.change_percent} />
+      </div>
+      <div className="mt-5">
+        <BarPair row={row} colors={colors} />
+      </div>
+    </article>
   )
 }
 
-function UsageLine({ points }) {
-  const values = points || []
-  const maxSeconds = Math.max(...values.map((item) => Number(item.seconds || 0)), 1)
-  const polyline = values.map((item, index) => {
-    const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100
-    const y = 36 - ((Number(item.seconds || 0) / maxSeconds) * 30)
-    return `${x},${y}`
+function RevenueCard({ row }) {
+  const colors = metricColors.revenue
+  return (
+    <article className="rounded-lg border border-violet-100 bg-violet-50 p-6 shadow-sm">
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-center">
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase text-violet-700">{row.label}</p>
+          <p className="mt-3 truncate text-4xl font-black text-slate-950">{money(row.this_month)}</p>
+          <div className="mt-4 flex flex-wrap items-center gap-3 text-sm font-semibold text-slate-600">
+            <ChangeBadge value={row.change_percent} />
+            <span>Compared to last month</span>
+          </div>
+        </div>
+        <BarPair row={row} colors={colors} tall />
+      </div>
+    </article>
+  )
+}
+
+function CircularProgressCard({ row, title = row.label }) {
+  const value = Math.max(0, Math.min(Number(row.this_month || 0), 100))
+  const circumference = 2 * Math.PI * 42
+  const offset = circumference - (value / 100) * circumference
+  const colors = metricColors.conversion_ratio
+
+  return (
+    <article className="flex min-h-[250px] flex-col justify-between rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">{title}</p>
+          <p className="mt-2 text-3xl font-black text-slate-950">{percent(value)}</p>
+        </div>
+        <ChangeBadge value={row.change_percent} />
+      </div>
+      <div className="mt-5 flex items-center justify-center">
+        <svg viewBox="0 0 100 100" className="h-36 w-36">
+          <circle cx="50" cy="50" r="42" fill="none" stroke="#e2e8f0" strokeWidth="10" />
+          <circle
+            cx="50"
+            cy="50"
+            r="42"
+            fill="none"
+            stroke={colors.dark}
+            strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            transform="rotate(-90 50 50)"
+          />
+          <text x="50" y="55" textAnchor="middle" className="fill-slate-900 text-lg font-black">
+            {value.toFixed(0)}%
+          </text>
+        </svg>
+      </div>
+      <p className="text-center text-sm font-semibold text-slate-500">Compared to last month</p>
+    </article>
+  )
+}
+
+function UsageMetricCard({ label, value, tone = 'slate' }) {
+  const tones = {
+    slate: 'bg-white text-slate-950',
+    blue: 'bg-blue-50 text-blue-950',
+    orange: 'bg-orange-50 text-orange-950',
+  }
+  return (
+    <article className={`rounded-lg border border-slate-200 p-5 shadow-sm ${tones[tone] || tones.slate}`}>
+      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-black">{value}</p>
+    </article>
+  )
+}
+
+function UsageLineChart({ points }) {
+  const values = points?.length ? points : [{ date: '-', label: '-', seconds: 0, hours: 0 }]
+  const maxHours = Math.max(...values.map((item) => Number(item.hours || 0)), 1)
+  const width = 640
+  const height = 220
+  const padX = 36
+  const padY = 24
+  const usableWidth = width - padX * 2
+  const usableHeight = height - padY * 2
+  const plotted = values.map((item, index) => {
+    const x = values.length <= 1 ? padX : padX + (index / (values.length - 1)) * usableWidth
+    const y = padY + usableHeight - (Number(item.hours || 0) / maxHours) * usableHeight
+    return { ...item, x, y }
+  })
+  const path = plotted.map((point, index) => {
+    if (index === 0) return `M ${point.x} ${point.y}`
+    const previous = plotted[index - 1]
+    const midX = (previous.x + point.x) / 2
+    return `C ${midX} ${previous.y}, ${midX} ${point.y}, ${point.x} ${point.y}`
   }).join(' ')
+
   return (
-    <div className="rounded-2xl bg-slate-50 p-4">
-      <svg viewBox="0 0 100 40" className="h-32 w-full overflow-visible">
-        <polyline points={polyline} fill="none" stroke="#334155" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        {values.map((item, index) => {
-          const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100
-          const y = 36 - ((Number(item.seconds || 0) / maxSeconds) * 30)
-          return <circle key={item.date} cx={x} cy={y} r="1.8" fill="#334155" />
-        })}
-      </svg>
-      <div className="mt-2 flex justify-between text-xs font-semibold text-slate-500">
-        <span>{values[0]?.date || '-'}</span>
-        <span>{values[values.length - 1]?.date || '-'}</span>
+    <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">Screen Time Trend</p>
+          <h2 className="text-xl font-black text-slate-950">Daily CRM Usage Trend</h2>
+        </div>
+        <p className="text-sm font-semibold text-slate-500">Hours per day</p>
       </div>
-    </div>
+      <div className="mt-5 overflow-hidden rounded-lg bg-slate-50 p-3">
+        <svg viewBox={`0 0 ${width} ${height}`} className="h-64 w-full" role="img" aria-label="Daily CRM usage trend">
+          {[0, 1, 2, 3].map((line) => {
+            const y = padY + (line / 3) * usableHeight
+            return <line key={line} x1={padX} x2={width - padX} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+          })}
+          <path d={path} fill="none" stroke="#334155" strokeWidth="4" strokeLinecap="round" />
+          {plotted.map((point) => (
+            <circle key={point.date} cx={point.x} cy={point.y} r="4" fill="#334155" />
+          ))}
+          <text x={padX} y={height - 4} className="fill-slate-500 text-xs font-semibold">{values[0]?.label || '-'}</text>
+          <text x={width - padX} y={height - 4} textAnchor="end" className="fill-slate-500 text-xs font-semibold">
+            {values[values.length - 1]?.label || '-'}
+          </text>
+        </svg>
+      </div>
+    </article>
   )
 }
 
-function InsightCard({ children }) {
+function InsightCard({ item }) {
+  const label = typeof item === 'string' ? 'Insight' : item.label
+  const value = typeof item === 'string' ? item : item.value
   return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <p className="text-sm font-semibold leading-6 text-slate-700">{children}</p>
-    </div>
+    <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
+      <p className="mt-3 text-base font-bold leading-6 text-slate-900">{value}</p>
+    </article>
   )
 }
 
@@ -169,89 +241,98 @@ export default function PerformanceHubPage() {
       .finally(() => setLoading(false))
   }, [month])
 
-  const personal = data?.personal || {}
-  const branch = data?.branch_overview || {}
-  const personalCards = useMemo(() => [
-    ['Leads Added', personal.leads || 0],
-    ['Walk-ins Converted', personal.walkins_converted || 0],
-    ['Enrollments', personal.enrollments || 0],
-    ['Conversion Ratio', percent(personal.conversion_ratio)],
-    ['Pending Follow-ups', personal.pending_followups || 0],
-    ['Total Follow-ups', personal.total_followups || 0],
-    ['Total Revenue Generated', money(personal.revenue)],
-    ['Avg Follow-up Response Time', personal.avg_followup_response_time || '0m'],
-    ['CRM Usage Time', personal.crm_usage_time || '0m'],
-  ], [personal])
+  const personalRows = useMemo(() => {
+    const rows = data?.my_performance_comparison || data?.monthly_comparison || []
+    return rows.filter((row) => ['leads', 'walkins', 'walkins_converted', 'enrollments', 'conversion_ratio'].includes(row.key))
+  }, [data])
+
+  const branchRows = useMemo(() => data?.branch_performance_comparison || [], [data])
+  const branchRevenue = branchRows.find((row) => row.key === 'revenue') || {
+    key: 'revenue',
+    label: 'Branch Revenue',
+    this_month: data?.branch_overview?.revenue || 0,
+    last_month: data?.previous_branch?.revenue || 0,
+    change_percent: 0,
+  }
+  const branchNonRevenue = branchRows.filter((row) => row.key !== 'revenue')
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-4 rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:flex-row sm:items-end sm:justify-between sm:p-8">
+      <section className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Performance Hub</p>
-          <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Personal Analytics</h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-            Track your own pipeline, follow-up work, revenue contribution, and CRM usage with branch-level summary visibility.
+          <p className="text-xs font-bold uppercase text-slate-500">Performance Hub</p>
+          <h1 className="mt-2 text-3xl font-black text-slate-950">My Performance Dashboard</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+            Personal pipeline, CRM usage, and branch analytics for your assigned branch.
           </p>
         </div>
         <input
           type="month"
           value={month}
           onChange={(event) => setMonth(event.target.value)}
-          className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900"
+          className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm sm:w-auto"
         />
       </section>
 
-      {message && <p className="rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm font-semibold text-slate-600">{message}</p>}
+      {message && <p className="rounded-lg border border-rose-100 bg-rose-50 px-5 py-4 text-sm font-semibold text-rose-700">{message}</p>}
       {loading ? (
-        <div className="rounded-[24px] border border-slate-200 bg-white p-6 text-sm font-semibold text-slate-500">Loading analytics...</div>
+        <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm font-semibold text-slate-500 shadow-sm">Loading analytics...</div>
       ) : data ? (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {personalCards.map(([label, value]) => <MetricCard key={label} label={label} value={value} />)}
-          </section>
-
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(340px,0.85fr)]">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Monthly Comparison</p>
-              <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">This month vs last month</h2>
-              <div className="mt-5">
-                <ComparisonCards rows={data.monthly_comparison || []} />
-              </div>
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 1</p>
+              <h2 className="text-2xl font-black text-slate-950">My Performance</h2>
             </div>
-
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">CRM Usage Analytics</p>
-              <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Active usage</h2>
-              <div className="mt-5 grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-                <MetricCard label="Today" value={data.usage?.today_display || '0m'} />
-                <MetricCard label="This Week" value={data.usage?.week_display || '0m'} />
-                <MetricCard label="This Month" value={data.usage?.month_display || '0m'} />
-              </div>
-              <div className="mt-5">
-                <UsageLine points={data.usage?.daily || []} />
-              </div>
+            <div className="grid auto-rows-fr gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {personalRows.filter((row) => row.key !== 'conversion_ratio').map((row) => (
+                <ComparisonCard key={row.key} row={row} />
+              ))}
+              {personalRows.filter((row) => row.key === 'conversion_ratio').map((row) => (
+                <CircularProgressCard key={row.key} row={row} title="Conversion Ratio" />
+              ))}
             </div>
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Branch Overview</p>
-              <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">{branch.branch_name || 'Branch'} summary</h2>
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <MetricCard label="Branch Leads" value={branch.leads || 0} />
-                <MetricCard label="Branch Enrollments" value={branch.enrollments || 0} />
-                <MetricCard label="Branch Conversion" value={percent(branch.conversion_ratio)} />
-                <MetricCard label="Monthly Growth" value={`${Number(branch.growth_percent || 0).toFixed(0)}%`} />
-              </div>
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 2</p>
+              <h2 className="text-2xl font-black text-slate-950">CRM Usage Analytics</h2>
             </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              <UsageMetricCard label="Average Daily Usage" value={data.usage?.average_daily_display || '0m'} tone="blue" />
+              <UsageMetricCard label="Monthly Usage" value={data.usage?.monthly_display || data.usage?.range_display || '0m'} tone="slate" />
+              <UsageMetricCard label="Most Active Day" value={data.usage?.most_active_day || 'No activity'} tone="orange" />
+            </div>
+            <UsageLineChart points={data.usage?.daily || []} />
+          </section>
 
-            <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Insights</p>
-              <div className="mt-4 grid gap-3">
-                {(data.insights || []).map((item) => (
-                  <InsightCard key={item}>{item}</InsightCard>
-                ))}
-              </div>
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 3</p>
+              <h2 className="text-2xl font-black text-slate-950">My Branch Performance</h2>
+              <p className="mt-1 text-sm font-semibold text-slate-500">{data.branch_overview?.branch_name || 'Assigned branch'}</p>
+            </div>
+            <RevenueCard row={branchRevenue} />
+            <div className="grid auto-rows-fr gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {branchNonRevenue.filter((row) => row.key !== 'conversion_ratio').map((row) => (
+                <ComparisonCard key={row.key} row={row} />
+              ))}
+              {branchNonRevenue.filter((row) => row.key === 'conversion_ratio').map((row) => (
+                <CircularProgressCard key={row.key} row={row} title="Branch Conversion Ratio" />
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 4</p>
+              <h2 className="text-2xl font-black text-slate-950">Performance Insights</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              {(data.insights || []).map((item, index) => (
+                <InsightCard key={`${typeof item === 'string' ? item : item.label}-${index}`} item={item} />
+              ))}
             </div>
           </section>
         </>

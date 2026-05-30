@@ -2008,6 +2008,73 @@ def performance_metrics(scope, start_date, end_date):
     }
 
 
+def performance_comparison_rows(current, previous, keys):
+    rows = []
+    for key, label in keys:
+        rows.append({
+            'key': key,
+            'label': label,
+            'this_month': current.get(key, 0),
+            'last_month': previous.get(key, 0),
+            'change_percent': pct_change(current.get(key, 0), previous.get(key, 0)),
+        })
+    return rows
+
+
+def daily_usage_points(daily_usage, start_date, end_date):
+    points = []
+    cursor = start_date
+    while cursor <= end_date:
+        key = cursor.isoformat()
+        seconds = min(int((daily_usage or {}).get(key, 0) or 0), 86400)
+        points.append({
+            'date': key,
+            'label': cursor.strftime('%d %b'),
+            'weekday': cursor.strftime('%A'),
+            'seconds': seconds,
+            'hours': round(seconds / 3600, 2),
+            'display': seconds_to_duration(seconds),
+        })
+        cursor += timedelta(days=1)
+    return points
+
+
+def usage_summary_for(user, start_date, end_date):
+    today = timezone.localdate()
+    effective_end = min(end_date, today)
+    if effective_end < start_date:
+        return 0, {}, [], 0, '0m', 'No activity'
+    total_seconds, daily_usage = usage_seconds_for(user, start_date, effective_end)
+    days_in_range = max((effective_end - start_date).days + 1, 1)
+    total_seconds = min(total_seconds, days_in_range * 86400)
+    average_seconds = min(int(total_seconds / days_in_range), 86400)
+    points = daily_usage_points(daily_usage, start_date, effective_end)
+    active_point = max(points, key=lambda item: item['seconds']) if points else None
+    most_active_day = active_point['weekday'] if active_point and active_point['seconds'] > 0 else 'No activity'
+    return total_seconds, daily_usage, points, average_seconds, seconds_to_duration(average_seconds), most_active_day
+
+
+def highest_enrollment_day(scope, start_date, end_date):
+    rows = (
+        scope['enrollments']
+        .filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+        .values('enrollment_date')
+        .annotate(count=Count('id'))
+        .order_by('-count', 'enrollment_date')
+    )
+    top = rows.first()
+    if not top or not top.get('enrollment_date'):
+        return 'No enrollments yet'
+    return f"{top['enrollment_date'].strftime('%A')} ({top['count']} enrollments)"
+
+
+def best_metric_label(rows):
+    if not rows:
+        return 'No activity yet'
+    best = max(rows, key=lambda row: float(row.get('change_percent') or 0))
+    return f"{best['label']} ({best['change_percent']:.0f}%)"
+
+
 def user_scope(user):
     return {
         'leads': Lead.objects.filter(Q(created_by=user) | Q(assigned_to=user), is_deleted=False).distinct(),
@@ -2081,33 +2148,50 @@ class PerformanceHubView(APIView):
         today_seconds, today_daily = usage_seconds_for(user, today, today)
         week_seconds, _ = usage_seconds_for(user, week_start, today)
         month_seconds, month_daily = usage_seconds_for(user, month_start, today)
-        range_seconds, daily_usage = usage_seconds_for(user, start_date, end_date)
+        range_seconds, daily_usage, usage_points, average_daily_seconds, average_daily_display, most_active_day = usage_summary_for(
+            user,
+            start_date,
+            end_date,
+        )
         current['crm_usage_time'] = seconds_to_duration(range_seconds)
         current['avg_followup_response_time'] = seconds_to_duration(average_followup_response_seconds(user, start_date, end_date))
-        comparison = []
-        for key, label in [
+        personal_comparison = performance_comparison_rows(current, previous, [
+            ('leads', 'Leads'),
+            ('walkins_converted', 'Walk-ins Converted'),
+            ('enrollments', 'Enrollments'),
+            ('conversion_ratio', 'Conversion %'),
+        ])
+        monthly_comparison = performance_comparison_rows(current, previous, [
             ('leads', 'Leads'),
             ('walkins', 'Walk-ins'),
             ('enrollments', 'Enrollments'),
             ('conversion_ratio', 'Conversion %'),
             ('revenue', 'Revenue'),
-        ]:
-            comparison.append({
-                'key': key,
-                'label': label,
-                'this_month': current[key],
-                'last_month': previous[key],
-                'change_percent': pct_change(current[key], previous[key]),
-            })
-        insights = []
-        revenue_change = pct_change(current['revenue'], previous['revenue'])
-        conversion_change = pct_change(current['conversion_ratio'], previous['conversion_ratio'])
-        insights.append(f'{abs(revenue_change):.0f}% {"improvement" if revenue_change >= 0 else "decline"} in revenue from last month.')
-        insights.append(f'Conversion rate {"improved" if conversion_change >= 0 else "reduced"} this month.')
+        ])
+        branch_comparison = performance_comparison_rows(branch_current, branch_previous, [
+            ('revenue', 'Branch Revenue'),
+            ('leads', 'Branch Leads'),
+            ('walkins', 'Branch Walk-ins'),
+            ('enrollments', 'Branch Enrollments'),
+            ('conversion_ratio', 'Branch Conversion %'),
+        ])
+        lead_change = pct_change(current['leads'], previous['leads'])
+        enrollment_change = pct_change(current['enrollments'], previous['enrollments'])
+        usage_change = pct_change(range_seconds, usage_seconds_for(user, previous_start, previous_end)[0])
+        usage_direction = 'increased' if usage_change >= 0 else 'decreased'
+        insights = [
+            {'label': 'Best Performing Metric', 'value': best_metric_label(personal_comparison)},
+            {'label': 'Highest Enrollment Day', 'value': highest_enrollment_day(personal_scope, start_date, end_date)},
+            {'label': 'Lead Growth', 'value': f'{lead_change:.0f}% vs last month'},
+            {'label': 'Enrollment Growth', 'value': f'{enrollment_change:.0f}% vs last month'},
+            {'label': 'Usage Trend', 'value': f'Your CRM usage {usage_direction} by {abs(usage_change):.0f}% compared to last month.'},
+        ]
         return Response({
             'period': {'start': start_date, 'end': end_date},
             'personal': current,
-            'monthly_comparison': comparison,
+            'previous_personal': previous,
+            'my_performance_comparison': personal_comparison,
+            'monthly_comparison': monthly_comparison,
             'usage': {
                 'today_seconds': today_seconds,
                 'today_display': seconds_to_duration(today_seconds),
@@ -2115,9 +2199,14 @@ class PerformanceHubView(APIView):
                 'week_display': seconds_to_duration(week_seconds),
                 'month_seconds': month_seconds,
                 'month_display': seconds_to_duration(month_seconds),
+                'monthly_seconds': range_seconds,
+                'monthly_display': seconds_to_duration(range_seconds),
                 'range_seconds': range_seconds,
                 'range_display': seconds_to_duration(range_seconds),
-                'daily': [
+                'average_daily_seconds': average_daily_seconds,
+                'average_daily_display': average_daily_display,
+                'most_active_day': most_active_day,
+                'daily': usage_points or [
                     {'date': key, 'seconds': value, 'display': seconds_to_duration(value)}
                     for key, value in sorted((daily_usage or today_daily or month_daily).items())
                 ],
@@ -2128,6 +2217,8 @@ class PerformanceHubView(APIView):
                 'branch_name': branch.name if branch else '',
                 'growth_percent': pct_change(branch_current['enrollments'], branch_previous['enrollments']),
             },
+            'previous_branch': branch_previous,
+            'branch_performance_comparison': branch_comparison,
             'insights': insights,
         })
 
@@ -8284,10 +8375,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         return f'{Decimal(str(value or 0)):.2f}'
 
     def _default_bill_address_lines(self):
-        return [
-            'First Floor, AAKIFAH 2017 Complex, Palghat Main Road,',
-            'Near Muthoot Finance, Kuniyamuthur, Coimbatore - 641008',
-        ]
+        return ['Branch address not set']
 
     def _branch_address_lines(self, branch):
         if not branch:
@@ -8558,7 +8646,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {payment_amount:,.2f}</div></div>
           <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {total_fees:,.2f}</div></div>
           <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {paid_amount:,.2f}</div></div>
-          <div class="field"><div class="label">BALANCE</div><div class="value amount">Rs {balance:,.2f}</div></div>
+          <div class="field"><div class="label">PENDING AMOUNT</div><div class="value amount">Rs {balance:,.2f}</div></div>
         </div>
       </div>
       <div class="section">
@@ -8830,9 +8918,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'], url_path='view-bill')
     def view_bill(self, request, pk=None):
         installment = self.get_object()
-        document_number = self._document_number(installment)
+        document_number = installment.bill_number
         if not document_number:
-            return Response({'detail': 'Payment document has not been generated yet.'}, status=404)
+            return Response({'detail': 'Bill has not been generated yet.'}, status=404)
 
         response = HttpResponse(self._immutable_document_html(installment), content_type='text/html; charset=utf-8')
         response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
@@ -8841,12 +8929,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='send-bill')
     def send_bill(self, request, pk=None):
         installment = self.get_object()
-        document_number = self._document_number(installment)
+        if request.user.is_super_admin:
+            return Response({'detail': 'Admins can generate and verify bills, but cannot send bills.'}, status=403)
+        document_number = installment.bill_number
         if not document_number:
-            return Response({'detail': 'Generate the bill or receipt before sending it.'}, status=400)
+            return Response({'detail': 'Generate the bill before sending it.'}, status=400)
 
         enrollment = installment.enrollment
-        document_label = 'Bill' if installment.bill_number else 'Receipt'
         filename = f'{document_number}.pdf'
         installment.document_snapshot = self._build_document_snapshot(installment)
         installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
@@ -8857,7 +8946,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=503)
         caption = (
             f'Hi {enrollment.name},\n\n'
-            f'Please find your {document_label.lower()} {document_number} attached.\n\n'
+            f'Please find your bill {document_number} attached.\n\n'
             '-Team IIE'
         )
         log = send_candidate_document(
@@ -8872,11 +8961,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             related_id=installment.id,
         )
         return Response({
-            'detail': 'Bill sent successfully.' if document_label == 'Bill' else f'{document_label} send request processed.',
+            'detail': 'Bill sent successfully.' if log.status == WhatsAppMessage.MsgStatus.SENT else 'Bill send request failed.',
             'phone': enrollment.phone,
             'document_number': document_number,
             'whatsapp_message': caption,
-            'sent_at': timezone.now(),
+            'sent_at': log.sent_at or log.created_at,
+            'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
+            'sent_by': request.user.full_name or request.user.username,
             **whatsapp_send_payload(log),
         })
 
