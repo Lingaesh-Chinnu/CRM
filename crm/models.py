@@ -1265,6 +1265,7 @@ class PaymentInstallment(models.Model):
     class Mode(models.TextChoices):
         CASH         = 'cash',          'Cash'
         UPI          = 'upi',           'UPI'
+        CASH_UPI     = 'cash_upi',      'Cash + UPI'
         BANK         = 'bank_transfer', 'Bank Transfer'
         CHEQUE       = 'cheque',        'Cheque'
         CARD         = 'card',          'Card'

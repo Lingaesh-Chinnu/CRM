@@ -1709,6 +1709,7 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
         if not reference:
             label = {
                 PaymentInstallment.Mode.UPI: 'UPI Transaction ID',
+                PaymentInstallment.Mode.CASH_UPI: 'UPI Transaction ID',
                 PaymentInstallment.Mode.CHEQUE: 'Cheque Number',
                 PaymentInstallment.Mode.BANK: 'Transfer ID / Reference ID',
                 PaymentInstallment.Mode.CARD: 'Card Last 4 Digits',

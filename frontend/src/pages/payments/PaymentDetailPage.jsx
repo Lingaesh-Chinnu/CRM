@@ -40,6 +40,10 @@ function referenceConfig(mode) {
       label: 'UPI Transaction ID',
       placeholder: 'Enter UPI transaction ID',
     },
+    cash_upi: {
+      label: 'UPI Transaction ID',
+      placeholder: 'Enter UPI transaction ID',
+    },
     cheque: {
       label: 'Cheque Number',
       placeholder: 'Enter cheque number',
@@ -613,10 +617,9 @@ export default function PaymentDetailPage() {
             >
               <option value="cash">Cash</option>
               <option value="upi">UPI</option>
+              <option value="cash_upi">Cash + UPI</option>
               <option value="bank_transfer">Bank Transfer</option>
-              <option value="cheque">Cheque</option>
               <option value="card">Card</option>
-              <option value="other">Other</option>
             </select>
 
             <input

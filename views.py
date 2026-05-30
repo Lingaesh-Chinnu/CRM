@@ -8503,8 +8503,34 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'branch_phone': branch.phone if branch and branch.phone else 'Phone number not set',
         }
 
-    def _next_payment_schedule(self, payment):
-        for item in payment_installment_summary(payment):
+    def _installment_summary_for_paid_amount(self, payment, paid_amount):
+        remaining_paid = Decimal(str(paid_amount or 0))
+        summary = []
+        for index, item in enumerate(get_payment_installment_schedule(payment), start=1):
+            required_amount = Decimal(str(item.get('amount') or 0))
+            item_paid_amount = min(remaining_paid, required_amount)
+            remaining_paid = max(remaining_paid - item_paid_amount, Decimal('0'))
+            pending_amount = max(required_amount - item_paid_amount, Decimal('0'))
+            if item_paid_amount >= required_amount and required_amount > 0:
+                item_status = 'paid'
+            elif item_paid_amount > 0:
+                item_status = 'partial'
+            else:
+                item_status = 'pending'
+            due_date = item.get('due_date')
+            summary.append({
+                'index': index,
+                'label': item.get('label') or f'{index} Installment',
+                'required_amount': required_amount,
+                'paid_amount': item_paid_amount,
+                'pending_amount': pending_amount,
+                'status': item_status,
+                'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+            })
+        return summary
+
+    def _next_payment_schedule(self, payment, summary=None):
+        for item in summary or payment_installment_summary(payment):
             pending_amount = Decimal(str(item.get('pending_amount') or 0))
             if pending_amount > 0:
                 return {
@@ -8526,9 +8552,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         total_fees = Decimal(str(payment.total_fees or 0))
         balance = max(total_fees - paid_amount, Decimal('0'))
         included = [installment] if is_bill else [installment]
-        installment_summary = payment_installment_summary(payment)
-        next_schedule = self._next_payment_schedule(payment)
+        installment_summary = self._installment_summary_for_paid_amount(payment, paid_amount)
+        next_schedule = self._next_payment_schedule(payment, installment_summary)
         return {
+            'calculation_version': 'bill_amount_v2',
             'document_type': 'bill' if is_bill else 'receipt',
             'document_number': self._document_number(installment),
             'generated_at': generated_at.isoformat() if generated_at else '',
@@ -8628,7 +8655,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                     <td>{escape(str(next_schedule.get('due_date') or 'Not set'))}</td>
                   </tr>
                   <tr>
-                    <th>Pending Amount</th>
+                    <th>Next Payment Amount</th>
                     <td class="amount">Rs {Decimal(str(next_schedule.get('pending_amount') or 0)):,.2f}</td>
                   </tr>
                 </tbody>
@@ -8748,7 +8775,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(payment_date)}</div></div>
           <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment_label)}</div></div>
           <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {payment_amount:,.2f}</div></div>
-          <div class="field"><div class="label">TOTAL FEES</div><div class="value amount">Rs {total_fees:,.2f}</div></div>
+          <div class="field"><div class="label">COURSE FEE</div><div class="value amount">Rs {total_fees:,.2f}</div></div>
           <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {paid_amount:,.2f}</div></div>
           <div class="field"><div class="label">PENDING AMOUNT</div><div class="value amount">Rs {balance:,.2f}</div></div>
         </div>
@@ -8861,7 +8888,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         return Response(PaymentInstallmentSerializer(installment).data)
 
     def _immutable_document_html(self, installment):
-        snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
+        snapshot = installment.document_snapshot or {}
+        if snapshot.get('calculation_version') != 'bill_amount_v2':
+            snapshot = self._build_document_snapshot(installment)
         html = self._build_bill_html(installment, snapshot)
         installment.document_snapshot = snapshot
         installment.document_html = html
@@ -8941,7 +8970,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             ('PAYMENT DATE', snapshot.get('payment_date') or ''),
             ('INSTALLMENT', snapshot.get('installment_label') or ''),
             ('PAYMENT AMOUNT', f"Rs {Decimal(str(snapshot.get('payment_amount') or 0)):,.2f}"),
-            ('TOTAL FEES', f"Rs {Decimal(str(snapshot.get('total_fees') or 0)):,.2f}"),
+            ('COURSE FEE', f"Rs {Decimal(str(snapshot.get('total_fees') or 0)):,.2f}"),
             ('PAID AMOUNT', f"Rs {Decimal(str(snapshot.get('paid_amount') or 0)):,.2f}"),
             ('BALANCE', f"Rs {Decimal(str(snapshot.get('balance') or 0)):,.2f}"),
         ]
@@ -8992,7 +9021,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             rows = [
                 ('Next Installment', next_schedule.get('label') or 'Next Installment'),
                 ('Due Date', next_schedule.get('due_date') or 'Not set'),
-                ('Pending Amount', f"Rs {Decimal(str(next_schedule.get('pending_amount') or 0)):,.2f}"),
+                ('Next Payment Amount', f"Rs {Decimal(str(next_schedule.get('pending_amount') or 0)):,.2f}"),
             ]
             for label, value in rows:
                 draw.rectangle((margin, next_y, width - margin, next_y + 44), fill='white', outline=border)
