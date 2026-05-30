@@ -1154,6 +1154,7 @@ class RulesSigningRequest(TimeStampedModel):
     class Status(models.TextChoices):
         PENDING = 'pending', 'Pending'
         SENT = 'sent', 'Sent'
+        VIEWED = 'viewed', 'Viewed'
         SUBMITTED = 'submitted', 'Submitted'
 
     enrollment = models.OneToOneField(Enrollment, on_delete=models.CASCADE, related_name='rules_signing')

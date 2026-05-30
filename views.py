@@ -6407,6 +6407,9 @@ class PublicRulesSigningView(APIView):
         signing = self.get_signing(token)
         if not signing:
             return Response({'detail': 'Invalid signing link.'}, status=404)
+        if signing.status == RulesSigningRequest.Status.SENT:
+            signing.status = RulesSigningRequest.Status.VIEWED
+            signing.save(update_fields=['status', 'updated_at'])
         enrollment = signing.enrollment
         installments = build_default_installment_plan(enrollment)
         return Response({
@@ -6808,6 +6811,41 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return None, 'Payment schedule total must match net payable fee.'
         return normalize_installment_schedule(schedule), ''
 
+    def _clean_manual_payment_schedule(self, enrollment, schedule):
+        if not isinstance(schedule, list) or not schedule:
+            return None, 'Payment schedule is required.'
+        cleaned = []
+        total = Decimal('0')
+        for index, item in enumerate(schedule, start=1):
+            if not isinstance(item, dict):
+                return None, 'Each payment schedule row must be valid.'
+            raw_amount = item.get('amount')
+            raw_due_date = item.get('due_date')
+            if raw_amount in (None, ''):
+                return None, 'Each installment needs an amount.'
+            if not raw_due_date:
+                return None, 'Each installment needs a due date.'
+            try:
+                amount = Decimal(str(raw_amount))
+            except (InvalidOperation, TypeError, ValueError):
+                return None, 'Installment amount must be numeric.'
+            if not amount.is_finite() or amount < 0:
+                return None, 'Installment amount must be a positive number.'
+            due_date = parse_date(str(raw_due_date))
+            if not due_date:
+                return None, 'Each installment needs a valid due date.'
+            total += amount
+            amount = amount.quantize(Decimal('0.01'))
+            cleaned.append({
+                'label': str(item.get('label') or '').strip() or f'{index} Installment',
+                'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
+                'due_date': due_date.isoformat(),
+            })
+        expected_total = Decimal(str(enrollment_payable_fee(enrollment) or 0)).quantize(Decimal('0.01'))
+        if total.quantize(Decimal('0.01')) != expected_total:
+            return None, 'Payment schedule total must match net payable fee.'
+        return normalize_installment_schedule(cleaned), ''
+
     def _ensure_enrollment_schedule(self, enrollment, split_count=None, lock=False):
         payable_fee = int(round(float(enrollment_payable_fee(enrollment) or 0)))
         if payable_fee < PAYMENT_SPLIT_THRESHOLD or split_count is not None or not enrollment.payment_schedule:
@@ -7037,12 +7075,32 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='payment-schedule')
     def payment_schedule(self, request, pk=None):
         enrollment = self.get_object()
-        if enrollment.payment_schedule_locked and not request.user.is_super_admin:
+        signing_status = getattr(getattr(enrollment, 'rules_signing', None), 'status', RulesSigningRequest.Status.PENDING)
+        rules_already_sent = signing_status in {
+            RulesSigningRequest.Status.SENT,
+            RulesSigningRequest.Status.VIEWED,
+            RulesSigningRequest.Status.SUBMITTED,
+        }
+        if enrollment.payment_schedule_locked and rules_already_sent:
             return Response({'detail': 'Payment schedule is locked after Rules & Regulation sending.'}, status=status.HTTP_403_FORBIDDEN)
         if enrollment.status in Enrollment.FINAL_STATUSES and not request.user.is_super_admin:
             return Response({'detail': 'Only admin can override payment schedules after enrollment confirmation.'}, status=status.HTTP_403_FORBIDDEN)
         if not enrollment.start_date:
             return Response({'detail': 'Course start date is required before finalizing payment schedule.'}, status=status.HTTP_400_BAD_REQUEST)
+        if request.data.get('payment_schedule') is not None:
+            schedule, error = self._clean_manual_payment_schedule(enrollment, request.data.get('payment_schedule'))
+            if error:
+                return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)
+            enrollment.payment_schedule = schedule
+            enrollment.payment_schedule_locked = False
+            enrollment.payment_schedule_finalized_at = None
+            enrollment.save(update_fields=[
+                'payment_schedule',
+                'payment_schedule_locked',
+                'payment_schedule_finalized_at',
+                'updated_at',
+            ])
+            return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
         try:
             split_count = int(request.data.get('split_count') or 2)
         except (TypeError, ValueError):
@@ -7180,12 +7238,13 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment.save(update_fields=['status', 'updated_at'])
         self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
-            'detail': 'Rules & Regulations sent successfully.',
+            'detail': 'Rules & Regulation form sent successfully.',
             'signing_link': signing_link,
             'whatsapp_message': message,
             'phone': enrollment.phone,
             'status': signing.status,
             'enrollment_status': enrollment.status,
+            'enrollment': EnrollmentDetailSerializer(enrollment, context={'request': request}).data,
             **whatsapp_send_payload(log),
         })
 

@@ -102,6 +102,36 @@ function formatDate(value) {
   })
 }
 
+function cloneSchedule(schedule) {
+  return (schedule || []).map((item) => ({
+    label: item.label || '',
+    amount: item.amount ?? '',
+    due_date: item.due_date || '',
+    paid_amount: item.paid_amount || 0,
+    pending_amount: item.pending_amount ?? item.amount ?? 0,
+    status: item.status || 'pending',
+  }))
+}
+
+function scheduleTotal(schedule) {
+  return (schedule || []).reduce((total, item) => total + Number(item.amount || 0), 0)
+}
+
+function StatusBadge({ label, value, tone = 'slate' }) {
+  const tones = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-800',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    cyan: 'border-cyan-200 bg-cyan-50 text-cyan-800',
+  }
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${tones[tone] || tones.slate}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] opacity-70">{label}</p>
+      <p className="mt-1 text-sm font-black">{value}</p>
+    </div>
+  )
+}
+
 function DetailCard({ label, value }) {
   return (
     <div className="rounded-2xl bg-slate-50 p-4">
@@ -152,6 +182,8 @@ export default function EnrollmentDetailPage() {
   const [phone, setPhone] = useState('')
   const [branch, setBranch] = useState('')
   const [editingDetails, setEditingDetails] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState(false)
+  const [scheduleDraft, setScheduleDraft] = useState([])
   const [pendingDetailChanges, setPendingDetailChanges] = useState([])
   const [message, setMessage] = useState('')
   const [rulesErrors, setRulesErrors] = useState({})
@@ -181,6 +213,7 @@ export default function EnrollmentDetailPage() {
         setPhone(data.phone || '')
         const installmentCount = Math.max((data.installment_schedule || []).length - 1, 2)
         setSplitCount(Math.min(installmentCount, 12))
+        setScheduleDraft(cloneSchedule(data.installment_schedule?.length ? data.installment_schedule : buildSchedule(data, data.start_date || '', Math.min(installmentCount, 12))))
       })
       .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
   }, [id, isSuperAdmin])
@@ -207,29 +240,31 @@ export default function EnrollmentDetailPage() {
     setMessage('')
     setRulesErrors({})
     try {
-      const { data: updatedEnrollment } = await api.patch(`/enrollments/${id}/`, {
-        start_date: startDate || null,
-        batch_timing: batchTiming || '',
-      })
-      const { data: scheduleEnrollment } = await api.post(`/enrollments/${id}/payment-schedule/`, {
-        split_count: splitCount,
-      })
+      let currentEnrollment = row
+      if (editingSchedule || !row.payment_schedule?.length) {
+        currentEnrollment = await saveSchedule({ silent: true })
+      } else {
+        const { data } = await api.patch(`/enrollments/${id}/`, {
+          start_date: startDate || null,
+          batch_timing: batchTiming || '',
+        })
+        currentEnrollment = data
+      }
       const { data } = await api.post(`/enrollments/${id}/send-rules-form/`)
-      setRow({
-        ...updatedEnrollment,
-        installment_schedule: scheduleEnrollment.installment_schedule,
-        payment_schedule: scheduleEnrollment.payment_schedule,
+      const nextEnrollment = data.enrollment || {
+        ...currentEnrollment,
         payment_schedule_locked: true,
-        payment_schedule_finalized_at: scheduleEnrollment.payment_schedule_finalized_at,
         rules_signing_status: data.status,
-        status: data.enrollment_status || updatedEnrollment.status,
-        rules_signed_pdf_url: updatedEnrollment.rules_signed_pdf_url,
-      })
+        status: data.enrollment_status || currentEnrollment.status,
+      }
+      setRow(nextEnrollment)
+      setScheduleDraft(cloneSchedule(nextEnrollment.installment_schedule || []))
+      setEditingSchedule(false)
 
       if (data.whatsapp_sent) {
-        setMessage(data.detail || 'Rules & Regulations sent successfully.')
+        setMessage(data.detail || 'Rules & Regulation form sent successfully.')
       } else {
-        setMessage(data.whatsapp_error || data.detail || 'Failed to send Rules & Regulations.')
+        setMessage(data.whatsapp_error || data.detail || 'Failed to send Rules & Regulation form.')
       }
     } catch (error) {
       const data = error.response?.data
@@ -237,7 +272,7 @@ export default function EnrollmentDetailPage() {
         start_date: data?.start_date || '',
         batch_timing: data?.batch_timing || '',
       })
-      setMessage(data?.detail || 'Failed to send Rules & Regulation form.')
+      setMessage(data?.detail ? `Failed to send Rules & Regulation form. ${data.detail}` : error.message || 'Failed to send Rules & Regulation form.')
     } finally {
       setSaving(false)
     }
@@ -294,6 +329,7 @@ export default function EnrollmentDetailPage() {
       setPhone(data.phone || '')
       setStartDate(data.start_date || '')
       setBatchTiming(data.batch_timing || '')
+      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
       setPendingDetailChanges([])
       setEditingDetails(false)
       setRulesErrors({})
@@ -311,6 +347,7 @@ export default function EnrollmentDetailPage() {
     try {
       const { data } = await api.post(`/enrollments/${id}/enroll-student/`)
       setRow(data)
+      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
       setMessage('Student enrollment confirmed.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Signed Rules & Regulation form is required before enrollment.')
@@ -338,6 +375,93 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const saveSchedule = async ({ silent = false } = {}) => {
+    if (!startDate) {
+      const error = new Error('Course start date is required before saving payment schedule.')
+      if (!silent) setMessage(error.message)
+      throw error
+    }
+    const rows = cloneSchedule(scheduleDraft.length ? scheduleDraft : buildSchedule(row, startDate, splitCount))
+    if (!rows.length) {
+      const error = new Error('Payment schedule is required.')
+      if (!silent) setMessage(error.message)
+      throw error
+    }
+    const total = Math.round(scheduleTotal(rows) * 100) / 100
+    if (total !== finalFees) {
+      const error = new Error(`Payment schedule total must match net payable fee (${formatCurrency(finalFees)}).`)
+      if (!silent) setMessage(error.message)
+      throw error
+    }
+    for (const item of rows) {
+      if (item.amount === '' || Number(item.amount) < 0 || !Number.isFinite(Number(item.amount))) {
+        const error = new Error('Each installment needs a valid amount.')
+        if (!silent) setMessage(error.message)
+        throw error
+      }
+      if (!item.due_date) {
+        const error = new Error('Each installment needs a due date.')
+        if (!silent) setMessage(error.message)
+        throw error
+      }
+    }
+    if (!silent) {
+      setSaving(true)
+      setMessage('')
+    }
+    try {
+      await api.patch(`/enrollments/${id}/`, {
+        start_date: startDate || null,
+        batch_timing: batchTiming || '',
+      })
+      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, {
+        payment_schedule: rows.map((item) => ({
+          label: item.label,
+          amount: item.amount,
+          due_date: item.due_date,
+        })),
+      })
+      setRow(data)
+      setStartDate(data.start_date || '')
+      setBatchTiming(data.batch_timing || '')
+      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
+      setEditingSchedule(false)
+      if (!silent) setMessage('Payment schedule saved.')
+      return data
+    } catch (error) {
+      if (!silent) setMessage(apiErrorMessage(error, 'Failed to save payment schedule.'))
+      throw error
+    } finally {
+      if (!silent) setSaving(false)
+    }
+  }
+
+  const regenerateSchedule = async () => {
+    if (!startDate) {
+      setMessage('Course start date is required before regenerating payment schedule.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      await api.patch(`/enrollments/${id}/`, {
+        start_date: startDate || null,
+        batch_timing: batchTiming || '',
+      })
+      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, { split_count: splitCount })
+      setRow(data)
+      setStartDate(data.start_date || '')
+      setBatchTiming(data.batch_timing || '')
+      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
+      setEditingSchedule(false)
+      setMessage('Payment schedule regenerated.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to regenerate payment schedule.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const addSplit = async () => {
     if (!startDate) {
       setMessage('Course start date is required before adding a split.')
@@ -356,6 +480,8 @@ export default function EnrollmentDetailPage() {
       setStartDate(data.start_date || '')
       setBatchTiming(data.batch_timing || '')
       setSplitCount(nextSplitCount)
+      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
+      setEditingSchedule(false)
       setMessage('Payment split updated.')
     } catch (error) {
       setMessage(apiErrorMessage(error, 'Failed to update payment split.'))
@@ -370,7 +496,10 @@ export default function EnrollmentDetailPage() {
     try {
       const endpoint = isSuperAdmin ? `/enrollments/${id}/change-course/` : `/enrollments/${id}/request-course-change/`
       const { data } = await api.post(endpoint, payload)
-      if (isSuperAdmin) setRow(data)
+      if (isSuperAdmin) {
+        setRow(data)
+        setScheduleDraft(cloneSchedule(data.installment_schedule || []))
+      }
       setShowCourseChange(false)
       setMessage(isSuperAdmin ? 'Course changed. Fees and pending installments were recalculated.' : 'Course change request submitted for admin approval.')
     } catch (error) {
@@ -400,14 +529,42 @@ export default function EnrollmentDetailPage() {
   }
 
   const rulesStatus = row.rules_signing_status || 'pending'
-  const canEnroll = rulesStatus === 'submitted'
   const isFinalEnrollment = ['enrolled', 'active', 'completed', 'dropped', 'on_hold'].includes(row.status)
   const canAddToPayment = ['enrolled', 'active', 'completed'].includes(row.status) && !row.payment_info
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
-  const schedule = row.installment_schedule?.length && !editingDetails
-    ? row.installment_schedule
-    : buildSchedule(row, startDate, splitCount)
-  const canAddSplit = finalFees >= 7000 && splitCount < 12 && !row.payment_schedule_locked && !isFinalEnrollment
+  const savedSchedule = row.installment_schedule?.length ? row.installment_schedule : []
+  const schedule = editingSchedule
+    ? scheduleDraft
+    : (savedSchedule.length ? savedSchedule : cloneSchedule(buildSchedule(row, startDate, splitCount)))
+  const hasSavedSchedule = Boolean(row.payment_schedule?.length)
+  const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
+  const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
+  const canManageSchedule = !scheduleIsReadOnly
+  const canAddSplit = finalFees >= 7000 && splitCount < 12 && canManageSchedule
+  const canEnroll = hasSavedSchedule && rulesStatus === 'submitted'
+  const scheduleBadge = scheduleIsReadOnly || row.payment_schedule_locked
+    ? 'Locked'
+    : hasSavedSchedule
+      ? 'Saved'
+      : 'Draft'
+  const rulesBadge = {
+    pending: 'Not Sent',
+    sent: 'Sent',
+    viewed: 'Viewed',
+    submitted: 'Signed',
+  }[rulesStatus] || statusLabel(rulesStatus)
+  const enrollmentBadge = isFinalEnrollment ? 'Enrolled' : canEnroll ? 'Ready to Enroll' : 'Pending'
+  const enrollBlockedReason = isFinalEnrollment
+    ? ''
+    : !hasSavedSchedule
+      ? 'Configure and save the payment schedule.'
+      : rulesStatus === 'pending'
+        ? 'Send the Rules & Regulation form.'
+        : rulesStatus === 'sent' || rulesStatus === 'viewed'
+          ? 'Waiting for Rules & Regulation submission.'
+          : rulesStatus !== 'submitted'
+            ? 'Waiting for Rules & Regulation submission.'
+            : ''
 
   return (
     <div className="space-y-6">
@@ -502,12 +659,14 @@ export default function EnrollmentDetailPage() {
           <div>
             <h2 className="text-xl font-black tracking-tight text-slate-950">Rules & Regulation Form</h2>
             <p className="mt-2 text-sm text-slate-500">
-              Send the signing link after confirming the course start date and batch timing.
+              Configure and save the payment schedule, send the signing link, then enroll after the candidate submits the form.
             </p>
           </div>
-          <span className="w-fit rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-            {rulesStatus}
-          </span>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <StatusBadge label="Payment Schedule" value={scheduleBadge} tone={scheduleBadge === 'Locked' ? 'amber' : scheduleBadge === 'Saved' ? 'emerald' : 'slate'} />
+            <StatusBadge label="Rules Form" value={rulesBadge} tone={rulesStatus === 'submitted' ? 'emerald' : rulesSentOrBeyond ? 'cyan' : 'slate'} />
+            <StatusBadge label="Enrollment" value={enrollmentBadge} tone={isFinalEnrollment || canEnroll ? 'emerald' : 'amber'} />
+          </div>
         </div>
         {editingDetails && (
           <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -566,24 +725,94 @@ export default function EnrollmentDetailPage() {
         </div>
         <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Schedule</p>
-            {canAddSplit && (
-              <button
-                type="button"
-                onClick={addSplit}
-                disabled={saving}
-                className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
-              >
-                Add Split
-              </button>
-            )}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Schedule</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Total: {formatCurrency(scheduleTotal(schedule))} / {formatCurrency(finalFees)}
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
+              {canManageSchedule && !editingSchedule && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScheduleDraft(cloneSchedule(schedule.length ? schedule : buildSchedule(row, startDate, splitCount)))
+                    setEditingSchedule(true)
+                    setMessage('')
+                  }}
+                  disabled={saving}
+                  className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Edit Schedule
+                </button>
+              )}
+              {canManageSchedule && (
+                <button
+                  type="button"
+                  onClick={regenerateSchedule}
+                  disabled={saving}
+                  className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Regenerate Schedule
+                </button>
+              )}
+              {canAddSplit && (
+                <button
+                  type="button"
+                  onClick={addSplit}
+                  disabled={saving}
+                  className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                >
+                  Add Split
+                </button>
+              )}
+              {canManageSchedule && editingSchedule && (
+                <button
+                  type="button"
+                  onClick={() => saveSchedule()}
+                  disabled={saving}
+                  className="w-fit rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                >
+                  Save Schedule
+                </button>
+              )}
+            </div>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {schedule.map((item) => (
+            {schedule.map((item, index) => (
               <div key={item.label} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200">
                 <p className="text-sm font-bold text-slate-950">{item.label}</p>
-                <p className="mt-2 text-xl font-black text-slate-950">{formatCurrency(item.amount)}</p>
-                <p className="mt-1 text-sm text-slate-500">Due: {item.due_date || 'Set course start date'}</p>
+                {editingSchedule ? (
+                  <div className="mt-3 space-y-3">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.amount}
+                      onChange={(event) => {
+                        const next = cloneSchedule(scheduleDraft)
+                        next[index] = { ...next[index], amount: event.target.value }
+                        setScheduleDraft(next)
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                    />
+                    <input
+                      type="date"
+                      value={item.due_date || ''}
+                      onChange={(event) => {
+                        const next = cloneSchedule(scheduleDraft)
+                        next[index] = { ...next[index], due_date: event.target.value }
+                        setScheduleDraft(next)
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="mt-2 text-xl font-black text-slate-950">{formatCurrency(item.amount)}</p>
+                    <p className="mt-1 text-sm text-slate-500">Due: {item.due_date || 'Set course start date'}</p>
+                  </>
+                )}
                 <div className="mt-3 space-y-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                   <p>Paid: {formatCurrency(item.paid_amount || 0)}</p>
                   <p>Pending: {formatCurrency(item.pending_amount ?? item.amount)}</p>
@@ -595,15 +824,20 @@ export default function EnrollmentDetailPage() {
           <p className="mt-3 text-sm text-slate-500">
             This schedule is auto-filled into the Rules & Regulation PDF and payment tracking.
           </p>
+          {scheduleIsReadOnly && (
+            <p className="mt-2 text-sm font-semibold text-amber-800">
+              Payment schedule is locked after Rules & Regulation sending.
+            </p>
+          )}
         </div>
         {message && <p className="mt-4 text-sm text-slate-600">{message}</p>}
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button
             onClick={sendRulesForm}
-            disabled={saving}
+            disabled={saving || isFinalEnrollment || rulesStatus === 'submitted'}
             className="inline-flex min-w-[230px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
-            {saving ? 'Sending...' : 'Send Rules & Regulation Form'}
+            {saving ? 'Sending...' : rulesSentOrBeyond && rulesStatus !== 'submitted' ? 'Resend Rules & Regulation Form' : 'Send Rules & Regulation Form'}
           </button>
           <button
             onClick={enrollStudent}
@@ -647,8 +881,8 @@ export default function EnrollmentDetailPage() {
           )}
         </div>
         {!canEnroll && (
-          <p className="mt-3 text-sm text-slate-500">
-            The Enroll Student button becomes available after the candidate submits the signed form.
+          <p className="mt-3 text-sm font-semibold text-slate-600">
+            {enrollBlockedReason || 'Enrollment is already completed.'}
           </p>
         )}
       </section>
