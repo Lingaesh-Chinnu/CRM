@@ -1181,6 +1181,29 @@ class RulesSigningRequest(TimeStampedModel):
         return f'Rules signing for {self.enrollment.student_number} - {self.get_status_display()}'
 
 
+class EnrollmentRulesResetHistory(models.Model):
+    enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='rules_reset_history')
+    reset_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='rules_process_resets')
+    reset_at = models.DateTimeField(default=timezone.now, db_index=True)
+    reason = models.TextField()
+    previous_rules_status = models.CharField(max_length=20, blank=True)
+    previous_signing_token = models.CharField(max_length=80, blank=True)
+    previous_schedule_locked = models.BooleanField(default=False)
+    previous_payment_schedule = models.JSONField(default=list, blank=True)
+    previous_signed = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = 'enrollment_rules_reset_history'
+        ordering = ['-reset_at', '-id']
+        indexes = [
+            models.Index(fields=['enrollment', 'reset_at'], name='enr_rules_reset_enr_at_idx'),
+            models.Index(fields=['reset_by', 'reset_at'], name='enr_rules_reset_by_at_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.enrollment_id} reset at {self.reset_at:%Y-%m-%d %H:%M}'
+
+
 class BranchTransferRequest(TimeStampedModel):
     """Request to convert a walk-in into an enrollment under another branch."""
 

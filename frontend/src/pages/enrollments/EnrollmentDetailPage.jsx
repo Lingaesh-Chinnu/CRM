@@ -462,6 +462,39 @@ export default function EnrollmentDetailPage() {
     }
   }
 
+  const resetEnrollmentWorkflow = async () => {
+    if (!isSuperAdmin) return
+    const signedWarning = rulesStatus === 'submitted'
+      ? ' This enrollment already has a signed form; the old signed link will be invalidated and a new form must be sent.'
+      : ''
+    const confirmed = window.confirm(`This will unlock the payment schedule, reset the Rules Form to Not Sent, and require a fresh Rules & Regulation form to be sent.${signedWarning} Continue?`)
+    if (!confirmed) return
+    const reason = window.prompt('Enter reset reason')
+    if (!String(reason || '').trim()) {
+      setMessage('Reset reason is required.')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/enrollments/${id}/reset-enrollment-workflow/`, { reason: reason.trim() })
+      const nextEnrollment = data.enrollment || data
+      setRow(nextEnrollment)
+      setStartDate(nextEnrollment.start_date || '')
+      setBatchTiming(nextEnrollment.batch_timing || '')
+      const nextSplitCount = Math.max((nextEnrollment.installment_schedule || []).length - 1, 2)
+      setSplitCount(Math.min(nextSplitCount, 12))
+      setScheduleDraft(cloneSchedule(nextEnrollment.installment_schedule?.length ? nextEnrollment.installment_schedule : buildSchedule(nextEnrollment, nextEnrollment.start_date || '', Math.min(nextSplitCount, 12))))
+      setEditingSchedule(true)
+      setEditingDetails(true)
+      setMessage(data.detail || 'Enrollment workflow reset.')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to reset enrollment workflow.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const addSplit = async () => {
     if (!startDate) {
       setMessage('Course start date is required before adding a split.')
@@ -554,6 +587,7 @@ export default function EnrollmentDetailPage() {
     submitted: 'Signed',
   }[rulesStatus] || statusLabel(rulesStatus)
   const enrollmentBadge = isFinalEnrollment ? 'Enrolled' : canEnroll ? 'Ready to Enroll' : 'Pending'
+  const canResetRulesProcess = isSuperAdmin && !isFinalEnrollment && (rulesSentOrBeyond || row.payment_schedule_locked)
   const enrollBlockedReason = isFinalEnrollment
     ? ''
     : !hasSavedSchedule
@@ -594,6 +628,16 @@ export default function EnrollmentDetailPage() {
             <span className="font-semibold text-slate-900">{row.phone || 'Phone not added'}</span>
           )}
         </div>
+        {canResetRulesProcess && (
+          <button
+            type="button"
+            onClick={resetEnrollmentWorkflow}
+            disabled={saving}
+            className="mt-5 w-fit rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
+          >
+            Reset Enrollment Workflow
+          </button>
+        )}
       </section>
       <CounselorReassignmentPanel
         enrollment={row}
@@ -887,6 +931,24 @@ export default function EnrollmentDetailPage() {
         )}
       </section>
       <CourseChangeHistorySection history={row.course_change_history || []} />
+      {row.rules_reset_history?.length > 0 && (
+        <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
+          <h2 className="text-xl font-black tracking-tight text-slate-950">Rules Reset History</h2>
+          <div className="mt-4 space-y-3">
+            {row.rules_reset_history.map((item) => (
+              <div key={item.id} className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                <p className="font-semibold text-slate-950">
+                  {formatDate(item.reset_at)} by {item.reset_by_name || 'Admin'}
+                </p>
+                <p className="mt-1">{item.reason}</p>
+                <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  Previous: {item.previous_rules_status || 'pending'} | Schedule {item.previous_schedule_locked ? 'Locked' : 'Unlocked'}{item.previous_signed ? ' | Signed form reset' : ''}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {pendingDetailChanges.length > 0 && (
         <ConfirmChangesModal
           changes={pendingDetailChanges}

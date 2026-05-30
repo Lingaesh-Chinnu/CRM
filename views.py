@@ -78,7 +78,7 @@ from crm.models import (
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
-    EnrollmentCounselorChangeHistory,
+    EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
     get_default_installment_schedule, get_enrollment_installment_schedule, normalize_installment_schedule,
     enrollment_payable_fee, PAYMENT_SPLIT_THRESHOLD,
@@ -7111,6 +7111,70 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
+
+    def _reset_enrollment_workflow(self, request, enrollment_pk):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can reset the enrollment workflow.'}, status=status.HTTP_403_FORBIDDEN)
+        reason = str(request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'reason': 'Reset reason is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            enrollment = (
+                Enrollment.objects
+                .select_for_update()
+                .select_related('branch', 'course')
+                .get(pk=enrollment_pk)
+            )
+            if enrollment.status in Enrollment.FINAL_STATUSES:
+                return Response({'detail': 'Cannot reset enrollment workflow after enrollment is completed.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            signing = RulesSigningRequest.objects.select_for_update().filter(enrollment=enrollment).first()
+            previous_rules_status = signing.status if signing else RulesSigningRequest.Status.PENDING
+            previous_token = str(signing.token) if signing else ''
+            previous_signed = bool(
+                signing and (
+                    signing.status == RulesSigningRequest.Status.SUBMITTED
+                    or signing.signed_pdf
+                    or signing.signed_pdf_file
+                )
+            )
+            EnrollmentRulesResetHistory.objects.create(
+                enrollment=enrollment,
+                reset_by=request.user,
+                reason=reason,
+                previous_rules_status=previous_rules_status,
+                previous_signing_token=previous_token,
+                previous_schedule_locked=enrollment.payment_schedule_locked,
+                previous_payment_schedule=enrollment.payment_schedule or [],
+                previous_signed=previous_signed,
+            )
+            if signing:
+                signing.delete()
+
+            enrollment.payment_schedule_locked = False
+            enrollment.payment_schedule_finalized_at = None
+            enrollment.status = Enrollment.Status.PENDING_RULES
+            enrollment.save(update_fields=[
+                'payment_schedule_locked',
+                'payment_schedule_finalized_at',
+                'status',
+                'updated_at',
+            ])
+
+        enrollment.refresh_from_db()
+        return Response({
+            'detail': 'Enrollment workflow reset. Edit the payment schedule and send a fresh Rules & Regulation form.',
+            'enrollment': EnrollmentDetailSerializer(enrollment, context={'request': request}).data,
+        })
+
+    @action(detail=True, methods=['post'], url_path='reset-rules-process')
+    def reset_rules_process(self, request, pk=None):
+        return self._reset_enrollment_workflow(request, self.get_object().pk)
+
+    @action(detail=True, methods=['post'], url_path='reset-enrollment-workflow')
+    def reset_enrollment_workflow(self, request, pk=None):
+        return self._reset_enrollment_workflow(request, self.get_object().pk)
 
     @action(detail=True, methods=['post'], url_path='send-rules-form')
     def send_rules_form(self, request, pk=None):

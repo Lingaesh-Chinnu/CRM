@@ -1289,7 +1289,7 @@ class DiscountSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/enrollments/serializers.py
 # ============================================================
-from crm.models import CounselorChangeRequest, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, RulesSigningRequest, get_enrollment_installment_schedule
+from crm.models import CounselorChangeRequest, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, RulesSigningRequest, get_enrollment_installment_schedule
 
 
 class CourseChangeHistorySerializer(serializers.ModelSerializer):
@@ -1346,6 +1346,19 @@ class EnrollmentCounselorChangeHistorySerializer(serializers.ModelSerializer):
             'id', 'old_counselor', 'old_counselor_name', 'new_counselor',
             'new_counselor_name', 'changed_by', 'changed_by_name', 'reason',
             'changed_at',
+        ]
+
+
+class EnrollmentRulesResetHistorySerializer(serializers.ModelSerializer):
+    reset_by_name = serializers.CharField(source='reset_by.full_name', read_only=True)
+
+    class Meta:
+        model = EnrollmentRulesResetHistory
+        fields = [
+            'id', 'reset_by', 'reset_by_name', 'reset_at', 'reason',
+            'previous_rules_status', 'previous_signing_token',
+            'previous_schedule_locked', 'previous_payment_schedule',
+            'previous_signed',
         ]
 
 
@@ -1442,6 +1455,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     course_change_history = CourseChangeHistorySerializer(many=True, read_only=True)
     counselor_change_history = EnrollmentCounselorChangeHistorySerializer(many=True, read_only=True)
     counselor_change_requests = CounselorChangeRequestSerializer(many=True, read_only=True)
+    rules_reset_history = EnrollmentRulesResetHistorySerializer(many=True, read_only=True)
     counselor_id = serializers.SerializerMethodField()
     counselor_name = serializers.SerializerMethodField()
     counselor_user = serializers.SerializerMethodField()
