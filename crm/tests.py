@@ -698,6 +698,105 @@ class PublicWalkInFormTests(APITestCase):
         ])
         self.assertEqual(response.data['installment_summary'][0]['label'], 'Full Payment')
 
+    def test_course_fee_7000_uses_full_payment_only(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Exact Threshold Student',
+            phone='9000000133',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=7000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 2000, 'due_date': '2026-05-12'},
+            ],
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': 'Full Payment', 'amount': 7000, 'due_date': '2026-05-11'},
+        ])
+
+    def test_payment_schedule_allows_added_installment_before_rules_send(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Dynamic Installment Student',
+            phone='9000000134',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=25000,
+            discount_amount=0,
+            status=Enrollment.Status.PENDING_RULES,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/payment-schedule/', {
+            'payment_schedule': [
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 6667, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 6667, 'due_date': '2026-06-12'},
+                {'label': '3rd Installment', 'amount': 6666, 'due_date': '2026-07-12'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['payment_schedule_locked'], False)
+        schedule = [
+            {key: item[key] for key in ['label', 'amount', 'due_date']}
+            for item in response.data['installment_schedule']
+        ]
+        self.assertEqual(schedule, [
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 6667, 'due_date': '2026-05-12'},
+            {'label': '2nd Installment', 'amount': 6667, 'due_date': '2026-06-12'},
+            {'label': '3rd Installment', 'amount': 6666, 'due_date': '2026-07-12'},
+        ])
+
+    def test_payment_schedule_rejects_zero_and_mismatched_amounts(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Invalid Schedule Student',
+            phone='9000000135',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=25000,
+            discount_amount=0,
+            status=Enrollment.Status.PENDING_RULES,
+        )
+        self.client.force_authenticate(self.staff)
+
+        zero_response = self.client.post(f'/api/enrollments/{enrollment.id}/payment-schedule/', {
+            'payment_schedule': [
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 0, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 20000, 'due_date': '2026-06-12'},
+            ],
+        }, format='json')
+        mismatch_response = self.client.post(f'/api/enrollments/{enrollment.id}/payment-schedule/', {
+            'payment_schedule': [
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10000, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 10001, 'due_date': '2026-06-12'},
+            ],
+        }, format='json')
+
+        self.assertEqual(zero_response.status_code, 400)
+        self.assertEqual(zero_response.data['detail'], 'Installment amount must be greater than zero.')
+        self.assertEqual(mismatch_response.status_code, 400)
+        self.assertEqual(mismatch_response.data['detail'], 'Installment total cannot exceed course fee.')
+
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,

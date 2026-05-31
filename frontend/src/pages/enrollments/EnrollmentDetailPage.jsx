@@ -55,7 +55,7 @@ function buildSchedule(row, startDate, splitCount = 2) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
   const courseStartDate = startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
-  if (finalFees < 7000) {
+  if (finalFees <= 7000) {
     return [{ label: 'Full Payment', amount: finalFees, due_date: enrollmentDate, paid_amount: 0, pending_amount: finalFees, status: 'pending' }]
   }
   let dueDate = courseStartDate
@@ -65,6 +65,40 @@ function buildSchedule(row, startDate, splitCount = 2) {
     dueDate = addOneMonth(dueDate) || dueDate
   })
   return rows
+}
+
+function recalculateInstallmentPlan(row, startDate, rows, installmentCount) {
+  const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
+  if (finalFees <= 7000) return buildSchedule(row, startDate, 2)
+
+  const existingRows = cloneSchedule(rows)
+  const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
+  let dueDate = existingRows[1]?.due_date || startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
+  const count = Math.min(Math.max(Number(installmentCount || existingRows.length - 1 || 2), 2), 12)
+  const amounts = splitAmount(finalFees - 5000, count)
+  const nextRows = [{
+    label: 'Enrollment',
+    amount: 5000,
+    due_date: existingRows[0]?.due_date || enrollmentDate,
+    paid_amount: existingRows[0]?.paid_amount || 0,
+    pending_amount: 5000,
+    status: existingRows[0]?.status || 'pending',
+  }]
+
+  amounts.forEach((amount, index) => {
+    const existing = existingRows[index + 1] || {}
+    nextRows.push({
+      label: installmentLabel(index + 1),
+      amount,
+      due_date: existing.due_date || dueDate,
+      paid_amount: existing.paid_amount || 0,
+      pending_amount: amount,
+      status: existing.status || 'pending',
+    })
+    dueDate = addOneMonth(existing.due_date || dueDate) || dueDate
+  })
+
+  return nextRows
 }
 
 function formatCurrency(value) {
@@ -115,6 +149,21 @@ function cloneSchedule(schedule) {
 
 function scheduleTotal(schedule) {
   return (schedule || []).reduce((total, item) => total + Number(item.amount || 0), 0)
+}
+
+function scheduleValidation(schedule, finalFees) {
+  const rows = schedule || []
+  if (!rows.length) return 'Payment schedule is required.'
+  if (finalFees <= 7000 && rows.length !== 1) return 'Courses up to Rs 7,000 use Full Payment only.'
+  for (const item of rows) {
+    const amount = Number(item.amount)
+    if (!Number.isFinite(amount) || amount <= 0) return 'Each installment amount must be greater than zero.'
+    if (!item.due_date) return 'Each installment needs a due date.'
+  }
+  const total = Math.round(scheduleTotal(rows) * 100) / 100
+  if (total > finalFees) return 'Installment total cannot exceed course fee.'
+  if (total !== finalFees) return 'Total planned amount must match course fee.'
+  return ''
 }
 
 function StatusBadge({ label, value, tone = 'slate' }) {
@@ -387,23 +436,11 @@ export default function EnrollmentDetailPage() {
       if (!silent) setMessage(error.message)
       throw error
     }
-    const total = Math.round(scheduleTotal(rows) * 100) / 100
-    if (total !== finalFees) {
-      const error = new Error(`Payment schedule total must match net payable fee (${formatCurrency(finalFees)}).`)
+    const validationError = scheduleValidation(rows, finalFees)
+    if (validationError) {
+      const error = new Error(validationError)
       if (!silent) setMessage(error.message)
       throw error
-    }
-    for (const item of rows) {
-      if (item.amount === '' || Number(item.amount) < 0 || !Number.isFinite(Number(item.amount))) {
-        const error = new Error('Each installment needs a valid amount.')
-        if (!silent) setMessage(error.message)
-        throw error
-      }
-      if (!item.due_date) {
-        const error = new Error('Each installment needs a due date.')
-        if (!silent) setMessage(error.message)
-        throw error
-      }
     }
     if (!silent) {
       setSaving(true)
@@ -495,32 +532,21 @@ export default function EnrollmentDetailPage() {
     }
   }
 
-  const addSplit = async () => {
+  const addInstallment = () => {
     if (!startDate) {
-      setMessage('Course start date is required before adding a split.')
+      setMessage('Course start date is required before adding an installment.')
       return
     }
-    setSaving(true)
-    setMessage('')
-    try {
-      await api.patch(`/enrollments/${id}/`, {
-        start_date: startDate || null,
-        batch_timing: batchTiming || '',
-      })
-      const nextSplitCount = Math.min(Math.max(Number(splitCount || 2) + 1, 3), 12)
-      const { data } = await api.post(`/enrollments/${id}/payment-schedule/`, { split_count: nextSplitCount })
-      setRow(data)
-      setStartDate(data.start_date || '')
-      setBatchTiming(data.batch_timing || '')
-      setSplitCount(nextSplitCount)
-      setScheduleDraft(cloneSchedule(data.installment_schedule || []))
-      setEditingSchedule(false)
-      setMessage('Payment split updated.')
-    } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to update payment split.'))
-    } finally {
-      setSaving(false)
+    if (finalFees <= 7000) {
+      setMessage('Courses up to Rs 7,000 use Full Payment only.')
+      return
     }
+    const currentRows = scheduleDraft.length ? scheduleDraft : schedule
+    const nextSplitCount = Math.min(Math.max(currentRows.length, 2), 12)
+    setSplitCount(nextSplitCount)
+    setScheduleDraft(recalculateInstallmentPlan(row, startDate, currentRows, nextSplitCount))
+    setEditingSchedule(true)
+    setMessage('')
   }
 
   const submitCourseChange = async (payload) => {
@@ -569,11 +595,14 @@ export default function EnrollmentDetailPage() {
   const schedule = editingSchedule
     ? scheduleDraft
     : (savedSchedule.length ? savedSchedule : cloneSchedule(buildSchedule(row, startDate, splitCount)))
+  const plannedTotal = Math.round(scheduleTotal(schedule) * 100) / 100
+  const remainingPlanned = Math.round((finalFees - plannedTotal) * 100) / 100
+  const currentScheduleError = scheduleValidation(schedule, finalFees)
   const hasSavedSchedule = Boolean(row.payment_schedule?.length)
   const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
   const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
   const canManageSchedule = !scheduleIsReadOnly
-  const canAddSplit = finalFees >= 7000 && splitCount < 12 && canManageSchedule
+  const canAddInstallment = finalFees > 7000 && schedule.length < 13 && canManageSchedule
   const canEnroll = hasSavedSchedule && rulesStatus === 'submitted'
   const scheduleBadge = scheduleIsReadOnly || row.payment_schedule_locked
     ? 'Locked'
@@ -771,9 +800,13 @@ export default function EnrollmentDetailPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Schedule</p>
-              <p className="mt-1 text-sm text-slate-500">
-                Total: {formatCurrency(scheduleTotal(schedule))} / {formatCurrency(finalFees)}
-              </p>
+              <div className="mt-2 grid gap-2 text-sm font-semibold text-slate-700 sm:grid-cols-3">
+                <p>Total Course Fee: {formatCurrency(finalFees)}</p>
+                <p>Total Planned: {formatCurrency(plannedTotal)}</p>
+                <p className={remainingPlanned === 0 ? 'text-emerald-700' : remainingPlanned < 0 ? 'text-rose-700' : 'text-amber-700'}>
+                  Remaining: {formatCurrency(remainingPlanned)}
+                </p>
+              </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
               {canManageSchedule && !editingSchedule && (
@@ -800,21 +833,21 @@ export default function EnrollmentDetailPage() {
                   Regenerate Schedule
                 </button>
               )}
-              {canAddSplit && (
+              {canAddInstallment && (
                 <button
                   type="button"
-                  onClick={addSplit}
+                  onClick={addInstallment}
                   disabled={saving}
                   className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  Add Split
+                  Add Installment
                 </button>
               )}
               {canManageSchedule && editingSchedule && (
                 <button
                   type="button"
                   onClick={() => saveSchedule()}
-                  disabled={saving}
+                  disabled={saving || Boolean(currentScheduleError)}
                   className="w-fit rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
                 >
                   Save Schedule
@@ -830,12 +863,12 @@ export default function EnrollmentDetailPage() {
                   <div className="mt-3 space-y-3">
                     <input
                       type="number"
-                      min="0"
+                      min="0.01"
                       step="0.01"
                       value={item.amount}
                       onChange={(event) => {
                         const next = cloneSchedule(scheduleDraft)
-                        next[index] = { ...next[index], amount: event.target.value }
+                        next[index] = { ...next[index], amount: event.target.value, pending_amount: event.target.value }
                         setScheduleDraft(next)
                       }}
                       className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
@@ -865,6 +898,11 @@ export default function EnrollmentDetailPage() {
               </div>
             ))}
           </div>
+          {currentScheduleError && editingSchedule && (
+            <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+              {currentScheduleError}
+            </p>
+          )}
           <p className="mt-3 text-sm text-slate-500">
             This schedule is auto-filled into the Rules & Regulation PDF and payment tracking.
           </p>
@@ -878,7 +916,7 @@ export default function EnrollmentDetailPage() {
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button
             onClick={sendRulesForm}
-            disabled={saving || isFinalEnrollment || rulesStatus === 'submitted'}
+            disabled={saving || isFinalEnrollment || rulesStatus === 'submitted' || Boolean(currentScheduleError)}
             className="inline-flex min-w-[230px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
             {saving ? 'Sending...' : rulesSentOrBeyond && rulesStatus !== 'submitted' ? 'Resend Rules & Regulation Form' : 'Send Rules & Regulation Form'}

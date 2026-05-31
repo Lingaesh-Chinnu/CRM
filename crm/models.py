@@ -878,7 +878,7 @@ def get_default_installment_schedule(enrollment, split_count=2):
     enrollment_date = enrollment.enrollment_date
     first_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
 
-    if final_fees < PAYMENT_SPLIT_THRESHOLD:
+    if final_fees <= PAYMENT_SPLIT_THRESHOLD:
         return [{
             'label': 'Full Payment',
             'amount': final_fees,
@@ -896,7 +896,7 @@ def get_default_installment_schedule(enrollment, split_count=2):
 
 
 def get_enrollment_installment_schedule(enrollment):
-    if int(round(float(enrollment_payable_fee(enrollment) or 0))) < PAYMENT_SPLIT_THRESHOLD:
+    if int(round(float(enrollment_payable_fee(enrollment) or 0))) <= PAYMENT_SPLIT_THRESHOLD:
         return normalize_installment_schedule(get_default_installment_schedule(enrollment))
     if getattr(enrollment, 'payment_schedule', None):
         return normalize_installment_schedule(enrollment.payment_schedule)
@@ -904,7 +904,7 @@ def get_enrollment_installment_schedule(enrollment):
 
 
 def get_payment_installment_schedule(payment):
-    if int(round(float(payment.total_fees or enrollment_payable_fee(payment.enrollment) or 0))) < PAYMENT_SPLIT_THRESHOLD:
+    if int(round(float(payment.total_fees or enrollment_payable_fee(payment.enrollment) or 0))) <= PAYMENT_SPLIT_THRESHOLD:
         return normalize_installment_schedule(get_default_installment_schedule(payment.enrollment))
     if payment.manual_installment_schedule:
         return payment.manual_installment_schedule

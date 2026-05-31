@@ -6835,6 +6835,10 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return None, 'Payment schedule is required.'
         cleaned = []
         total = Decimal('0')
+        expected_total = Decimal(str(enrollment_payable_fee(enrollment) or 0)).quantize(Decimal('0.01'))
+        full_payment_only = expected_total <= Decimal(str(PAYMENT_SPLIT_THRESHOLD))
+        if full_payment_only and len(schedule) != 1:
+            return None, 'Courses up to Rs 7,000 must use Full Payment only.'
         for index, item in enumerate(schedule, start=1):
             if not isinstance(item, dict):
                 return None, 'Each payment schedule row must be valid.'
@@ -6848,8 +6852,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 amount = Decimal(str(raw_amount))
             except (InvalidOperation, TypeError, ValueError):
                 return None, 'Installment amount must be numeric.'
-            if not amount.is_finite() or amount < 0:
-                return None, 'Installment amount must be a positive number.'
+            if not amount.is_finite() or amount <= 0:
+                return None, 'Installment amount must be greater than zero.'
             due_date = parse_date(str(raw_due_date))
             if not due_date:
                 return None, 'Each installment needs a valid due date.'
@@ -6860,20 +6864,26 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
                 'due_date': due_date.isoformat(),
             })
-        expected_total = Decimal(str(enrollment_payable_fee(enrollment) or 0)).quantize(Decimal('0.01'))
+        if total.quantize(Decimal('0.01')) > expected_total:
+            return None, 'Installment total cannot exceed course fee.'
         if total.quantize(Decimal('0.01')) != expected_total:
             return None, 'Payment schedule total must match net payable fee.'
+        if full_payment_only and cleaned[0]['label'] != 'Full Payment':
+            cleaned[0]['label'] = 'Full Payment'
         return normalize_installment_schedule(cleaned), ''
 
     def _ensure_enrollment_schedule(self, enrollment, split_count=None, lock=False):
         payable_fee = int(round(float(enrollment_payable_fee(enrollment) or 0)))
-        if payable_fee < PAYMENT_SPLIT_THRESHOLD or split_count is not None or not enrollment.payment_schedule:
+        if payable_fee <= PAYMENT_SPLIT_THRESHOLD or split_count is not None or not enrollment.payment_schedule:
             schedule, error = self._schedule_from_split_count(enrollment, split_count or 2)
             if error:
                 raise ValueError(error)
             enrollment.payment_schedule = schedule
         else:
-            enrollment.payment_schedule = normalize_installment_schedule(enrollment.payment_schedule)
+            schedule, error = self._clean_manual_payment_schedule(enrollment, enrollment.payment_schedule)
+            if error:
+                raise ValueError(error)
+            enrollment.payment_schedule = schedule
         update_fields = ['payment_schedule', 'updated_at']
         if lock and not enrollment.payment_schedule_locked:
             enrollment.payment_schedule_locked = True
@@ -8401,8 +8411,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 return Response({'detail': 'Installment amount must be numeric.'}, status=400)
             if not amount.is_finite():
                 return Response({'detail': 'Installment amount must be numeric.'}, status=400)
-            if amount < 0:
-                return Response({'detail': 'Installment amount cannot be negative.'}, status=400)
+            if amount <= 0:
+                return Response({'detail': 'Installment amount must be greater than zero.'}, status=400)
             amount = amount.quantize(Decimal('0.01'))
             parsed_due_date = parse_date(str(due_date))
             if not parsed_due_date:
