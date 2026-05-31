@@ -5,6 +5,8 @@ from rest_framework.test import APITestCase
 from unittest import mock
 from decimal import Decimal
 from datetime import timedelta
+import base64
+import io
 
 from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn
 
@@ -696,6 +698,78 @@ class PublicWalkInFormTests(APITestCase):
         ])
         self.assertEqual(response.data['installment_summary'][0]['label'], 'Full Payment')
 
+    def test_public_rules_signing_processes_photo_signature_and_pdf(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Signing Candidate',
+            phone='9000000130',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'selfie': image_data, 'signature': image_data},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['detail'], 'Rules & Regulation form submitted successfully.')
+        signing.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(enrollment.status, Enrollment.Status.RULES_SUBMITTED)
+        self.assertTrue(signing.selfie_image_file)
+        self.assertTrue(signing.signature_image_file)
+        self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
+
+    def test_public_rules_signing_hides_dependency_errors(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Dependency Candidate',
+            phone='9000000131',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+
+        with mock.patch('views.validate_data_image', side_effect=RuntimeError('Pillow is required to process form images.')):
+            with self.assertLogs('views', level='ERROR') as logs:
+                response = self.client.post(
+                    f'/api/public/rules-sign/{signing.token}/',
+                    {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
+                    format='json',
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['detail'], 'Unable to process form at the moment. Please contact support.')
+        self.assertNotIn('Pillow', response.data['detail'])
+        self.assertTrue(any('Rules signing image validation failed' in entry for entry in logs.output))
+
     def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -801,6 +875,65 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(payment.status, Payment.Status.PARTIAL)
         self.assertEqual(Decimal(str(response.data['total_fees'])), Decimal('38900.00'))
         self.assertEqual(Decimal(str(response.data['balance'])), Decimal('33900.00'))
+
+    def test_generated_bills_use_current_payment_and_cumulative_paid_amounts(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Bill Calculation Student',
+            phone='9000000132',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '2nd Installment', 'amount': 3000, 'due_date': '2026-05-20'},
+                {'label': 'Final Installment', 'amount': 7900, 'due_date': '2026-06-12'},
+            ],
+        )
+        self.client.force_authenticate(self.admin)
+
+        expected = [
+            (Decimal('5000.00'), Decimal('5000.00'), Decimal('10900.00'), '1st Installment'),
+            (Decimal('3000.00'), Decimal('8000.00'), Decimal('7900.00'), '2nd Installment'),
+            (Decimal('7900.00'), Decimal('15900.00'), Decimal('0.00'), 'Final Installment'),
+        ]
+        installments = []
+        for index, (amount, paid_amount, pending_amount, label) in enumerate(expected, start=1):
+            installment = PaymentInstallment.objects.create(
+                payment=payment,
+                enrollment=enrollment,
+                amount=amount,
+                installment_index=index,
+                installment_label=label,
+                payment_date='2026-05-11',
+                payment_mode=PaymentInstallment.Mode.CASH,
+            )
+
+            response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+
+            self.assertEqual(response.status_code, 200)
+            installment.refresh_from_db()
+            snapshot = installment.document_snapshot
+            self.assertEqual(Decimal(snapshot['payment_amount']), amount)
+            self.assertEqual(Decimal(snapshot['paid_amount']), paid_amount)
+            self.assertEqual(Decimal(snapshot['pending_amount']), pending_amount)
+            self.assertEqual(Decimal(snapshot['pending_amount']), Decimal(snapshot['total_fees']) - Decimal(snapshot['paid_amount']))
+            self.assertEqual(len(snapshot['payment_schedule']), 3)
+            self.assertNotIn('Next Payment Schedule', installment.document_html)
+            installments.append(installment)
+
+        from views import PaymentInstallmentViewSet
+
+        pdf_bytes = PaymentInstallmentViewSet()._build_document_pdf(installments[1])
+        self.assertTrue(pdf_bytes.startswith(b'%PDF'))
 
     def test_counselor_change_requires_counselor_and_admin_approval(self):
         new_counselor = User.objects.create_user(

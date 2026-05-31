@@ -207,6 +207,7 @@ def linked_candidate_records(candidate):
 User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
+FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
 
 
 def missing_model_columns(model, field_names):
@@ -1313,8 +1314,8 @@ def validate_data_image(image_data, label):
         from PIL import Image
         Image.open(io.BytesIO(image_bytes)).verify()
         return image_bytes
-    except ImportError:
-        raise RuntimeError('Pillow is required to process form images. Please install Pillow in the active virtual environment.')
+    except ImportError as exc:
+        raise RuntimeError('Form image processing dependency is unavailable.') from exc
     except ValueError:
         raise
     except Exception:
@@ -1325,7 +1326,7 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
     try:
         from PIL import Image, ImageDraw, ImageFont, ImageOps
     except ImportError as exc:
-        raise RuntimeError('Pillow is required to generate signed Rules & Regulation PDFs.') from exc
+        raise RuntimeError('Signed Rules & Regulation PDF generation dependency is unavailable.') from exc
 
     width, height = 1240, 1754
     margin = 80
@@ -6451,7 +6452,8 @@ class PublicRulesSigningView(APIView):
             selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
             signature_bytes = validate_data_image(request.data.get('signature'), 'Signature')
         except RuntimeError as exc:
-            return Response({'detail': str(exc)}, status=503)
+            logger.exception('Rules signing image validation failed for token=%s.', token)
+            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
         except ValueError as exc:
             detail = str(exc)
             if detail == 'Identity photo is required.':
@@ -6464,7 +6466,12 @@ class PublicRulesSigningView(APIView):
             try:
                 pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
             except RuntimeError as exc:
-                return Response({'detail': str(exc)}, status=503)
+                logger.exception(
+                    'Rules signing PDF generation failed for token=%s enrollment_id=%s.',
+                    token,
+                    enrollment.id,
+                )
+                return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
             signing.selfie_image_file = selfie_bytes
             signing.signature_image_file = signature_bytes
             signing.signed_pdf_file = pdf_bytes
@@ -6483,7 +6490,19 @@ class PublicRulesSigningView(APIView):
                 'updated_at',
             ])
         except (OperationalError, ProgrammingError):
-            return Response({'detail': 'Rules signing storage is not ready. Please run database migrations and try again.'}, status=503)
+            logger.exception(
+                'Rules signing storage failed for token=%s enrollment_id=%s.',
+                token,
+                enrollment.id,
+            )
+            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
+        except Exception:
+            logger.exception(
+                'Rules signing submission failed for token=%s enrollment_id=%s.',
+                token,
+                enrollment.id,
+            )
+            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
         if enrollment.status != Enrollment.Status.ENROLLED:
             enrollment.status = Enrollment.Status.RULES_SUBMITTED
             enrollment.save(update_fields=['status', 'updated_at'])
@@ -8671,7 +8690,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         generated_at = installment.bill_generated_at or timezone.now()
         cutoff = generated_at if is_bill else timezone.now()
         historical_installments = payment.installments.filter(created_at__lte=cutoff)
+        current_payment_amount = Decimal(str(installment.amount or 0))
         paid_amount = historical_installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        paid_amount = Decimal(str(paid_amount or 0))
+        if installment.pk and not historical_installments.filter(pk=installment.pk).exists():
+            paid_amount += current_payment_amount
         total_fees = Decimal(str(payment.total_fees or 0))
         balance = max(total_fees - paid_amount, Decimal('0'))
         included = [installment] if is_bill else [installment]
@@ -8693,7 +8716,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'reference_number': installment.reference_number or 'Not provided',
             'payment_date': self._receipt_date(installment.payment_date),
             'installment_label': installment.installment_label or str(installment.installment_index),
-            'payment_amount': self._snapshot_decimal(installment.amount),
+            'payment_amount': self._snapshot_decimal(current_payment_amount),
             'total_fees': self._snapshot_decimal(total_fees),
             'paid_amount': self._snapshot_decimal(paid_amount),
             'balance': self._snapshot_decimal(balance),
@@ -8764,28 +8787,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 </tr>
                 """
             )
-        next_schedule = snapshot.get('next_payment_schedule')
-        if next_schedule:
-            next_schedule_html = f"""
-              <table>
-                <tbody>
-                  <tr>
-                    <th>Next Installment</th>
-                    <td>{escape(str(next_schedule.get('label') or 'Next Installment'))}</td>
-                  </tr>
-                  <tr>
-                    <th>Due Date</th>
-                    <td>{escape(str(next_schedule.get('due_date') or 'Not set'))}</td>
-                  </tr>
-                  <tr>
-                    <th>Next Payment Amount</th>
-                    <td class="amount">Rs {Decimal(str(next_schedule.get('pending_amount') or 0)):,.2f}</td>
-                  </tr>
-                </tbody>
-              </table>
-            """
-        else:
-            next_schedule_html = '<div class="fully-paid">Course Fees Fully Paid</div>'
         logo_src = ''
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
@@ -8853,7 +8854,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       .badge {{ display: inline-block; min-width: 70px; border-radius: 999px; padding: 2px 8px; text-align: center; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; line-height: 1.25; }}
       .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
       .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
-      .fully-paid {{ border: 1px solid #86EFAC; background: #DCFCE7; color: #166534; padding: 10px 12px; font-size: 12px; font-weight: 800; text-align: center; }}
       .generated-info {{ padding: 18px 24px; background: white; color: #334155; font-size: 11.5px; line-height: 1.8; }}
       .generated-info p {{ margin: 0; }}
       .generated-info .info-label {{ font-weight: 700; }}
@@ -8918,10 +8918,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             {''.join(schedule_rows)}
           </tbody>
         </table>
-      </div>
-      <div class="section">
-        <h2>Next Payment Schedule</h2>
-        {next_schedule_html}
       </div>
       <div class="generated-info">
         <p><span class="info-label">GENERATED BY:</span> <span class="info-value">Indra Institute of Education</span></p>
@@ -9136,27 +9132,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 x += col_width_item
             y_row += 48
 
-        next_y = y_row + 48
-        draw.text((margin, next_y), 'NEXT PAYMENT SCHEDULE', fill='black', font=title_font)
-        next_y += 34
-        next_schedule = snapshot.get('next_payment_schedule')
-        if next_schedule:
-            rows = [
-                ('Next Installment', next_schedule.get('label') or 'Next Installment'),
-                ('Due Date', next_schedule.get('due_date') or 'Not set'),
-                ('Next Payment Amount', f"Rs {Decimal(str(next_schedule.get('pending_amount') or 0)):,.2f}"),
-            ]
-            for label, value in rows:
-                draw.rectangle((margin, next_y, width - margin, next_y + 44), fill='white', outline=border)
-                draw.text((margin + 12, next_y + 14), label, fill=slate, font=label_font)
-                draw.text((margin + 310, next_y + 14), str(value), fill='black', font=font)
-                next_y += 44
-        else:
-            draw.rectangle((margin, next_y, width - margin, next_y + 52), fill='#DCFCE7', outline='#86EFAC')
-            draw.text((margin + 12, next_y + 18), 'Course Fees Fully Paid', fill='#166534', font=title_font)
-            next_y += 52
-
-        info_y = next_y + 48
+        info_y = y_row + 64
         draw.line((margin, info_y - 24, width - margin, info_y - 24), fill=border, width=2)
         draw.text((margin, info_y), 'GENERATED BY: Indra Institute of Education', fill=slate, font=font)
         draw.text((margin, info_y + 34), f"GENERATED ON: {self._receipt_date(snapshot.get('generated_at'))}", fill=slate, font=font)
