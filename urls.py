@@ -30,7 +30,7 @@ from views import (
     BranchPerformanceComparisonReportView, PerformanceHubView, AdminAnalyticsDashboardView,
     PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
-    RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView,
+    RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView, PublicRulesReviewPdfView,
 )
 
 router = DefaultRouter()
@@ -104,6 +104,7 @@ urlpatterns = [
     path('rules-sign/<uuid:token>/', rules_sign_view, name='rules_sign_legacy'),
     path('rules-signed-pdf/<int:enrollment_id>/', RulesSignedPdfView.as_view(), name='rules_signed_pdf'),
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
+    path('public/rules-review-pdf/<uuid:token>/', PublicRulesReviewPdfView.as_view(), name='public_rules_review_pdf'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
     re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),

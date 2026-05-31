@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -135,6 +136,7 @@ def log_whatsapp_message(
     sent_by=None,
     related_model='',
     related_id=None,
+    provider='wati',
 ):
     from crm.models import WhatsAppMessage
 
@@ -147,7 +149,7 @@ def log_whatsapp_message(
         sent_by=sent_by,
         related_model=related_model,
         related_id=related_id,
-        provider='wati',
+        provider=provider,
         provider_response=result if isinstance(result, dict) else {'result': str(result)},
     )
     if result.get('error'):
@@ -164,6 +166,58 @@ def log_whatsapp_message(
         log.sent_at = timezone.now()
     log.save()
     return log
+
+
+def whatsapp_web_url(phone, message):
+    normalized_phone = normalize_candidate_phone(phone)
+    if not normalized_phone:
+        return ''
+    return f'https://wa.me/{normalized_phone}?text={quote(message or "")}'
+
+
+def send_whatsapp_message(
+    *,
+    candidate_name,
+    phone,
+    message_type,
+    message_body,
+    sent_by=None,
+    related_model='',
+    related_id=None,
+    provider='whatsapp_web',
+):
+    """Provider abstraction for WhatsApp sending.
+
+    Current provider opens WhatsApp Web. WATI can be wired here later without
+    changing callers.
+    """
+    normalized_phone = normalize_candidate_phone(phone)
+    if not normalized_phone:
+        return log_whatsapp_message(
+            candidate_name=candidate_name,
+            phone=str(phone or ''),
+            message_type=message_type,
+            message_body=message_body,
+            result={'error': 'Invalid candidate phone number.'},
+            sent_by=sent_by,
+            related_model=related_model,
+            related_id=related_id,
+            provider=provider,
+        )
+
+    url = whatsapp_web_url(normalized_phone, message_body)
+    return log_whatsapp_message(
+        candidate_name=candidate_name,
+        phone=normalized_phone,
+        message_type=message_type,
+        message_body=message_body,
+        result={'provider': provider, 'whatsapp_url': url},
+        template_name='WhatsApp Web',
+        sent_by=sent_by,
+        related_model=related_model,
+        related_id=related_id,
+        provider=provider,
+    )
 
 
 def send_candidate_message(

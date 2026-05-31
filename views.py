@@ -67,7 +67,7 @@ import logging
 import re
 import uuid
 import zipfile
-from whatsapp_service import send_candidate_document, send_candidate_message
+from whatsapp_service import send_candidate_document, send_candidate_message, send_whatsapp_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
@@ -426,11 +426,14 @@ def active_whatsapp_template(template_type):
 
 
 def whatsapp_send_payload(log):
+    provider_response = log.provider_response or {}
     return {
         'whatsapp_sent': log.status == WhatsAppMessage.MsgStatus.SENT,
         'whatsapp_status': log.status,
         'whatsapp_error': log.error_message,
         'whatsapp_log_id': log.id,
+        'whatsapp_url': provider_response.get('whatsapp_url') or provider_response.get('url') or '',
+        'whatsapp_provider': log.provider,
     }
 
 
@@ -1322,7 +1325,7 @@ def validate_data_image(image_data, label):
         raise ValueError(f'Invalid {label.lower()} image.')
 
 
-def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submitted_at=None):
+def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, submitted_at=None):
     try:
         from PIL import Image, ImageDraw, ImageFont, ImageOps
     except ImportError as exc:
@@ -1476,11 +1479,16 @@ def build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes=None, submi
         add_page()
     y += 18
     draw.text((margin, y), 'Student Signature', fill=ink, font=section_font)
-    signature = Image.open(io.BytesIO(signature_bytes)).convert('RGBA')
-    signature.thumbnail((420, 180))
-    page.paste(signature, (margin, y + 46), signature)
-    submitted_value = submitted_at or timezone.now()
-    draw.text((margin, y + 225), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill=muted, font=small_font)
+    if signature_bytes:
+        signature = Image.open(io.BytesIO(signature_bytes)).convert('RGBA')
+        signature.thumbnail((420, 180))
+        page.paste(signature, (margin, y + 46), signature)
+        submitted_value = submitted_at or timezone.now()
+        draw.text((margin, y + 225), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill=muted, font=small_font)
+    else:
+        line_y = y + 150
+        draw.line((margin, line_y, margin + 420, line_y), fill=border, width=2)
+        draw.text((margin, line_y + 24), 'To be signed by the student', fill=muted, font=small_font)
     pages.append(page)
 
     output = io.BytesIO()
@@ -6620,6 +6628,27 @@ class PublicRulesSignedPdfView(APIView):
         return response
 
 
+class PublicRulesReviewPdfView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def get(self, request, token):
+        signing = RulesSigningRequest.objects.select_related(
+            'enrollment__course',
+            'enrollment__branch',
+        ).filter(token=token).first()
+        if not signing:
+            return Response({'detail': 'Invalid signing link.'}, status=404)
+        try:
+            pdf_bytes = build_signed_rules_pdf(signing.enrollment)
+        except Exception:
+            logger.exception('Rules review PDF generation failed for token=%s.', token)
+            return Response({'detail': 'Unable to generate Rules & Regulation PDF at the moment.'}, status=503)
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{proof_filename(signing.enrollment)}"'
+        return response
+
+
 # ============================================================
 # backend/apps/enrollments/views.py
 # ============================================================
@@ -7226,89 +7255,75 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
         signing_path = f'{app_url(f"IIE-Rules-Regulations/{signing.token}")}/'
         signing_link = request.build_absolute_uri(signing_path)
-        default_message = (
-            f'Hi {enrollment.name},\n\n'
-            'Please review and sign the IIE Rules & Regulations form using the link below:\n\n'
-            'IIE Rules & Regulations Form:\n'
-            f'{signing_link}\n\n'
-            'After signing, our team will proceed with your enrollment.\n\n'
+        rules_pdf_url = request.build_absolute_uri(f'{app_url(f"public/rules-review-pdf/{signing.token}")}/')
+        message = (
+            f'Dear {enrollment.name},\n\n'
+            'Welcome to Indra Institute of Education.\n\n'
+            'Please review and sign the attached Rules & Regulations form.\n\n'
+            'Thank you.\n'
             '-Team IIE'
         )
-        template = active_whatsapp_template(WhatsAppTemplate.TemplateType.RULES_FORM_LINK)
-        payment = getattr(enrollment, 'payment', None)
-        values = {
-            'student_name': enrollment.name,
-            'candidate_name': enrollment.name,
-            'course_name': enrollment.course.name if enrollment.course else '',
-            'branch_name': enrollment.branch.name if enrollment.branch else '',
-            'phone_number': enrollment.phone,
-            'total_fee': whatsapp_currency(enrollment_payable_fee(enrollment)),
-            'paid_amount': whatsapp_currency(payment.paid_amount if payment else 0),
-            'pending_amount': whatsapp_currency((payment.balance if payment else enrollment_payable_fee(enrollment))),
-            'due_date': whatsapp_date(enrollment.start_date),
-            'next_payment_date': whatsapp_date(payment.next_payment_date if payment else None),
-            'rules_link': signing_link,
-            'institute_name': 'IIE',
-        }
-        message = render_whatsapp_template(template.message_body if template else default_message, values)
+        try:
+            build_signed_rules_pdf(enrollment)
+        except Exception as exc:
+            logger.exception('Rules & Regulations PDF generation failed: enrollment_id=%s', enrollment.id)
+            return Response(
+                {'detail': f'Unable to generate Rules & Regulation PDF: {exc}'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
         logger.info(
-            'Rules & Regulations send requested: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s enrollment_id=%s',
+            'Rules & Regulations WhatsApp Web handoff requested: candidate_id=%s candidate_name=%s candidate_phone=%s enrollment_id=%s',
             enrollment.student_number or enrollment.id,
             enrollment.name,
             enrollment.phone,
-            template.id if template else None,
             enrollment.id,
         )
         try:
-            log = send_candidate_message(
+            log = send_whatsapp_message(
                 candidate_name=enrollment.name,
                 phone=enrollment.phone,
                 message_type=WhatsAppMessage.MsgType.RULES_FORM_LINK,
-                message_body=template.message_body if template else default_message,
-                template=template,
-                values=values,
+                message_body=message,
                 sent_by=request.user,
                 related_model='enrollment',
                 related_id=enrollment.id,
-                dedupe=False,
             )
         except Exception as exc:
             logger.exception(
-                'Rules & Regulations send crashed: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s enrollment_id=%s',
+                'Rules & Regulations WhatsApp Web handoff crashed: candidate_id=%s candidate_name=%s candidate_phone=%s enrollment_id=%s',
                 enrollment.student_number or enrollment.id,
                 enrollment.name,
                 enrollment.phone,
-                template.id if template else None,
                 enrollment.id,
             )
             return Response({
-                'detail': f'Rules & Regulations send failed: {exc}',
+                'detail': f'Unable to prepare WhatsApp Web message: {exc}',
                 'signing_link': signing_link,
+                'rules_pdf_url': rules_pdf_url,
                 'whatsapp_message': message,
                 'phone': enrollment.phone,
                 'status': signing.status,
                 'enrollment_status': enrollment.status,
-            }, status=status.HTTP_502_BAD_GATEWAY)
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         logger.info(
-            'Rules & Regulations send response: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
+            'Rules & Regulations WhatsApp Web handoff response: candidate_id=%s candidate_name=%s candidate_phone=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
             enrollment.student_number or enrollment.id,
             enrollment.name,
             enrollment.phone,
-            template.id if template else None,
             log.id,
             log.status,
             log.error_message,
             log.provider_response,
         )
         if log.status != WhatsAppMessage.MsgStatus.SENT:
-            detail = log.error_message or 'WhatsApp provider did not accept the Rules & Regulations message.'
+            detail = log.error_message or 'Unable to prepare WhatsApp Web message.'
             logger.error(
-                'Rules & Regulations send failed: candidate_id=%s candidate_name=%s candidate_phone=%s template_id=%s whatsapp_log_id=%s error=%s response=%s',
+                'Rules & Regulations WhatsApp Web handoff failed: candidate_id=%s candidate_name=%s candidate_phone=%s whatsapp_log_id=%s error=%s response=%s',
                 enrollment.student_number or enrollment.id,
                 enrollment.name,
                 enrollment.phone,
-                template.id if template else None,
                 log.id,
                 detail,
                 log.provider_response,
@@ -7316,12 +7331,13 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'detail': detail,
                 'signing_link': signing_link,
+                'rules_pdf_url': rules_pdf_url,
                 'whatsapp_message': message,
                 'phone': enrollment.phone,
                 'status': signing.status,
                 'enrollment_status': enrollment.status,
                 **whatsapp_send_payload(log),
-            }, status=status.HTTP_502_BAD_GATEWAY)
+            }, status=status.HTTP_400_BAD_REQUEST)
         signing.status = RulesSigningRequest.Status.SENT
         signing.sent_at = timezone.now()
         signing.sent_by = request.user
@@ -7331,8 +7347,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment.save(update_fields=['status', 'updated_at'])
         self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
-            'detail': 'Rules & Regulation form sent successfully.',
+            'detail': 'Rules & Regulation form generated successfully. Attach the PDF and send via WhatsApp.',
             'signing_link': signing_link,
+            'rules_pdf_url': rules_pdf_url,
             'whatsapp_message': message,
             'phone': enrollment.phone,
             'status': signing.status,

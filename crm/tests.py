@@ -8,7 +8,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn
+from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
 
 
 User = get_user_model()
@@ -796,6 +796,46 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(zero_response.data['detail'], 'Installment amount must be greater than zero.')
         self.assertEqual(mismatch_response.status_code, 400)
         self.assertEqual(mismatch_response.data['detail'], 'Installment total cannot exceed course fee.')
+
+    @override_settings(WATI_API_URL='', WATI_ACCESS_TOKEN='')
+    def test_send_rules_form_uses_whatsapp_web_without_wati_configuration(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules WhatsApp Web Student',
+            phone='9876543210',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=25000,
+            discount_amount=0,
+            status=Enrollment.Status.PENDING_RULES,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10000, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 10000, 'due_date': '2026-06-12'},
+            ],
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/send-rules-form/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data['detail'],
+            'Rules & Regulation form generated successfully. Attach the PDF and send via WhatsApp.',
+        )
+        self.assertIn('https://wa.me/919876543210?', response.data['whatsapp_url'])
+        self.assertIn('Dear Rules WhatsApp Web Student', response.data['whatsapp_message'])
+        self.assertIn('/public/rules-review-pdf/', response.data['rules_pdf_url'])
+        self.assertNotIn('WATI is not configured', str(response.data))
+        enrollment.refresh_from_db()
+        self.assertTrue(enrollment.payment_schedule_locked)
+        self.assertEqual(enrollment.rules_signing.status, RulesSigningRequest.Status.SENT)
+        log = WhatsAppMessage.objects.get(related_model='enrollment', related_id=enrollment.id)
+        self.assertEqual(log.provider, 'whatsapp_web')
+        self.assertEqual(log.status, WhatsAppMessage.MsgStatus.SENT)
 
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
