@@ -824,11 +824,14 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.data['detail'],
-            'Rules & Regulation form generated successfully. Attach the PDF and send via WhatsApp.',
+            'Rules & Regulations link generated successfully.',
         )
         self.assertIn('https://wa.me/919876543210?', response.data['whatsapp_url'])
         self.assertIn('Dear Rules WhatsApp Web Student', response.data['whatsapp_message'])
-        self.assertIn('/public/rules-review-pdf/', response.data['rules_pdf_url'])
+        self.assertIn('/rules-sign/', response.data['signing_link'])
+        self.assertIn(response.data['signing_link'], response.data['whatsapp_message'])
+        self.assertIn('/rules-sign/', response.data['whatsapp_url'])
+        self.assertNotIn('about:blank', str(response.data))
         self.assertNotIn('WATI is not configured', str(response.data))
         enrollment.refresh_from_db()
         self.assertTrue(enrollment.payment_schedule_locked)

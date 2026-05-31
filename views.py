@@ -7253,31 +7253,23 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
-        signing_path = f'{app_url(f"IIE-Rules-Regulations/{signing.token}")}/'
+        signing_path = f'{app_url(f"rules-sign/{signing.token}")}/'
         signing_link = request.build_absolute_uri(signing_path)
-        rules_pdf_url = request.build_absolute_uri(f'{app_url(f"public/rules-review-pdf/{signing.token}")}/')
         message = (
             f'Dear {enrollment.name},\n\n'
             'Welcome to Indra Institute of Education.\n\n'
-            'Please review and sign the attached Rules & Regulations form.\n\n'
+            'Please review and sign your Rules & Regulations form using the link below:\n\n'
+            f'{signing_link}\n\n'
             'Thank you.\n'
             '-Team IIE'
         )
-        try:
-            build_signed_rules_pdf(enrollment)
-        except Exception as exc:
-            logger.exception('Rules & Regulations PDF generation failed: enrollment_id=%s', enrollment.id)
-            return Response(
-                {'detail': f'Unable to generate Rules & Regulation PDF: {exc}'},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
 
         logger.info(
-            'Rules & Regulations WhatsApp Web handoff requested: candidate_id=%s candidate_name=%s candidate_phone=%s enrollment_id=%s',
+            'Rules & Regulations link generated: student_id=%s enrollment_id=%s token=%s url=%s',
             enrollment.student_number or enrollment.id,
-            enrollment.name,
-            enrollment.phone,
             enrollment.id,
+            signing.token,
+            signing_link,
         )
         try:
             log = send_whatsapp_message(
@@ -7300,7 +7292,6 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'detail': f'Unable to prepare WhatsApp Web message: {exc}',
                 'signing_link': signing_link,
-                'rules_pdf_url': rules_pdf_url,
                 'whatsapp_message': message,
                 'phone': enrollment.phone,
                 'status': signing.status,
@@ -7308,10 +7299,10 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         logger.info(
-            'Rules & Regulations WhatsApp Web handoff response: candidate_id=%s candidate_name=%s candidate_phone=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
+            'Rules & Regulations WhatsApp message status: student_id=%s token=%s url=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
             enrollment.student_number or enrollment.id,
-            enrollment.name,
-            enrollment.phone,
+            signing.token,
+            signing_link,
             log.id,
             log.status,
             log.error_message,
@@ -7331,7 +7322,6 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'detail': detail,
                 'signing_link': signing_link,
-                'rules_pdf_url': rules_pdf_url,
                 'whatsapp_message': message,
                 'phone': enrollment.phone,
                 'status': signing.status,
@@ -7347,9 +7337,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment.save(update_fields=['status', 'updated_at'])
         self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
-            'detail': 'Rules & Regulation form generated successfully. Attach the PDF and send via WhatsApp.',
+            'detail': 'Rules & Regulations link generated successfully.',
             'signing_link': signing_link,
-            'rules_pdf_url': rules_pdf_url,
             'whatsapp_message': message,
             'phone': enrollment.phone,
             'status': signing.status,

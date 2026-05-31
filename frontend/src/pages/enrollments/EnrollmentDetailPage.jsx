@@ -288,11 +288,7 @@ export default function EnrollmentDetailPage() {
     setSaving(true)
     setMessage('')
     setRulesErrors({})
-    let rulesPdfWindow = null
-    let whatsappWindow = null
     try {
-      rulesPdfWindow = window.open('', '_blank')
-      whatsappWindow = window.open('', '_blank')
       let currentEnrollment = row
       if (editingSchedule || !row.payment_schedule?.length) {
         currentEnrollment = await saveSchedule({ silent: true })
@@ -314,25 +310,8 @@ export default function EnrollmentDetailPage() {
       setScheduleDraft(cloneSchedule(nextEnrollment.installment_schedule || []))
       setEditingSchedule(false)
 
-      if (data.rules_pdf_url) {
-        if (rulesPdfWindow) {
-          rulesPdfWindow.opener = null
-          rulesPdfWindow.location.href = data.rules_pdf_url
-        } else {
-          window.open(data.rules_pdf_url, '_blank', 'noopener,noreferrer')
-        }
-      } else if (rulesPdfWindow) {
-        rulesPdfWindow.close()
-      }
       if (data.whatsapp_url) {
-        if (whatsappWindow) {
-          whatsappWindow.opener = null
-          whatsappWindow.location.href = data.whatsapp_url
-        } else {
-          window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
-        }
-      } else if (whatsappWindow) {
-        whatsappWindow.close()
+        window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
       }
 
       if (data.whatsapp_sent || data.whatsapp_url) {
@@ -341,8 +320,6 @@ export default function EnrollmentDetailPage() {
         setMessage(data.whatsapp_error || data.detail || 'Failed to send Rules & Regulation form.')
       }
     } catch (error) {
-      if (rulesPdfWindow) rulesPdfWindow.close()
-      if (whatsappWindow) whatsappWindow.close()
       const data = error.response?.data
       setRulesErrors({
         start_date: data?.start_date || '',
