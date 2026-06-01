@@ -65,6 +65,7 @@ import base64
 import io
 import logging
 import re
+import textwrap
 import uuid
 import zipfile
 from whatsapp_service import send_candidate_document, send_candidate_message, send_whatsapp_message
@@ -2073,6 +2074,157 @@ def usage_summary_for(user, start_date, end_date):
     return total_seconds, daily_usage, points, average_seconds, seconds_to_duration(average_seconds), most_active_day
 
 
+def report_money(value):
+    try:
+        amount = Decimal(str(value or 0))
+    except (InvalidOperation, TypeError, ValueError):
+        amount = Decimal('0')
+    return f'Rs {amount:,.0f}'
+
+
+def report_percent(value):
+    return f'{float(value or 0):.2f}%'
+
+
+def build_monthly_consolidated_report_pdf(payload):
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, height = 1240, 1754
+    margin = 70
+    pages = []
+    title_font = ImageFont.load_default()
+    header_font = ImageFont.load_default()
+    normal_font = ImageFont.load_default()
+    small_font = ImageFont.load_default()
+
+    def new_page():
+        page = Image.new('RGB', (width, height), 'white')
+        return page, ImageDraw.Draw(page), margin
+
+    def footer(draw, number):
+        draw.line((margin, height - 70, width - margin, height - 70), fill='#e2e8f0', width=2)
+        draw.text((margin, height - 50), 'Indra Institute of Education - Management Review Copy', fill='#475569', font=small_font)
+        draw.text((width - margin - 80, height - 50), f'Page {number}', fill='#475569', font=small_font)
+
+    def draw_table(draw, y, headers, rows, widths, max_rows=20):
+        x = margin
+        draw.rectangle((margin, y, width - margin, y + 44), fill='#f1f5f9')
+        for index, header in enumerate(headers):
+            draw.text((x + 10, y + 14), str(header), fill='#334155', font=small_font)
+            x += widths[index]
+        y += 44
+        for row in rows[:max_rows]:
+            x = margin
+            draw.line((margin, y, width - margin, y), fill='#e2e8f0', width=1)
+            for index, value in enumerate(row):
+                draw.text((x + 10, y + 11), str(value)[:32], fill='#0f172a', font=small_font)
+                x += widths[index]
+            y += 38
+        return y + 20
+
+    def draw_trend(draw, y, title, points, color='#334155'):
+        draw.text((margin, y), title, fill='#0f172a', font=header_font)
+        y += 38
+        chart_x, chart_y, chart_w, chart_h = margin, y, width - (margin * 2), 190
+        draw.rectangle((chart_x, chart_y, chart_x + chart_w, chart_y + chart_h), outline='#cbd5e1', width=2)
+        values = [float(item.get('value') or 0) for item in points]
+        if values:
+            max_value = max(max(values), 1)
+            coords = []
+            for index, value in enumerate(values):
+                x = chart_x + (index / max(len(values) - 1, 1)) * chart_w
+                point_y = chart_y + chart_h - (value / max_value) * (chart_h - 20) - 10
+                coords.append((x, point_y))
+            for first, second in zip(coords, coords[1:]):
+                draw.line((first[0], first[1], second[0], second[1]), fill=color, width=4)
+            for x, point_y in coords:
+                draw.ellipse((x - 5, point_y - 5, x + 5, point_y + 5), fill=color)
+        else:
+            draw.text((chart_x + 20, chart_y + 80), 'No data recorded for this period.', fill='#64748b', font=normal_font)
+        return y + chart_h + 35
+
+    period = payload.get('period') or {}
+    start_date = period.get('start')
+    month_text = start_date.strftime('%B %Y') if hasattr(start_date, 'strftime') else str(start_date or '')
+    generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p')
+    metrics = payload.get('metrics') or {}
+    payment = payload.get('payment_summary') or {}
+
+    page, draw, y = new_page()
+    draw.text((margin, y), 'IIE Monthly Consolidated Report', fill='#0f172a', font=title_font)
+    y += 54
+    draw.text((margin, y), 'Indra Institute of Education', fill='#334155', font=header_font)
+    y += 36
+    draw.text((margin, y), f'Month: {month_text}   Generated: {generated_at}', fill='#475569', font=normal_font)
+    y += 58
+    cards = [
+        ('Total Leads', metrics.get('leads', 0)),
+        ('Total Walk-ins', metrics.get('walkins', 0)),
+        ('Total Enrollments', metrics.get('enrollments', 0)),
+        ('Total Revenue', report_money(metrics.get('revenue', 0))),
+        ('Conversion Ratio', report_percent(metrics.get('conversion_ratio', 0))),
+        ('Total Collection', report_money(payment.get('total_collection', 0))),
+        ('Pending Payments', payment.get('pending_payments', 0)),
+        ('Overdue Payments', payment.get('overdue_payments', 0)),
+        ('Collection Ratio', report_percent(payment.get('collection_ratio', 0))),
+    ]
+    card_w, card_h = 340, 105
+    for index, (label, value) in enumerate(cards):
+        col = index % 3
+        row = index // 3
+        x = margin + col * (card_w + 40)
+        cy = y + row * (card_h + 28)
+        draw.rectangle((x, cy, x + card_w, cy + card_h), outline='#cbd5e1', width=2)
+        draw.text((x + 18, cy + 18), label, fill='#64748b', font=small_font)
+        draw.text((x + 18, cy + 54), str(value), fill='#0f172a', font=header_font)
+    y += 3 * (card_h + 28) + 25
+    draw.text((margin, y), 'Branch Summary', fill='#0f172a', font=header_font)
+    y += 44
+    branch_rows = [[
+        row.get('branch_name', '-'), row.get('leads', 0), row.get('walkins', 0),
+        row.get('enrollments', 0), report_money(row.get('revenue', 0)), report_percent(row.get('conversion_ratio', 0)),
+    ] for row in payload.get('branch_comparison', [])]
+    draw_table(draw, y, ['Branch', 'Leads', 'Walk-ins', 'Enrolls', 'Revenue', 'Conv.'], branch_rows, [260, 130, 150, 150, 210, 140], 12)
+    footer(draw, 1)
+    pages.append(page)
+
+    page, draw, y = new_page()
+    draw.text((margin, y), 'Counselor Summary', fill='#0f172a', font=header_font)
+    y += 44
+    counselor_rows = [[
+        row.get('name', '-'), row.get('leads', 0), row.get('walkins', 0),
+        row.get('enrollments', 0), report_percent(row.get('conversion_ratio', 0)), report_money(row.get('revenue', 0)),
+    ] for row in payload.get('counselor_comparison', [])]
+    y = draw_table(draw, y, ['Counselor', 'Leads', 'Walk-ins', 'Enrolls', 'Conv.', 'Revenue'], counselor_rows, [310, 110, 140, 140, 140, 220], 24)
+    y += 15
+    draw.text((margin, y), 'Payment Summary', fill='#0f172a', font=header_font)
+    y += 42
+    draw_table(draw, y, ['Metric', 'Value'], [
+        ['Total Collection', report_money(payment.get('total_collection', 0))],
+        ['Pending Payments', payment.get('pending_payments', 0)],
+        ['Pending Amount', report_money(payment.get('pending_amount', 0))],
+        ['Overdue Payments', payment.get('overdue_payments', 0)],
+        ['Collection Ratio', report_percent(payment.get('collection_ratio', 0))],
+    ], [520, 420], 10)
+    footer(draw, 2)
+    pages.append(page)
+
+    page, draw, y = new_page()
+    draw.text((margin, y), 'Monthly Trends', fill='#0f172a', font=header_font)
+    y += 46
+    trends = payload.get('trends') or {}
+    y = draw_trend(draw, y, 'Leads Trend', trends.get('leads') or [], '#1d4ed8')
+    y = draw_trend(draw, y, 'Walk-ins Trend', trends.get('walkins') or [], '#b45309')
+    y = draw_trend(draw, y, 'Enrollment Trend', trends.get('enrollments') or [], '#047857')
+    draw_trend(draw, y, 'Revenue Trend', trends.get('revenue') or [], '#6d28d9')
+    footer(draw, 3)
+    pages.append(page)
+
+    buffer = io.BytesIO()
+    pages[0].save(buffer, format='PDF', save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
+
+
 def highest_enrollment_day(scope, start_date, end_date):
     rows = (
         scope['enrollments']
@@ -2448,7 +2600,30 @@ class AdminAnalyticsDashboardView(APIView):
             f'{abs(pct_change(metrics["revenue"], previous["revenue"])):.0f}% {"improvement" if pct_change(metrics["revenue"], previous["revenue"]) >= 0 else "decline"} from last month.',
             f'Conversion rate is {metrics["conversion_ratio"]:.2f}% for the selected period.',
         ]
-        return Response({
+        payments = Payment.objects.select_related('enrollment', 'enrollment__branch', 'enrollment__course').filter(enrollment__is_deleted=False)
+        branch = request.query_params.get('branch')
+        user_id = request.query_params.get('user')
+        course = request.query_params.get('course')
+        source = request.query_params.get('source')
+        if branch:
+            payments = payments.filter(enrollment__branch_id=branch)
+        if user_id:
+            payments = payments.filter(Q(enrollment__created_by_id=user_id) | Q(enrollment__enrolled_by_id=user_id))
+        if course:
+            payments = payments.filter(enrollment__course_id=course)
+        if source:
+            payments = payments.filter(enrollment__source=source)
+        collection = PaymentInstallment.objects.filter(
+            payment__in=payments,
+            payment_date__gte=start_date,
+            payment_date__lte=end_date,
+            document_type=PaymentInstallment.DocumentType.RECEIPT,
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        pending_payments = payments.filter(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL])
+        pending_amount = sum((payment.balance for payment in pending_payments), Decimal('0'))
+        overdue_payments = pending_payments.filter(next_payment_date__isnull=False, next_payment_date__lte=end_date)
+        collection_ratio = ratio(collection, Decimal(str(collection or 0)) + pending_amount)
+        payload = {
             'period': {'start': start_date, 'end': end_date},
             'metrics': metrics,
             'changes': {
@@ -2483,7 +2658,21 @@ class AdminAnalyticsDashboardView(APIView):
                 'sources': [{'value': value, 'label': label} for value, label in Lead.Source.choices],
             },
             'insights': insights,
-        })
+            'payment_summary': {
+                'total_collection': collection,
+                'pending_payments': pending_payments.count(),
+                'pending_amount': pending_amount,
+                'overdue_payments': overdue_payments.count(),
+                'collection_ratio': collection_ratio,
+            },
+        }
+        if str(request.query_params.get('download') or '').lower() in ('1', 'true', 'pdf'):
+            pdf_bytes = build_monthly_consolidated_report_pdf(payload)
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            report_month = start_date.strftime('%Y-%m')
+            response['Content-Disposition'] = f'attachment; filename="IIE-monthly-consolidated-report-{report_month}.pdf"'
+            return response
+        return Response(payload)
 
 
 class SessionHeartbeatView(APIView):

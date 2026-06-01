@@ -29,6 +29,7 @@ const adminNavigation = [
   { name: 'Delete Candidates', href: '/admin/delete-candidates', short: 'DC' },
   { name: 'WhatsApp Templates', href: '/admin/whatsapp-templates', short: 'WT' },
   { name: 'Branches', href: '/admin/branches', short: 'BR' },
+  { name: 'Consolidated Report', href: '/admin/consolidated-report', short: 'MR' },
   { name: 'Reports', href: '/admin/reports', short: 'RE' },
   { name: 'Receipts', href: '/admin/receipts', short: 'RC' },
   { name: 'User Monitoring', href: '/admin/user-monitoring', short: 'UM' },

@@ -49,6 +49,7 @@ import TargetsPage   from './pages/admin/TargetsPage'
 import HistoricalAnalyticsPage from './pages/admin/HistoricalAnalyticsPage'
 import BranchesPage  from './pages/admin/BranchesPage'
 import ReportsPage   from './pages/admin/ReportsPage'
+import MonthlyConsolidatedReportPage from './pages/admin/MonthlyConsolidatedReportPage'
 import ReceiptsPage  from './pages/admin/ReceiptsPage'
 import UserMonitoringPage from './pages/admin/UserMonitoringPage'
 import LeadImportHistoryPage from './pages/admin/LeadImportHistoryPage'
@@ -78,7 +79,7 @@ function UserPerformanceRoute() {
 
   if (!initialized) return null
   if (user?.role === 'super_admin') {
-    return <Navigate to="/admin/reports" replace />
+    return <Navigate to="/admin/consolidated-report" replace />
   }
   return <PerformanceHubPage />
 }
@@ -153,6 +154,7 @@ export default function App() {
           <Route path="admin/historical-analytics" element={<HistoricalAnalyticsPage />} />
           <Route path="admin/branches" element={<BranchesPage />} />
           <Route path="admin/reports"  element={<ReportsPage />} />
+          <Route path="admin/consolidated-report" element={<MonthlyConsolidatedReportPage />} />
           <Route path="admin/receipts" element={<ReceiptsPage />} />
           <Route path="admin/user-monitoring" element={<UserMonitoringPage />} />
           <Route path="admin/lead-import-history" element={<LeadImportHistoryPage />} />

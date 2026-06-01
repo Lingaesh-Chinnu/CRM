@@ -106,7 +106,7 @@ urlpatterns = [
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
     path('public/rules-review-pdf/<uuid:token>/', PublicRulesReviewPdfView.as_view(), name='public_rules_review_pdf'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
-    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
+    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|consolidated-report|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),
 ]
