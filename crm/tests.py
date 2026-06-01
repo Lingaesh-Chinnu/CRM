@@ -9,10 +9,132 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
+from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
 
 
 User = get_user_model()
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
+class LeadTransferTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.other_branch = Branch.objects.create(name='Hopes', city='Coimbatore')
+        self.course = Course.objects.create(name='Python Full Stack', actual_fees=42900)
+        self.admin = User.objects.create_superuser(
+            username='transfer-admin',
+            email='transfer-admin@example.com',
+            password='pass12345',
+        )
+        self.owner = User.objects.create_user(
+            username='transfer-owner',
+            email='transfer-owner@example.com',
+            password='pass12345',
+            branch=self.branch,
+        )
+        self.same_branch_user = User.objects.create_user(
+            username='transfer-same',
+            email='transfer-same@example.com',
+            password='pass12345',
+            branch=self.branch,
+        )
+        self.other_branch_user = User.objects.create_user(
+            username='transfer-other',
+            email='transfer-other@example.com',
+            password='pass12345',
+            branch=self.other_branch,
+        )
+        self.no_leads_user = User.objects.create_user(
+            username='transfer-no-leads',
+            email='transfer-no-leads@example.com',
+            password='pass12345',
+            branch=self.branch,
+        )
+        self.lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Transfer Lead',
+            phone='9000002001',
+            source=Lead.Source.MANUAL,
+            status=Lead.Status.FOLLOW_UP,
+            assigned_to=self.owner,
+            created_by=self.owner,
+        )
+        Lead.objects.create(
+            branch=self.other_branch,
+            course=self.course,
+            name='Existing Lead',
+            phone='9000002002',
+            source=Lead.Source.MANUAL,
+            status=Lead.Status.FOLLOW_UP,
+            assigned_to=self.other_branch_user,
+            created_by=self.other_branch_user,
+        )
+        self.client.force_authenticate(self.admin)
+
+    def post_transfer(self, target_user, **extra):
+        payload = {'transfer_to': target_user.id if target_user else 999999, **extra}
+        return self.client.post(f'/api/leads/{self.lead.id}/transfer/', payload, format='json')
+
+    def test_transfer_to_same_branch_user(self):
+        response = self.post_transfer(self.same_branch_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.assigned_to_id, self.same_branch_user.id)
+        self.assertEqual(self.lead.branch_id, self.branch.id)
+        self.assertTrue(LeadTransferHistory.objects.filter(lead=self.lead, to_user=self.same_branch_user).exists())
+        self.assertTrue(Notification.objects.filter(user=self.same_branch_user, title='Lead Transferred To You').exists())
+
+    def test_transfer_to_different_branch_user(self):
+        response = self.post_transfer(self.other_branch_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.assigned_to_id, self.other_branch_user.id)
+        self.assertEqual(self.lead.branch_id, self.other_branch.id)
+        history = LeadTransferHistory.objects.get(lead=self.lead, to_user=self.other_branch_user)
+        self.assertEqual(history.from_branch_id, self.branch.id)
+        self.assertEqual(history.to_branch_id, self.other_branch.id)
+
+    def test_transfer_to_user_with_existing_leads(self):
+        response = self.post_transfer(self.other_branch_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Lead.objects.filter(assigned_to=self.other_branch_user).count(), 2)
+
+    def test_transfer_to_user_with_no_leads(self):
+        response = self.post_transfer(self.no_leads_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.assigned_to_id, self.no_leads_user.id)
+
+    def test_transfer_rejects_missing_user(self):
+        response = self.post_transfer(None)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['success'])
+        self.assertEqual(response.data['message'], 'Lead transfer failed')
+
+    def test_transfer_rejects_branch_mismatch(self):
+        response = self.post_transfer(self.same_branch_user, transfer_to_branch=self.other_branch.id)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data['success'])
+        self.assertEqual(response.data['message'], 'Selected user does not belong to the selected branch.')
+
+    @mock.patch('views.create_user_notification', side_effect=Exception('notification failed'))
+    def test_notification_failure_does_not_break_transfer(self, _mock_notification):
+        response = self.post_transfer(self.same_branch_user)
+
+        self.assertEqual(response.status_code, 200)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.assigned_to_id, self.same_branch_user.id)
+        self.assertTrue(LeadTransferHistory.objects.filter(lead=self.lead, to_user=self.same_branch_user).exists())
 
 
 @override_settings(

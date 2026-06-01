@@ -732,7 +732,8 @@ export default function LeadDetailPage() {
       setTransferTo('')
       setMessage(data.detail || 'Lead transferred successfully.')
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to transfer lead.'))
+      const data = error.response?.data
+      setMessage(data?.error || data?.message || apiErrorMessage(error, 'Failed to transfer lead.'))
     } finally {
       setSavingDetails(false)
     }

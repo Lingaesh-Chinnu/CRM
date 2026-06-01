@@ -3063,12 +3063,28 @@ class LeadViewSet(viewsets.ModelViewSet):
     def _transfer_lead(self, lead, target_user, transferred_by, note=''):
         if lead.assigned_to_id == target_user.id and lead.branch_id == target_user.branch_id:
             return None
+        logger.info(
+            'Lead transfer started lead_id=%s source_user_id=%s destination_user_id=%s destination_branch_id=%s transferred_by_id=%s',
+            lead.id,
+            (lead.assigned_to_id or lead.created_by_id),
+            target_user.id,
+            target_user.branch_id,
+            transferred_by.id if transferred_by else None,
+        )
         from_user = lead.assigned_to or lead.created_by
         from_branch = lead.branch
         lead.assigned_to = target_user
         if target_user.branch_id:
             lead.branch = target_user.branch
         lead.save(update_fields=['assigned_to', 'branch', 'updated_at'])
+        logger.info(
+            'Lead transfer lead assignment saved lead_id=%s from_user_id=%s from_branch_id=%s to_user_id=%s to_branch_id=%s',
+            lead.id,
+            from_user.id if from_user else None,
+            from_branch.id if from_branch else None,
+            target_user.id,
+            lead.branch_id,
+        )
         history = LeadTransferHistory.objects.create(
             lead=lead,
             from_user=from_user,
@@ -3078,39 +3094,128 @@ class LeadViewSet(viewsets.ModelViewSet):
             to_branch=lead.branch,
             note=str(note or '').strip(),
         )
+        logger.info('Lead transfer history created lead_id=%s history_id=%s', lead.id, history.id)
         if target_user.id != transferred_by.id:
-            create_user_notification(
-                target_user,
-                'Lead Transferred To You',
-                f'{lead.name} was transferred to you by {transferred_by.full_name}.',
+            try:
+                create_user_notification(
+                    target_user,
+                    'Lead Transferred To You',
+                    f'{lead.name} was transferred to you by {transferred_by.full_name}.',
+                    Notification.NType.INFO,
+                    f'/leads/{lead.id}',
+                )
+                logger.info('Lead transfer user notification created lead_id=%s user_id=%s', lead.id, target_user.id)
+            except Exception:
+                logger.exception(
+                    'Lead transfer target notification failed lead_id=%s destination_user_id=%s',
+                    lead.id,
+                    target_user.id,
+                )
+        try:
+            notify_admin_users(
+                'Lead Transferred',
+                f'{lead.name} was transferred to {target_user.full_name} by {transferred_by.full_name}.',
                 Notification.NType.INFO,
                 f'/leads/{lead.id}',
             )
-        notify_admin_users(
-            'Lead Transferred',
-            f'{lead.name} was transferred to {target_user.full_name} by {transferred_by.full_name}.',
-            Notification.NType.INFO,
-            f'/leads/{lead.id}',
-        )
+            logger.info('Lead transfer admin notifications processed lead_id=%s', lead.id)
+        except Exception:
+            logger.exception('Lead transfer admin notification failed lead_id=%s', lead.id)
         return history
 
     @action(detail=True, methods=['post'], url_path='transfer')
     def transfer(self, request, pk=None):
         lead = self.get_object()
+        source_user_id = lead.assigned_to_id or lead.created_by_id
         target_id = request.data.get('transfer_to') or request.data.get('to_user') or request.data.get('user')
+        requested_branch_id = request.data.get('branch') or request.data.get('to_branch') or request.data.get('transfer_to_branch')
+        logger.info(
+            'Lead transfer request received lead_id=%s current_owner_id=%s target_user_id=%s target_branch_id=%s payload=%s requested_by_id=%s',
+            lead.id,
+            source_user_id,
+            target_id,
+            requested_branch_id,
+            dict(request.data) if hasattr(request.data, 'dict') else request.data,
+            request.user.id,
+        )
         if not target_id:
             return Response({'transfer_to': 'Select a counselor.'}, status=status.HTTP_400_BAD_REQUEST)
         target_user = User.objects.filter(pk=target_id, is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch').first()
         if not target_user:
-            return Response({'transfer_to': 'Select an active counselor.'}, status=status.HTTP_400_BAD_REQUEST)
-        with transaction.atomic():
-            lead = Lead.objects.select_for_update().select_related('assigned_to', 'created_by', 'branch').get(pk=lead.pk)
-            history = self._transfer_lead(lead, target_user, request.user, request.data.get('note'))
-        lead.refresh_from_db()
-        data = self.get_serializer(lead).data
-        data['transfer_created'] = bool(history)
-        data['detail'] = f'Lead transferred to {target_user.full_name}.'
-        return Response(data)
+            logger.warning(
+                'Lead transfer invalid destination lead_id=%s source_user_id=%s destination_user_id=%s transferred_by_id=%s',
+                lead.id,
+                source_user_id,
+                target_id,
+                request.user.id,
+            )
+            return Response({
+                'success': False,
+                'message': 'Lead transfer failed',
+                'error': 'Destination user does not exist or is not an active counselor.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not target_user.branch_id:
+            logger.warning(
+                'Lead transfer destination user has no branch lead_id=%s source_user_id=%s destination_user_id=%s transferred_by_id=%s',
+                lead.id,
+                source_user_id,
+                target_user.id,
+                request.user.id,
+            )
+            return Response({
+                'success': False,
+                'message': 'Lead transfer failed',
+                'error': 'Destination user does not have an assigned branch.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if requested_branch_id and str(target_user.branch_id) != str(requested_branch_id):
+            logger.warning(
+                'Lead transfer target user branch mismatch lead_id=%s source_user_id=%s destination_user_id=%s requested_branch_id=%s actual_branch_id=%s',
+                lead.id,
+                source_user_id,
+                target_user.id,
+                requested_branch_id,
+                target_user.branch_id,
+            )
+            return Response({
+                'success': False,
+                'message': 'Selected user does not belong to the selected branch.',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                lead = Lead.objects.select_for_update().get(pk=lead.pk)
+                history = self._transfer_lead(lead, target_user, request.user, request.data.get('note'))
+            lead.refresh_from_db()
+            logger.info(
+                'Lead transfer completed lead_id=%s source_user_id=%s destination_user_id=%s destination_branch_id=%s history_created=%s',
+                lead.id,
+                source_user_id,
+                target_user.id,
+                target_user.branch_id,
+                bool(history),
+            )
+            data = self.get_serializer(lead).data
+            data['success'] = True
+            data['transfer_created'] = bool(history)
+            data['detail'] = f'Lead transferred to {target_user.full_name}.'
+            return Response(data)
+        except Exception as exc:
+            logger.exception(
+                f'Lead transfer failed for lead {lead.id} source_user_id={source_user_id} destination_user_id={target_user.id if target_user else target_id} destination_branch_id={target_user.branch_id if target_user else None} transferred_by_id={request.user.id}'
+            )
+            logger.error(
+                'Lead transfer failure context lead_id=%s source_user_id=%s destination_user_id=%s destination_branch_id=%s transferred_by_id=%s',
+                lead.id,
+                source_user_id,
+                target_user.id if target_user else target_id,
+                target_user.branch_id if target_user else None,
+                request.user.id,
+                exc_info=False,
+            )
+            return Response({
+                'success': False,
+                'message': 'Lead transfer failed',
+                'error': str(exc),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
