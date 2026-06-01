@@ -194,6 +194,17 @@ export default function Header({ onMenuClick }) {
               </div>
             )}
           </div>
+          <Link
+            to="/performance-hub?period=last_month"
+            title="View Last Month Performance"
+            aria-label="View Last Month Performance"
+            className="group relative inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-800 transition hover:bg-slate-50 hover:text-slate-950"
+          >
+            <span aria-hidden="true" className="text-lg leading-none">📊</span>
+            <span className="pointer-events-none absolute right-0 top-full mt-2 hidden w-max whitespace-nowrap rounded-lg bg-slate-950 px-2.5 py-1 text-xs font-semibold text-white shadow-lg group-hover:block">
+              View Last Month Performance
+            </span>
+          </Link>
           <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-700 p-[1px] shadow-lg shadow-slate-300/50">
             <button
               onClick={handleLogout}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
@@ -12,6 +13,13 @@ function percent(value) {
 
 function monthValue(date) {
   return date.toISOString().slice(0, 7)
+}
+
+function lastMonthValue() {
+  const date = new Date()
+  date.setDate(1)
+  date.setMonth(date.getMonth() - 1)
+  return monthValue(date)
 }
 
 function formatMetricValue(row, value) {
@@ -224,10 +232,19 @@ function InsightCard({ item }) {
 }
 
 export default function PerformanceHubPage() {
-  const [month, setMonth] = useState(monthValue(new Date()))
+  const [searchParams] = useSearchParams()
+  const [month, setMonth] = useState(() => (
+    searchParams.get('period') === 'last_month' ? lastMonthValue() : monthValue(new Date())
+  ))
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (searchParams.get('period') === 'last_month') {
+      setMonth(lastMonthValue())
+    }
+  }, [searchParams])
 
   useEffect(() => {
     setLoading(true)
