@@ -3,7 +3,7 @@ const codingSymbols = ['</>', '{ }', '( )', '[ ]', '//', '#', '&&', 'fn()', '<di
 export default function LoginAnimatedBackground({ className = '' }) {
   return (
     <div className={`pointer-events-none absolute inset-0 ${className}`} aria-hidden="true">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(41,82,255,0.24),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(255,79,163,0.22),transparent_30%),linear-gradient(135deg,#0A0F1E_8%,#111A35_50%,#1E1230_100%)]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.14),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(37,99,235,0.18),transparent_28%),linear-gradient(135deg,#020617_8%,#061224_48%,#0b1a31_100%)]" />
       <div className="login-neon-dots absolute inset-0">
         {Array.from({ length: 14 }).map((_, index) => (
           <span key={index} />

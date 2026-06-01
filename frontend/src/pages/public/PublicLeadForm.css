@@ -1,0 +1,23 @@
+.public-lead-form,
+.public-enquiry-page {
+  --ink: #0A0F1E;
+  --muted: #5C6580;
+  --light: #F5F6FA;
+  --white: #fff;
+  --border: #E2E5EF;
+  --blue: #2952FF;
+  --pink: #FF4FA3;
+  --grad: linear-gradient(135deg, #2952FF 0%, #FF4FA3 100%);
+  --grad2: linear-gradient(135deg, #FF4FA3 0%, #2952FF 100%);
+  --shadow: 0 16px 56px rgba(41, 82, 255, .14);
+}
+
+.public-lead-form .public-lead-gradient,
+.public-enquiry-page .public-lead-gradient {
+  background: var(--grad);
+}
+
+.public-lead-form .public-lead-gradient-reverse,
+.public-enquiry-page .public-lead-gradient-reverse {
+  background: var(--grad2);
+}

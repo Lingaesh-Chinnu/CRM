@@ -3,6 +3,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import brandLogo from '/iie-white.png'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
+import './PublicLeadForm.css'
 
 const REDIRECT_URL = 'https://www.indrainstitute.com'
 
@@ -190,7 +191,7 @@ export default function PublicLeadForm() {
   }
 
   return (
-    <div className="min-h-screen overflow-y-auto bg-[var(--light)] px-3 py-3 text-white sm:px-6 sm:py-6">
+    <div className="public-lead-form public-enquiry-page min-h-screen overflow-y-auto bg-[var(--light)] px-3 py-3 text-white sm:px-6 sm:py-6">
       <div className="flex min-h-[calc(100vh-1.5rem)] items-start justify-center sm:min-h-[calc(100vh-3rem)] sm:items-center">
         <section className="lead-modal-in relative w-full max-w-[29rem] overflow-hidden rounded-[26px] border border-white/10 bg-[var(--ink)] shadow-[var(--shadow)] sm:rounded-[30px]">
           <style>{`
@@ -243,7 +244,7 @@ export default function PublicLeadForm() {
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                   <div
-                    className="h-full rounded-full brand-gradient transition-all duration-300 ease-out"
+                    className="public-lead-gradient h-full rounded-full transition-all duration-300 ease-out"
                     style={{ width: step === 1 ? '50%' : '100%' }}
                   />
                 </div>
@@ -364,14 +365,14 @@ export default function PublicLeadForm() {
                     <button
                       type="button"
                       onClick={goNext}
-                      className="min-h-[3.2rem] flex-1 rounded-2xl brand-gradient px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105"
+                      className="public-lead-gradient min-h-[3.2rem] flex-1 rounded-2xl px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105"
                     >
                       Next →
                     </button>
                   ) : (
                     <button
                       disabled={saving}
-                      className="min-h-[3.2rem] flex-1 rounded-2xl brand-gradient px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                      className="public-lead-gradient min-h-[3.2rem] flex-1 rounded-2xl px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
                     >
                       {saving ? 'Submitting...' : 'Get a Call Back'}
                     </button>
