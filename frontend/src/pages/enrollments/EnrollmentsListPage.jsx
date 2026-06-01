@@ -80,6 +80,23 @@ function money(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
 
+function isoDate(value) {
+  return value.toISOString().slice(0, 10)
+}
+
+function monthBounds(offset = 0) {
+  const date = new Date()
+  const start = new Date(date.getFullYear(), date.getMonth() + offset, 1)
+  const end = new Date(date.getFullYear(), date.getMonth() + offset + 1, 0)
+  return {
+    from: isoDate(start),
+    to: isoDate(end),
+  }
+}
+
+const thisMonthRange = monthBounds()
+const lastMonthRange = monthBounds(-1)
+
 export default function EnrollmentsListPage() {
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
@@ -89,8 +106,9 @@ export default function EnrollmentsListPage() {
     course: '',
     status: '',
     search: '',
-    enrolledFrom: '',
-    enrolledTo: '',
+    period: 'this_month',
+    enrolledFrom: thisMonthRange.from,
+    enrolledTo: thisMonthRange.to,
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -168,6 +186,45 @@ export default function EnrollmentsListPage() {
     { label: 'Pending', value: 'pending', count: statusCount('pending') },
     { label: 'Completed', value: 'completed', count: statusCount('completed') },
   ]
+  const totalRevenue = rows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
+  const branchSummary = rows.reduce((summary, row) => {
+    const label = row.branch_name || 'No branch'
+    summary[label] = (summary[label] || 0) + 1
+    return summary
+  }, {})
+  const counselorSummary = rows.reduce((summary, row) => {
+    const label = row.counselor_name || 'Unassigned'
+    summary[label] = (summary[label] || 0) + 1
+    return summary
+  }, {})
+  const topBranch = Object.entries(branchSummary).sort((a, b) => b[1] - a[1])[0]
+  const topCounselor = Object.entries(counselorSummary).sort((a, b) => b[1] - a[1])[0]
+
+  const setPeriod = (period) => {
+    if (period === 'this_month') {
+      setFilters((current) => ({
+        ...current,
+        period,
+        enrolledFrom: thisMonthRange.from,
+        enrolledTo: thisMonthRange.to,
+      }))
+      return
+    }
+    if (period === 'last_month') {
+      setFilters((current) => ({
+        ...current,
+        period,
+        enrolledFrom: lastMonthRange.from,
+        enrolledTo: lastMonthRange.to,
+      }))
+      return
+    }
+    setFilters((current) => ({ ...current, period }))
+  }
+
+  const setCustomDate = (field, value) => {
+    setFilters((current) => ({ ...current, period: 'custom', [field]: value }))
+  }
 
   return (
     <div className="space-y-6">
@@ -176,8 +233,8 @@ export default function EnrollmentsListPage() {
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Confirmed student enrollments</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
           {isSuperAdmin
-            ? 'View students across every branch and narrow the list with branch, course, status, and search filters.'
-            : 'This page automatically shows students from your branch, with course details and enrollment dates.'}
+            ? 'View current month admissions across every branch and narrow the list with branch, course, status, and search filters.'
+            : 'This page automatically shows current month admissions from your branch, with course details and enrollment dates.'}
         </p>
       </section>
 
@@ -253,14 +310,43 @@ export default function EnrollmentsListPage() {
             />
           </label>
           <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Period</span>
+            <select value={filters.period} onChange={(event) => setPeriod(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+              <option value="custom">Custom Date Range</option>
+            </select>
+          </label>
+          <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
-            <input type="date" value={filters.enrolledFrom} onChange={(event) => setFilters((current) => ({ ...current, enrolledFrom: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+            <input type="date" value={filters.enrolledFrom} onChange={(event) => setCustomDate('enrolledFrom', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
           </label>
           <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
-            <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
+            <input type="date" value={filters.enrolledTo} onChange={(event) => setCustomDate('enrolledTo', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
           </label>
         </div>
+      </section>
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Enrollments</p>
+          <p className="mt-3 text-2xl font-black text-slate-950">{rows.length}</p>
+        </article>
+        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Revenue Generated</p>
+          <p className="mt-3 text-2xl font-black text-slate-950">{money(totalRevenue)}</p>
+        </article>
+        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top Branch</p>
+          <p className="mt-3 truncate text-2xl font-black text-slate-950">{topBranch?.[0] || '-'}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">{topBranch ? `${topBranch[1]} enrollments` : 'No enrollments'}</p>
+        </article>
+        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top Counselor</p>
+          <p className="mt-3 truncate text-2xl font-black text-slate-950">{topCounselor?.[0] || '-'}</p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">{topCounselor ? `${topCounselor[1]} enrollments` : 'No enrollments'}</p>
+        </article>
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
@@ -271,8 +357,8 @@ export default function EnrollmentsListPage() {
         )}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Students</p>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Student list with course details</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current Month Admissions</p>
+            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Enrollment list with course details</h2>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             <StatusFilterChips
