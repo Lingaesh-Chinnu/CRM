@@ -13,7 +13,7 @@ const navigation = [
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
   { name: 'Payments', href: '/payments', short: 'PY' },
   { name: 'Pending', href: '/pending/leads', short: 'PE', pending: true },
-  { name: 'Performance Hub', href: '/performance-hub', short: 'PH', staffOnly: true },
+  { name: 'Performance Hub', href: '/performance-hub', short: 'PH' },
   { name: 'Team Board', href: '/team-board', short: 'TB' },
   { name: 'Counselor Requests', href: '/counselor-change-requests', short: 'CR' },
 ]

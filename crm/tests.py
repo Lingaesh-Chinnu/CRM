@@ -9,7 +9,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
+from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
 
 
 User = get_user_model()
@@ -159,6 +159,40 @@ class LeadImportValidationTests(APITestCase):
         self.assertEqual(no_course_lead.external_course_interested, '')
         self.assertEqual(no_course_lead.source, Lead.Source.OTHERS)
         self.assertEqual(no_course_lead.source_description, 'College Event')
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
+class MonthlyRatingResetTests(APITestCase):
+    def test_current_month_rating_starts_at_100_before_targets_are_due(self):
+        branch = Branch.objects.create(name='Rating Branch', city='Coimbatore')
+        staff = User.objects.create_user(
+            username='rating-staff',
+            email='rating-staff@example.com',
+            password='pass12345',
+            branch=branch,
+        )
+        today = timezone.localdate()
+        BranchTarget.objects.create(
+            branch=branch,
+            month=today.month,
+            year=today.year,
+            lead_target=50,
+            walkin_target=25,
+            enroll_target=10,
+            revenue_target=Decimal('100000'),
+        )
+
+        from views import calculate_user_monthly_rating
+
+        rating = calculate_user_monthly_rating(staff, today.year, today.month)
+
+        self.assertEqual(rating.score, 100)
+        self.assertEqual(rating.stars, 5)
+        self.assertEqual(rating.breakdown['target_achievement']['deduction'], 0)
+        self.assertEqual(rating.breakdown['activity']['deduction'], 0)
 
 
 @override_settings(

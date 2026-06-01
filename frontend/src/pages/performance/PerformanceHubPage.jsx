@@ -47,7 +47,7 @@ function ChangeBadge({ value }) {
   const change = Number(value || 0)
   return (
     <span className={`inline-flex min-w-[74px] items-center justify-center rounded-md px-2.5 py-1 text-xs font-bold ${changeTone(change)}`}>
-      {change >= 0 ? '^' : 'v'} {Math.abs(change).toFixed(0)}%
+      {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(0)}%
     </span>
   )
 }
@@ -231,6 +231,176 @@ function InsightCard({ item }) {
   )
 }
 
+function Stars({ stars = 5 }) {
+  const count = Math.max(0, Math.min(Number(stars || 0), 5))
+  return <span className="tracking-wide text-amber-500">{'★'.repeat(count)}{'☆'.repeat(5 - count)}</span>
+}
+
+function RankingTable({ title, rows }) {
+  return (
+    <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-black text-slate-950">{title}</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-500">
+            <tr>
+              <th className="px-5 py-3">Rank</th>
+              <th className="px-5 py-3">Name</th>
+              <th className="px-5 py-3">Branch</th>
+              <th className="px-5 py-3">Leads</th>
+              <th className="px-5 py-3">Walk-ins</th>
+              <th className="px-5 py-3">Enrollments</th>
+              <th className="px-5 py-3">Revenue</th>
+              <th className="px-5 py-3">Rating</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {(rows || []).map((row, index) => (
+              <tr key={`${title}-${row.user_id || row.branch_id || index}`} className={index === 0 ? 'bg-emerald-50/40' : ''}>
+                <td className="px-5 py-3 font-black text-slate-900">{row.rank || index + 1}</td>
+                <td className="px-5 py-3 font-semibold text-slate-900">{row.name || row.branch_name}</td>
+                <td className="px-5 py-3 text-slate-600">{row.branch_name || '-'}</td>
+                <td className="px-5 py-3">{Number(row.leads || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{Number(row.walkins || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{Number(row.enrollments || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{money(row.revenue)}</td>
+                <td className="px-5 py-3"><Stars stars={row.rating_stars || 5} /> <span className="ml-2 font-semibold">{Number(row.rating_score || 100)}%</span></td>
+              </tr>
+            ))}
+            {(!rows || rows.length === 0) && (
+              <tr><td colSpan="8" className="px-5 py-6 text-center text-slate-500">No records for this period.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  )
+}
+
+function BranchPerformanceTable({ rows }) {
+  return (
+    <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-black text-slate-950">Branch Performance</h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-bold uppercase text-slate-500">
+            <tr>
+              <th className="px-5 py-3">Branch</th>
+              <th className="px-5 py-3">Leads</th>
+              <th className="px-5 py-3">Walk-ins</th>
+              <th className="px-5 py-3">Enrollments</th>
+              <th className="px-5 py-3">Conversion</th>
+              <th className="px-5 py-3">Revenue</th>
+              <th className="px-5 py-3">Screen Time</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {(rows || []).map((row) => (
+              <tr key={row.branch_id}>
+                <td className="px-5 py-3 font-semibold text-slate-900">{row.branch_name}</td>
+                <td className="px-5 py-3">{Number(row.leads || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{Number(row.walkins || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{Number(row.enrollments || 0).toLocaleString('en-IN')}</td>
+                <td className="px-5 py-3">{percent(row.conversion_ratio)}</td>
+                <td className="px-5 py-3">{money(row.revenue)}</td>
+                <td className="px-5 py-3 font-semibold">{row.screen_time_display || '0m'}</td>
+              </tr>
+            ))}
+            {(!rows || rows.length === 0) && (
+              <tr><td colSpan="7" className="px-5 py-6 text-center text-slate-500">No branch data for this period.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  )
+}
+
+function ScreenTimeTable({ title, rows, nameKey = 'name' }) {
+  return (
+    <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 px-5 py-4">
+        <h2 className="text-lg font-black text-slate-950">{title}</h2>
+      </div>
+      <div className="divide-y divide-slate-100">
+        {(rows || []).slice(0, 10).map((row, index) => (
+          <div key={`${title}-${row.user_id || row.branch_id || index}`} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
+            <div>
+              <p className="font-bold text-slate-900">{row[nameKey] || row.name}</p>
+              {row.branch_name && nameKey !== 'branch_name' && <p className="text-xs font-semibold text-slate-500">{row.branch_name}</p>}
+            </div>
+            <p className="font-black text-slate-950">{row.display || '0m'}</p>
+          </div>
+        ))}
+        {(!rows || rows.length === 0) && <p className="px-5 py-6 text-center text-sm text-slate-500">No screen time recorded.</p>}
+      </div>
+    </article>
+  )
+}
+
+function AdminPerformanceDashboard({ data }) {
+  const rows = data?.monthly_comparison || []
+  const revenue = rows.find((row) => row.key === 'revenue')
+  const nonRevenue = rows.filter((row) => row.key !== 'revenue')
+  return (
+    <>
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">This Month vs Last Month</p>
+          <h2 className="text-2xl font-black text-slate-950">Organization Performance</h2>
+        </div>
+        {revenue && <RevenueCard row={revenue} />}
+        <div className="grid auto-rows-fr gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {nonRevenue.filter((row) => row.key !== 'conversion_ratio').map((row) => <ComparisonCard key={row.key} row={row} />)}
+          {nonRevenue.filter((row) => row.key === 'conversion_ratio').map((row) => <CircularProgressCard key={row.key} row={row} title="Conversion Ratio" />)}
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">Branch Performance</p>
+          <h2 className="text-2xl font-black text-slate-950">Branch Comparison</h2>
+        </div>
+        <BranchPerformanceTable rows={data.branch_performance || []} />
+      </section>
+
+      <section className="grid gap-4 xl:grid-cols-2">
+        <RankingTable title="Top Performers" rows={data.top_performers || []} />
+        <RankingTable title="Lowest Performers" rows={data.lowest_performers || []} />
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">User Performance Ranking</p>
+          <h2 className="text-2xl font-black text-slate-950">Monthly Leaderboard</h2>
+        </div>
+        <RankingTable title="All Users" rows={data.user_performance_ranking || []} />
+      </section>
+
+      <section className="space-y-4">
+        <div>
+          <p className="text-xs font-bold uppercase text-slate-500">Screen Time Reporting</p>
+          <h2 className="text-2xl font-black text-slate-950">CRM Usage</h2>
+        </div>
+        <div className="grid gap-4 md:grid-cols-3">
+          <UsageMetricCard label="Average Screen Time" value={data.screen_time?.average_user_display || '0m'} tone="blue" />
+          <UsageMetricCard label="Total Screen Time" value={data.screen_time?.total_display || '0m'} tone="slate" />
+          <UsageMetricCard label="Average Daily Activity" value={data.screen_time?.average_daily_display || '0m'} tone="orange" />
+        </div>
+        <UsageLineChart points={data.screen_time?.daily || []} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ScreenTimeTable title="User-wise Screen Time" rows={data.screen_time?.user_wise || []} />
+          <ScreenTimeTable title="Branch-wise Screen Time" rows={data.screen_time?.branch_wise || []} nameKey="branch_name" />
+        </div>
+      </section>
+    </>
+  )
+}
+
 export default function PerformanceHubPage() {
   const [searchParams] = useSearchParams()
   const [month, setMonth] = useState(() => (
@@ -278,9 +448,11 @@ export default function PerformanceHubPage() {
       <section className="flex flex-col gap-4 border-b border-slate-200 pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-bold uppercase text-slate-500">Performance Hub</p>
-          <h1 className="mt-2 text-3xl font-black text-slate-950">My Performance Dashboard</h1>
+          <h1 className="mt-2 text-3xl font-black text-slate-950">{data?.dashboard_type === 'admin' ? 'Performance Report Dashboard' : 'My Performance Hub'}</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Personal pipeline, CRM usage, and branch analytics for your assigned branch.
+            {data?.dashboard_type === 'admin'
+              ? 'Organization-wide reporting, rankings, branch performance, and CRM usage analytics.'
+              : 'My leads, walk-ins, enrollments, conversion, revenue, screen time, and monthly rating.'}
           </p>
         </div>
         <input
@@ -294,6 +466,8 @@ export default function PerformanceHubPage() {
       {message && <p className="rounded-lg border border-rose-100 bg-rose-50 px-5 py-4 text-sm font-semibold text-rose-700">{message}</p>}
       {loading ? (
         <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm font-semibold text-slate-500 shadow-sm">Loading analytics...</div>
+      ) : data?.dashboard_type === 'admin' ? (
+        <AdminPerformanceDashboard data={data} />
       ) : data ? (
         <>
           <section className="space-y-4">
@@ -314,7 +488,7 @@ export default function PerformanceHubPage() {
           <section className="space-y-4">
             <div>
               <p className="text-xs font-bold uppercase text-slate-500">Section 2</p>
-              <h2 className="text-2xl font-black text-slate-950">CRM Usage Analytics</h2>
+              <h2 className="text-2xl font-black text-slate-950">My Screen Time</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <UsageMetricCard label="Average Daily Usage" value={data.usage?.average_daily_display || '0m'} tone="blue" />
@@ -327,6 +501,20 @@ export default function PerformanceHubPage() {
           <section className="space-y-4">
             <div>
               <p className="text-xs font-bold uppercase text-slate-500">Section 3</p>
+              <h2 className="text-2xl font-black text-slate-950">My Monthly Rating</h2>
+            </div>
+            <article className="rounded-lg border border-amber-100 bg-amber-50 p-6 shadow-sm">
+              <p className="text-xs font-bold uppercase text-amber-700">Current Month</p>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="text-3xl font-black"><Stars stars={data.monthly_rating?.stars || 5} /></div>
+                <p className="text-4xl font-black text-slate-950">{Number(data.monthly_rating?.score ?? 100)}%</p>
+              </div>
+            </article>
+          </section>
+
+          <section className="space-y-4">
+            <div>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 4</p>
               <h2 className="text-2xl font-black text-slate-950">My Branch Performance</h2>
               <p className="mt-1 text-sm font-semibold text-slate-500">{data.branch_overview?.branch_name || 'Assigned branch'}</p>
             </div>
@@ -343,7 +531,7 @@ export default function PerformanceHubPage() {
 
           <section className="space-y-4">
             <div>
-              <p className="text-xs font-bold uppercase text-slate-500">Section 4</p>
+              <p className="text-xs font-bold uppercase text-slate-500">Section 5</p>
               <h2 className="text-2xl font-black text-slate-950">Performance Insights</h2>
             </div>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">

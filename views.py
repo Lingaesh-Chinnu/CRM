@@ -2112,6 +2112,15 @@ def branch_scope(branch):
     }
 
 
+def organization_scope():
+    return {
+        'leads': Lead.objects.filter(is_deleted=False),
+        'walkins': WalkIn.objects.filter(is_deleted=False),
+        'enrollments': Enrollment.objects.filter(is_deleted=False),
+        'followups': FollowUp.objects.all(),
+    }
+
+
 def average_followup_response_seconds(user, start_date, end_date):
     followups = FollowUp.objects.filter(
         updated_by=user,
@@ -2142,13 +2151,112 @@ def average_followup_response_seconds(user, start_date, end_date):
 
 
 class PerformanceHubView(APIView):
-    """Current user's private performance analytics plus branch summary."""
+    """Role-aware performance analytics for staff and organization reporting for admins."""
     permission_classes = [IsStaffOrAdmin]
+
+    def admin_response(self, request, start_date, end_date, previous_start, previous_end):
+        scope = organization_scope()
+        current = performance_metrics(scope, start_date, end_date)
+        previous = performance_metrics(scope, previous_start, previous_end)
+        comparison = performance_comparison_rows(current, previous, [
+            ('leads', 'Total Leads'),
+            ('walkins', 'Total Walk-ins'),
+            ('enrollments', 'Total Enrollments'),
+            ('conversion_ratio', 'Conversion %'),
+            ('revenue', 'Revenue Generated'),
+        ])
+
+        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
+        user_rows = []
+        total_user_seconds = 0
+        daily_totals = {}
+        for row_user in users:
+            row_metrics = performance_metrics(user_scope(row_user), start_date, end_date)
+            usage_seconds, row_daily = usage_seconds_for(row_user, start_date, end_date)
+            total_user_seconds += usage_seconds
+            for day_key, seconds in row_daily.items():
+                daily_totals[day_key] = daily_totals.get(day_key, 0) + seconds
+            rating = calculate_user_monthly_rating(row_user, start_date.year, start_date.month)
+            user_rows.append({
+                'user_id': row_user.id,
+                'name': row_user.full_name,
+                'branch_name': row_user.branch.name if row_user.branch else '',
+                'screen_time_seconds': usage_seconds,
+                'screen_time_display': seconds_to_duration(usage_seconds),
+                'rating_score': rating.score if rating else 100,
+                'rating_stars': rating.stars if rating else 5,
+                **row_metrics,
+            })
+        user_rows.sort(key=lambda item: (-item['enrollments'], -float(item['revenue'] or 0), -item['rating_score'], item['name']))
+        ranked_users = [{**row, 'rank': index + 1} for index, row in enumerate(user_rows)]
+
+        branch_rows = []
+        for branch in Branch.objects.filter(is_active=True).order_by('name'):
+            row_metrics = performance_metrics(branch_scope(branch), start_date, end_date)
+            branch_seconds = sum(row['screen_time_seconds'] for row in user_rows if row.get('branch_name') == branch.name)
+            branch_rows.append({
+                'branch_id': branch.id,
+                'branch_name': branch.name,
+                'screen_time_seconds': branch_seconds,
+                'screen_time_display': seconds_to_duration(branch_seconds),
+                **row_metrics,
+            })
+        branch_rows.sort(key=lambda item: (-item['enrollments'], -float(item['revenue'] or 0), item['branch_name']))
+
+        days_in_range = max((end_date - start_date).days + 1, 1)
+        average_screen_seconds = int(total_user_seconds / max(users.count(), 1)) if users.exists() else 0
+        return Response({
+            'role': User.Role.SUPER_ADMIN,
+            'dashboard_type': 'admin',
+            'period': {'start': start_date, 'end': end_date},
+            'metrics': current,
+            'previous_metrics': previous,
+            'monthly_comparison': comparison,
+            'changes': {
+                key: pct_change(current[key], previous[key])
+                for key in ['leads', 'walkins', 'enrollments', 'conversion_ratio', 'revenue']
+            },
+            'branch_performance': branch_rows,
+            'user_performance_ranking': ranked_users,
+            'top_performers': ranked_users[:5],
+            'lowest_performers': sorted(ranked_users, key=lambda item: (item['enrollments'], float(item['revenue'] or 0), item['rating_score'], item['name']))[:5],
+            'screen_time': {
+                'total_seconds': total_user_seconds,
+                'total_display': seconds_to_duration(total_user_seconds),
+                'average_user_seconds': average_screen_seconds,
+                'average_user_display': seconds_to_duration(average_screen_seconds),
+                'average_daily_seconds': int(total_user_seconds / days_in_range),
+                'average_daily_display': seconds_to_duration(int(total_user_seconds / days_in_range)),
+                'user_wise': [
+                    {
+                        'user_id': row['user_id'],
+                        'name': row['name'],
+                        'branch_name': row['branch_name'],
+                        'seconds': row['screen_time_seconds'],
+                        'display': row['screen_time_display'],
+                    }
+                    for row in ranked_users
+                ],
+                'branch_wise': [
+                    {
+                        'branch_id': row['branch_id'],
+                        'branch_name': row['branch_name'],
+                        'seconds': row['screen_time_seconds'],
+                        'display': row['screen_time_display'],
+                    }
+                    for row in branch_rows
+                ],
+                'daily': daily_usage_points(daily_totals, start_date, end_date),
+            },
+        })
 
     def get(self, request):
         user = request.user
         start_date, end_date = date_range_from_request(request)
         previous_start, previous_end = previous_month_bounds(start_date)
+        if user.is_super_admin:
+            return self.admin_response(request, start_date, end_date, previous_start, previous_end)
+
         personal_scope = user_scope(user)
         branch = user.branch
         branch_data_scope = branch_scope(branch) if branch else {
@@ -2172,13 +2280,16 @@ class PerformanceHubView(APIView):
             start_date,
             end_date,
         )
+        rating = calculate_user_monthly_rating(user, start_date.year, start_date.month)
         current['crm_usage_time'] = seconds_to_duration(range_seconds)
         current['avg_followup_response_time'] = seconds_to_duration(average_followup_response_seconds(user, start_date, end_date))
         personal_comparison = performance_comparison_rows(current, previous, [
             ('leads', 'Leads'),
+            ('walkins', 'Walk-ins'),
             ('walkins_converted', 'Walk-ins Converted'),
             ('enrollments', 'Enrollments'),
             ('conversion_ratio', 'Conversion %'),
+            ('revenue', 'Revenue Contribution'),
         ])
         monthly_comparison = performance_comparison_rows(current, previous, [
             ('leads', 'Leads'),
@@ -2206,6 +2317,8 @@ class PerformanceHubView(APIView):
             {'label': 'Usage Trend', 'value': f'Your CRM usage {usage_direction} by {abs(usage_change):.0f}% compared to last month.'},
         ]
         return Response({
+            'role': user.role,
+            'dashboard_type': 'user',
             'period': {'start': start_date, 'end': end_date},
             'personal': current,
             'previous_personal': previous,
@@ -2230,6 +2343,7 @@ class PerformanceHubView(APIView):
                     for key, value in sorted((daily_usage or today_daily or month_daily).items())
                 ],
             },
+            'monthly_rating': UserMonthlyRatingSerializer(rating).data if rating else None,
             'branch_overview': {
                 **branch_current,
                 'branch_id': branch.id if branch else None,
@@ -10024,6 +10138,7 @@ def calculate_user_monthly_rating(user, year=None, month=None):
     month = month or today.month
     start, end = month_window(year, month)
     effective_end = min(end, today)
+    month_complete = end < today
     score = 100
     breakdown = {}
 
@@ -10049,12 +10164,15 @@ def calculate_user_monthly_rating(user, year=None, month=None):
     else:
         breakdown['conversion_rate'] = {'deduction': 0, 'detail': f'Conversion rate {conversion_rate:.2f}%.'}
 
-    overdue_payments = visible_payment_queryset(Payment.objects.filter(
-        enrollment__created_by=user,
-        status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
-        next_payment_date__gte=start,
-        next_payment_date__lte=effective_end,
-    ))
+    payment_due_end = end if month_complete else today - timedelta(days=1)
+    overdue_payments = visible_payment_queryset(Payment.objects.none())
+    if payment_due_end >= start:
+        overdue_payments = visible_payment_queryset(Payment.objects.filter(
+            enrollment__created_by=user,
+            status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
+            next_payment_date__gte=start,
+            next_payment_date__lte=payment_due_end,
+        ))
     if overdue_payments.filter(status=Payment.Status.UNPAID).exists():
         deduct('payment_reminder', 10, 'Missed payment reminder found for an unpaid due payment.')
     elif overdue_payments.filter(status=Payment.Status.PARTIAL).exists():
@@ -10122,10 +10240,13 @@ def calculate_user_monthly_rating(user, year=None, month=None):
         login_at__date__gte=start,
         login_at__date__lte=end,
     ).exists()
-    if not active_login:
+    if not active_login and month_complete:
         deduct('activity', 5, 'No login activity found for the month.')
     else:
-        breakdown['activity'] = {'deduction': 0, 'detail': 'Login activity found for the month.'}
+        breakdown['activity'] = {
+            'deduction': 0,
+            'detail': 'Login activity found for the month.' if active_login else 'Current month activity window is still open.',
+        }
 
     target = BranchTarget.objects.filter(branch=user.branch, year=year, month=month).first()
     target_not_achieved = False
@@ -10135,10 +10256,13 @@ def calculate_user_monthly_rating(user, year=None, month=None):
             or walkin_qs.count() < target.walkin_target
             or enroll_qs.count() < target.enroll_target
         )
-    if target_not_achieved:
+    if target_not_achieved and month_complete:
         deduct('target_achievement', 15, 'Monthly target was not achieved.')
     else:
-        breakdown['target_achievement'] = {'deduction': 0, 'detail': 'Monthly target achieved or no user target set.'}
+        breakdown['target_achievement'] = {
+            'deduction': 0,
+            'detail': 'Monthly target achieved or no user target set.' if not target_not_achieved else 'Current month target window is still open.',
+        }
 
     score = max(0, min(100, score))
     rating, _ = UserMonthlyRating.objects.update_or_create(
