@@ -21,6 +21,7 @@ const requiredLabels = {
   email: 'Email',
   pincode: 'Pincode',
   location: 'Address',
+  source: 'Source',
   course: 'Course Interested',
   branch: 'Branch',
   preferred_timing: 'Preferred Timing',
@@ -69,9 +70,26 @@ const qualificationOptions = [
   { value: 'housewife', label: 'Housewife' },
 ]
 
+const sourceOptions = [
+  { value: 'manual', label: 'Manual' },
+  { value: 'google', label: 'Google' },
+  { value: 'website', label: 'Website' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'justdial', label: 'JustDial' },
+  { value: 'team_reference', label: 'Team Reference' },
+  { value: 'friends_reference', label: 'Friends Reference' },
+  { value: 'others', label: 'Others' },
+]
+
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
   return [{ value, label: value }, ...qualificationOptions]
+}
+
+function sourceLabel(value) {
+  return sourceOptions.find((option) => option.value === value)?.label || statusLabel(value)
 }
 
 function statusLabel(status) {
@@ -104,6 +122,7 @@ function buildConversionForm(lead) {
     interested_global_certification: false,
     status: lead?.status || 'new',
     assigned_to: lead?.assigned_to || lead?.follow_up_by || lead?.assigned_user?.id || '',
+    source: lead?.source || 'manual',
     source_description: lead?.source_description || '',
   }
 }
@@ -729,6 +748,7 @@ export default function LeadDetailPage() {
     { field: 'email', label: 'Email', value: lead.email },
     { field: 'pincode', label: 'Pincode', value: lead.pincode },
     { field: 'location', label: 'Address', value: lead.location },
+    { field: 'source', label: 'Source', value: lead.source, displayValue: lead.source_display || sourceLabel(lead.source), displayNew: sourceLabel },
     { field: 'conversion_date', payloadField: 'walkin_date', label: 'Visit Date', value: lead.walkin_date },
     ...(isSuperAdmin ? [{ field: 'branch', label: 'Branch', value: lead.branch, displayValue: lead.branch_name, displayNew: (value) => branches.find((branch) => String(branch.id) === String(value))?.name || value }] : []),
     ...(canEditLeadCourse ? [{ field: 'course', label: 'Course Interested', value: lead.course, displayValue: lead.course_name, displayNew: (value) => courses.find((course) => String(course.id) === String(value))?.name || value }] : []),
@@ -931,7 +951,12 @@ export default function LeadDetailPage() {
               <textarea value={detailsForm.location || ''} onChange={(event) => updateDetail('location', event.target.value)} placeholder="Enter Address" className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('location')}
             </DetailField>
-            <div className="rounded-2xl bg-slate-50 p-4"><p className="text-xs uppercase tracking-[0.18em] text-slate-500">Source</p><p className="mt-2 font-semibold text-slate-900">{lead.source_display || lead.source}</p></div>
+            <DetailField label="Source" value={lead.source_display || sourceLabel(lead.source)} editing={editingDetails}>
+              <select value={detailsForm.source || 'manual'} onChange={(event) => updateDetail('source', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              {detailErrorFor('source')}
+            </DetailField>
             <DetailField label="Source Description" value={lead.source_description} editing={editingDetails}>
               <textarea value={detailsForm.source_description || ''} onChange={(event) => updateDetail('source_description', event.target.value)} placeholder="Example: Saw Instagram AI placement reel" className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
             </DetailField>

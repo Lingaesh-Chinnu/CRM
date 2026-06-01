@@ -3464,13 +3464,23 @@ class LeadViewSet(viewsets.ModelViewSet):
 REQUIRED_LEAD_IMPORT_HEADINGS = [
     'Candidate Name',
     'Phone Number',
-    'Course Interested',
-    'Branch',
-    'How They Know IIE',
-    'Follow-up Date',
-    'Remarks',
 ]
 OPTIONAL_LEAD_IMPORT_HEADINGS = [
+    'Course Interested',
+    'Course Name',
+    'Course Names',
+    'Branch',
+    'Email',
+    'Source',
+    'Lead Source',
+    'Source Name',
+    'Source Names',
+    'How They Know IIE',
+    'Follow-up Date',
+    'Follow Up Date',
+    'Remarks',
+    'Location',
+    'Qualification',
     'Source Description',
 ]
 
@@ -3496,6 +3506,14 @@ def parse_import_followup_date(value):
         except ValueError:
             continue
     return None
+
+
+def first_import_value(row, *headings):
+    for heading in headings:
+        value = normalise_import_cell(row.get(heading))
+        if value:
+            return value
+    return ''
 
 
 def read_lead_import_rows(uploaded_file):
@@ -3552,14 +3570,9 @@ class LeadImportView(APIView):
             return Response({'detail': str(exc), 'history': LeadImportHistorySerializer(history).data}, status=400)
 
         missing = [heading for heading in REQUIRED_LEAD_IMPORT_HEADINGS if heading not in headings]
-        allowed_headings = [*REQUIRED_LEAD_IMPORT_HEADINGS, *OPTIONAL_LEAD_IMPORT_HEADINGS]
-        unexpected = [heading for heading in headings if heading and heading not in allowed_headings]
-        if missing or unexpected:
+        if missing:
             errors = []
-            if missing:
-                errors.append({'row': None, 'error': f'Missing columns: {", ".join(missing)}'})
-            if unexpected:
-                errors.append({'row': None, 'error': f'Unexpected columns: {", ".join(unexpected)}'})
+            errors.append({'row': None, 'error': f'Missing columns: {", ".join(missing)}'})
             history.total_rows = len(rows)
             history.failed_count = len(rows)
             history.status = LeadImportHistory.Status.FAILED
@@ -3573,42 +3586,53 @@ class LeadImportView(APIView):
 
         course_map = {course.name.strip().lower(): course for course in Course.objects.filter(is_active=True)}
         source_map = {label.lower(): value for value, label in Lead.Source.choices}
-        existing_phones = set(Lead.objects.values_list('phone', flat=True))
+        source_map.update({value.lower(): value for value, _label in Lead.Source.choices})
+        existing_phones = {
+            normalize_phone_number(phone)
+            for phone in list(Lead.objects.values_list('phone', flat=True))
+            + list(WalkIn.objects.values_list('phone', flat=True))
+            + list(Enrollment.objects.values_list('phone', flat=True))
+            if normalize_phone_number(phone)
+        }
         seen_phones = set()
         errors = []
         imported = 0
         duplicates = 0
+        duplicate_rows = []
 
         for index, row in enumerate(rows, start=2):
             name = normalise_import_cell(row.get('Candidate Name'))
-            phone = normalise_import_cell(row.get('Phone Number'))
-            course_name = normalise_import_cell(row.get('Course Interested'))
-            branch_name = normalise_import_cell(row.get('Branch'))
-            source_label = normalise_import_cell(row.get('How They Know IIE'))
+            raw_phone = normalise_import_cell(row.get('Phone Number'))
+            phone = valid_import_phone(raw_phone)
+            course_name = first_import_value(row, 'Course Interested', 'Course Name', 'Course Names')
+            source_label = first_import_value(row, 'How They Know IIE', 'Source', 'Lead Source', 'Source Name', 'Source Names')
             source_description = normalise_import_cell(row.get('Source Description'))
-            followup_raw = normalise_import_cell(row.get('Follow-up Date'))
+            followup_raw = first_import_value(row, 'Follow-up Date', 'Follow Up Date')
             followup_date = parse_import_followup_date(followup_raw)
             remarks = normalise_import_cell(row.get('Remarks'))
+            email = normalise_import_cell(row.get('Email'))
+            location = normalise_import_cell(row.get('Location'))
+            qualification = normalise_import_cell(row.get('Qualification'))
 
             row_errors = []
             if not name:
                 row_errors.append('Candidate Name is required.')
-            if not phone:
+            if not raw_phone:
                 row_errors.append('Phone Number is required.')
+            elif not phone:
+                row_errors.append('Phone Number is invalid.')
             if phone and (phone in existing_phones or phone in seen_phones):
                 duplicates += 1
-                row_errors.append('Duplicate phone number.')
+                duplicate_rows.append({'row': index, 'phone': phone})
+                seen_phones.add(phone)
+                continue
             course = course_map.get(course_name.lower())
-            if not course:
-                row_errors.append('Course Interested does not match an active course.')
-            branch = lookup_branch(branch_name)
-            if not branch:
-                row_errors.append('Branch does not match an active branch.')
-            elif branch.id != request.user.branch_id:
-                row_errors.append('Branch must match your assigned branch.')
-            source = source_map.get(source_label.lower())
+            branch = request.user.branch
+            source = source_map.get(source_label.lower()) if source_label else Lead.Source.MANUAL
             if not source:
-                row_errors.append('How They Know IIE does not match an allowed source.')
+                source = Lead.Source.OTHERS
+                if source_label and source_label.lower() not in source_description.lower():
+                    source_description = f'{source_label} - {source_description}' if source_description else source_label
             if followup_raw and not followup_date:
                 row_errors.append('Follow-up Date is invalid. Use YYYY-MM-DD or DD-MM-YYYY.')
 
@@ -3622,11 +3646,15 @@ class LeadImportView(APIView):
                 'name': name,
                 'phone': phone,
                 'course': course,
+                'external_course_interested': course_name,
                 'branch': branch,
                 'source': source,
                 'source_description': source_description,
                 'next_follow_up_date': followup_date,
                 'remarks': remarks,
+                'email': email,
+                'location': location,
+                'qualification': qualification,
                 'created_by': request.user,
                 'assigned_to': request.user,
             }
@@ -3640,7 +3668,7 @@ class LeadImportView(APIView):
         failed = len(errors)
         if imported and failed:
             import_status = LeadImportHistory.Status.PARTIAL
-        elif imported:
+        elif imported or (duplicates and not failed):
             import_status = LeadImportHistory.Status.SUCCESS
         else:
             import_status = LeadImportHistory.Status.FAILED
@@ -3653,12 +3681,15 @@ class LeadImportView(APIView):
         history.error_log = errors
         history.save()
 
-        response_status = status.HTTP_201_CREATED if imported else status.HTTP_400_BAD_REQUEST
+        response_status = status.HTTP_201_CREATED if imported else (
+            status.HTTP_200_OK if duplicates and not failed else status.HTTP_400_BAD_REQUEST
+        )
         return Response({
             'total_rows': history.total_rows,
             'successfully_imported': imported,
             'failed_rows': failed,
             'duplicate_rows': duplicates,
+            'duplicate_rows_detail': duplicate_rows,
             'errors': errors,
             'status': history.status,
             'import_summary': {
@@ -3681,7 +3712,16 @@ class LeadImportTemplateView(APIView):
         workbook = openpyxl.Workbook()
         sheet = workbook.active
         sheet.title = 'Leads Template'
-        sheet.append(REQUIRED_LEAD_IMPORT_HEADINGS)
+        sheet.append([
+            'Candidate Name',
+            'Phone Number',
+            'Course Interested',
+            'Branch',
+            'How They Know IIE',
+            'Follow-up Date',
+            'Remarks',
+            'Source Description',
+        ])
         sheet.append([
             'Sample Candidate',
             '9876543210',
@@ -3690,6 +3730,7 @@ class LeadImportTemplateView(APIView):
             'Google',
             timezone.localdate().isoformat(),
             'Follow up after demo enquiry.',
+            'Google Ads campaign',
         ])
         response = HttpResponse(
             content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

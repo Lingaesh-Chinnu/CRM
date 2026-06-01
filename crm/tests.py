@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -106,6 +107,58 @@ class NotificationRoleRoutingTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item['title'] for item in response.data], ['Course Change Request'])
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
+class LeadImportValidationTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.staff = User.objects.create_user(
+            username='lead-import-staff',
+            email='lead-import-staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+        )
+        Lead.objects.create(
+            branch=self.branch,
+            name='Existing Lead',
+            phone='9000000001',
+            source=Lead.Source.MANUAL,
+        )
+
+    def test_import_accepts_custom_course_and_source_text(self):
+        self.client.force_authenticate(self.staff)
+        csv_data = (
+            'Candidate Name,Phone Number,Course Interested,How They Know IIE,Remarks\n'
+            'AI Lead,9876543210,Artificial Intelligence,Workshop,Met at seminar desk\n'
+            'Duplicate Lead,9000000001,AI & ML,Seminar,Already in CRM\n'
+            'Bad Phone,123,Python,Google,Invalid mobile\n'
+            'No Course Lead,9876543212,,College Event,Decide course later\n'
+        )
+        upload = SimpleUploadedFile('event-leads.csv', csv_data.encode('utf-8'), content_type='text/csv')
+
+        response = self.client.post('/api/leads/import/', {'file': upload}, format='multipart')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['successfully_imported'], 2)
+        self.assertEqual(response.data['duplicate_rows'], 1)
+        self.assertEqual(response.data['failed_rows'], 1)
+        self.assertEqual(len(response.data['errors']), 1)
+        self.assertIn('Phone Number is invalid.', response.data['errors'][0]['error'])
+
+        ai_lead = Lead.objects.get(phone='9876543210')
+        self.assertIsNone(ai_lead.course)
+        self.assertEqual(ai_lead.external_course_interested, 'Artificial Intelligence')
+        self.assertEqual(ai_lead.source, Lead.Source.OTHERS)
+        self.assertEqual(ai_lead.source_description, 'Workshop')
+
+        no_course_lead = Lead.objects.get(phone='9876543212')
+        self.assertEqual(no_course_lead.external_course_interested, '')
+        self.assertEqual(no_course_lead.source, Lead.Source.OTHERS)
+        self.assertEqual(no_course_lead.source_description, 'College Event')
 
 
 @override_settings(
