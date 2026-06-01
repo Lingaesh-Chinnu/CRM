@@ -6764,6 +6764,48 @@ def schedule_total(schedule):
     return sum(Decimal(str(item.get('amount') or 0)) for item in schedule or [])
 
 
+def adjust_course_change_schedule_total(schedule, course_fee, locked_count=0, enrollment=None):
+    rows = [dict(item) for item in (schedule or [])]
+    expected_total = Decimal(str(course_fee or 0))
+    current_total = schedule_total(rows)
+    difference = expected_total - current_total
+    if difference == 0:
+        return rows, difference
+
+    adjustable_index = len(rows) - 1
+    if adjustable_index < locked_count:
+        due_date = getattr(enrollment, 'start_date', None) or getattr(enrollment, 'enrollment_date', None) or timezone.localdate()
+        rows.append({
+            'label': course_change_installment_label(len(rows) + 1),
+            'amount': 0,
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+        })
+        adjustable_index = len(rows) - 1
+
+    current_amount = Decimal(str(rows[adjustable_index].get('amount') or 0))
+    adjusted_amount = current_amount + difference
+    if adjusted_amount < 0:
+        adjusted_amount = Decimal('0')
+    rows[adjustable_index]['amount'] = decimal_to_schedule_amount(adjusted_amount)
+
+    remaining_difference = expected_total - schedule_total(rows)
+    if remaining_difference != 0:
+        rows[adjustable_index]['amount'] = decimal_to_schedule_amount(
+            Decimal(str(rows[adjustable_index].get('amount') or 0)) + remaining_difference
+        )
+    return rows, difference
+
+
+def paid_numbered_installment_count(locked_items):
+    count = 0
+    for item in locked_items or []:
+        label = str(item.get('label') or '').strip().lower()
+        if label in {'enrollment', 'course fee', 'full payment'}:
+            continue
+        count += 1
+    return count
+
+
 def log_decimal(value):
     return '' if value is None else str(value)
 
@@ -6859,7 +6901,27 @@ def rebuild_pending_installment_schedule(enrollment, payment):
 
     remaining_total = new_total - locked_total
     if remaining_total <= 0:
-        return locked_items
+        adjusted_schedule, correction = adjust_course_change_schedule_total(
+            locked_items,
+            new_total,
+            locked_count=len(locked_items),
+            enrollment=enrollment,
+        )
+        logger.info(
+            'Course change payment schedule calculation: locked schedule adjusted context=%s',
+            course_change_log_context(
+                enrollment=enrollment,
+                payment=payment,
+                new_fee=new_total,
+                paid_amount=str(paid_amount),
+                remaining_balance='0',
+                locked_total=str(locked_total),
+                rebuilt_schedule=adjusted_schedule,
+                schedule_correction=str(correction),
+                final_total=str(schedule_total(adjusted_schedule)),
+            ),
+        )
+        return adjusted_schedule
 
     pending_count = max(len(default_schedule) - len(locked_items), 1)
     base_amount = remaining_total // pending_count
@@ -6870,18 +6932,25 @@ def rebuild_pending_installment_schedule(enrollment, payment):
         due_dates.append(enrollment.start_date or enrollment.enrollment_date)
 
     future_items = []
+    paid_numbered_count = paid_numbered_installment_count(locked_items)
     for offset, amount in enumerate(amounts, start=1):
         index = len(locked_items) + offset
         default_item = default_schedule[index - 1] if index - 1 < len(default_schedule) else {}
         label = default_item.get('label') or course_change_installment_label(index)
         if locked_items:
-            label = course_change_installment_label(index)
+            label = course_change_installment_label(paid_numbered_count + offset)
         future_items.append({
             'label': label,
             'amount': decimal_to_schedule_amount(amount),
             'due_date': due_dates[offset - 1].isoformat() if hasattr(due_dates[offset - 1], 'isoformat') else due_dates[offset - 1],
         })
     rebuilt_schedule = locked_items + future_items
+    rebuilt_schedule, correction = adjust_course_change_schedule_total(
+        rebuilt_schedule,
+        new_total,
+        locked_count=len(locked_items),
+        enrollment=enrollment,
+    )
     logger.info(
         'Course change payment schedule calculation: partial payment schedule rebuilt context=%s',
         course_change_log_context(
@@ -6890,12 +6959,13 @@ def rebuild_pending_installment_schedule(enrollment, payment):
             new_fee=new_total,
             paid_amount=str(paid_amount),
             locked_total=str(locked_total),
-            remaining_total=str(remaining_total),
+            remaining_balance=str(remaining_total),
             pending_count=pending_count,
             default_schedule=default_schedule,
             locked_schedule=locked_items,
             rebuilt_schedule=rebuilt_schedule,
-            rebuilt_schedule_total=str(schedule_total(rebuilt_schedule)),
+            schedule_correction=str(correction),
+            final_total=str(schedule_total(rebuilt_schedule)),
         ),
     )
     return rebuilt_schedule
@@ -6962,8 +7032,25 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
         payment.manual_installment_schedule = rebuild_pending_installment_schedule(enrollment, payment)
         rebuilt_total = schedule_total(payment.manual_installment_schedule)
         if rebuilt_total != Decimal(str(new_fee or 0)):
-            raise ValueError(
-                f'Rebuilt payment schedule total {rebuilt_total} does not match new course fee {new_fee}.'
+            payment.manual_installment_schedule, correction = adjust_course_change_schedule_total(
+                payment.manual_installment_schedule,
+                new_fee,
+                enrollment=enrollment,
+            )
+            rebuilt_total = schedule_total(payment.manual_installment_schedule)
+            logger.info(
+                'Course change payment schedule post-rebuild total auto-corrected context=%s',
+                course_change_log_context(
+                    enrollment=enrollment,
+                    old_course=old_course,
+                    new_course=new_course,
+                    payment=payment,
+                    old_fee=old_fee,
+                    new_fee=new_fee,
+                    schedule_correction=str(correction),
+                    rebuilt_schedule=payment.manual_installment_schedule,
+                    final_total=str(rebuilt_total),
+                ),
             )
         payment.save(update_fields=[
             'total_fees', 'paid_amount', 'manual_installment_schedule',
@@ -6978,8 +7065,9 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
                 payment=payment,
                 old_fee=old_fee,
                 new_fee=new_fee,
+                remaining_balance=str(Decimal(str(new_fee or 0)) - Decimal(str(payment.paid_amount or 0))),
                 rebuilt_schedule=payment.manual_installment_schedule,
-                rebuilt_schedule_total=str(rebuilt_total),
+                final_total=str(rebuilt_total),
                 payment_status=payment.status,
                 next_payment_date=payment.next_payment_date.isoformat() if hasattr(payment.next_payment_date, 'isoformat') else payment.next_payment_date,
                 installment_count=payment.installments.count(),

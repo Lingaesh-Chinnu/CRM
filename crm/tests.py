@@ -1071,7 +1071,79 @@ class PublicWalkInFormTests(APITestCase):
         ])
         self.assertTrue(any('Course change approval completed' in entry for entry in logs.output))
         self.assertTrue(any("'request_id': " in entry for entry in logs.output))
-        self.assertTrue(any("'rebuilt_schedule_total': '15000'" in entry for entry in logs.output))
+        self.assertTrue(any("'final_total': '15000'" in entry for entry in logs.output))
+
+    def test_course_change_approval_auto_corrects_rebuilt_schedule_total(self):
+        course_25000 = Course.objects.create(name='Course 25000', actual_fees=25000)
+        course_29900 = Course.objects.create(name='Course 29900', actual_fees=29900)
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=course_25000,
+            name='Schedule Correction Student',
+            phone='9000000142',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=25000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            enrolled_by=self.staff,
+            created_by=self.staff,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 11950, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 11950, 'due_date': '2026-06-12'},
+            ],
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 11950, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 11950, 'due_date': '2026-06-12'},
+            ],
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment',
+            payment_date='2026-05-11',
+            receipt_number='RCPT-SCHEDULE-CORRECTION',
+        )
+        change_request = CourseChangeRequest.objects.create(
+            student=enrollment,
+            enrollment=enrollment,
+            old_course=course_25000,
+            requested_course=course_29900,
+            requested_batch_date='2026-05-20',
+            reason='Move to upgraded course',
+            requested_by=self.staff,
+            old_fee=enrollment.net_payable_fee,
+            new_fee=course_29900.actual_fees,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/course-change-requests/{change_request.id}/approve/', format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        enrollment.refresh_from_db()
+        payment.refresh_from_db()
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, CourseChangeRequest.Status.APPROVED)
+        self.assertEqual(enrollment.course, course_29900)
+        self.assertEqual(payment.total_fees, Decimal('29900.00'))
+        self.assertEqual(payment.paid_amount, Decimal('5000.00'))
+        self.assertEqual(payment.balance, Decimal('24900.00'))
+        self.assertEqual(PaymentInstallment.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 12450, 'due_date': '2026-05-12'},
+            {'label': '2nd Installment', 'amount': 12450, 'due_date': '2026-06-12'},
+        ])
+        self.assertEqual(sum(Decimal(str(item['amount'])) for item in payment.manual_installment_schedule), Decimal('29900'))
 
     def test_course_change_approval_returns_backend_error_message(self):
         enrollment = Enrollment.objects.create(
