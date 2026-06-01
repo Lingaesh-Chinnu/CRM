@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -9,6 +9,7 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
+import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 function statusLabel(status) {
   if (!status) return 'New'
@@ -119,6 +120,9 @@ export default function LeadsListPage() {
   const canImportLeads = user?.role && user.role !== 'super_admin'
   const isSuperAdmin = user?.role === 'super_admin'
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const returnTo = currentReturnTo(location)
+  const navigationMessage = location.state?.message || ''
   const statusFilter = searchParams.get('status') || ''
   const walkinDateFrom = searchParams.get('walkin_date_from') || ''
   const walkinDateTo = searchParams.get('walkin_date_to') || ''
@@ -228,6 +232,12 @@ export default function LeadsListPage() {
       .then(({ data }) => setStaffUsers(data || []))
       .catch(() => setStaffUsers([]))
   }, [])
+
+  useEffect(() => {
+    if (location.state?.listFilters) {
+      setFilters((current) => ({ ...current, ...location.state.listFilters }))
+    }
+  }, [location.state])
 
   useEffect(() => {
     if (!isSuperAdmin) return
@@ -594,9 +604,9 @@ export default function LeadsListPage() {
           />
           <TeamColorLegend users={filteredLeads.map((lead) => lead.assigned_user)} />
         </div>
-        {loadMessage && (
+        {(navigationMessage || loadMessage) && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700 sm:px-8">
-            {loadMessage}
+            {navigationMessage || loadMessage}
           </div>
         )}
         {focus === 'today-follow-up' && (
@@ -664,7 +674,7 @@ export default function LeadsListPage() {
                       <div className="flex min-w-0 items-center gap-2">
                         <ImportantToggle active={!!lead.is_important} onToggle={(nextValue) => toggleLeadImportant(lead, nextValue)} />
                         <OwnerDot user={lead.assigned_user} />
-                        <Link to={`/leads/${lead.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
+                        <Link to={withReturnTo(`/leads/${lead.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
                       </div>
                       <p className="mt-1 overflow-hidden break-words text-xs leading-4 text-slate-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{lead.course_name || 'Course not selected'}</p>
                     </div>

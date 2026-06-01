@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -7,6 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import { OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
+import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 function normaliseListResponse(data) {
   return data.results || data
@@ -93,9 +94,18 @@ export default function EnrollmentsListPage() {
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const location = useLocation()
+  const returnTo = currentReturnTo(location)
+  const navigationMessage = location.state?.message || ''
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
   const debouncedSearch = useDebouncedValue(filters.search.trim())
+
+  useEffect(() => {
+    if (location.state?.listFilters) {
+      setFilters((current) => ({ ...current, ...location.state.listFilters }))
+    }
+  }, [location.state])
 
   useEffect(() => {
     loadFilterOptions()
@@ -254,9 +264,9 @@ export default function EnrollmentsListPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        {message && (
+        {(navigationMessage || message) && (
           <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700">
-            {message}
+            {navigationMessage || message}
           </div>
         )}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
@@ -284,7 +294,7 @@ export default function EnrollmentsListPage() {
               rows={rows}
               columns={[
                 { key: 'enrollmentDate', header: 'Enroll Date', width: '68px', className: 'flex items-center', render: (row) => <CompactStamp dateValue={row.enrollment_date || row.created_at} timeValue={row.created_at || row.enrollment_date} /> },
-                { key: 'name', header: 'Student', width: 'minmax(155px,1.15fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={`/enrollments/${row.id}`} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'name', header: 'Student', width: 'minmax(155px,1.15fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={withReturnTo(`/enrollments/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
                 { key: 'course', header: 'Course', width: 'minmax(120px,0.95fr)', className: 'flex items-center', render: (row) => <span className="overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{row.course_name || 'Course pending'}</span> },
                 ...(isSuperAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(76px,0.65fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> }] : []),
                 { key: 'status', header: 'Status', width: '92px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },

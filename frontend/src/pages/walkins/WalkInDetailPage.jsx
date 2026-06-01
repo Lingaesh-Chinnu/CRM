@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
+import { FOLLOW_UP_SUCCESS_MESSAGE, resolveReturnTo } from '../../utils/returnNavigation'
 
 function prettyValue(value, fallback = '') {
   return value || fallback
@@ -165,6 +166,7 @@ function FormField({ label, children }) {
 export default function WalkInDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useSelector((state) => state.auth)
   const [walkin, setWalkin] = useState(null)
   const [courses, setCourses] = useState([])
@@ -376,7 +378,10 @@ export default function WalkInDetailPage() {
       follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(current.follow_ups || [])],
     }))
-    setMessage('Follow-up saved.')
+    navigate(resolveReturnTo(location, '/walkins'), {
+      replace: true,
+      state: { message: FOLLOW_UP_SUCCESS_MESSAGE, listFilters: location.state?.listFilters },
+    })
   }
 
   const updateDetail = (field, value) => {

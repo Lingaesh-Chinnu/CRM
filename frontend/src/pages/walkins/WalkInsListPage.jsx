@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -8,6 +8,7 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
+import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
 
@@ -103,7 +104,7 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch }) {
+function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters }) {
   const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
@@ -157,7 +158,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                     <div className="flex min-w-0 items-center gap-2">
                       <ImportantToggle active={!!walkin.is_important} onToggle={(nextValue) => onImportantToggle(walkin, nextValue)} />
                       <OwnerDot user={walkin.assigned_user} />
-                      <Link to={`/walkins/${walkin.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
+                      <Link to={withReturnTo(`/walkins/${walkin.id}`, returnTo)} state={{ returnTo, listFilters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
                     </div>
                     <p className="mt-1 truncate text-xs text-slate-500">{walkin.phone || 'Phone not set'}</p>
                   </div>
@@ -210,6 +211,9 @@ export default function WalkInsListPage() {
   const [loadMessage, setLoadMessage] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
+  const returnTo = currentReturnTo(location)
+  const navigationMessage = location.state?.message || ''
   const { user } = useSelector((state) => state.auth)
   const canFilterByBranch = user?.role === 'super_admin'
   const appliedFilters = useMemo(() => readFilters(searchParams, canFilterByBranch), [searchParams, canFilterByBranch])
@@ -234,6 +238,12 @@ export default function WalkInsListPage() {
   useEffect(() => {
     setFilters(appliedFilters)
   }, [appliedFilters])
+
+  useEffect(() => {
+    if (location.state?.listFilters) {
+      setFilters((current) => ({ ...current, ...location.state.listFilters }))
+    }
+  }, [location.state])
 
   useEffect(() => {
     Promise.all([
@@ -391,9 +401,9 @@ export default function WalkInsListPage() {
       </section>
 
       <form method="GET" onSubmit={submitFilters} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-        {loadMessage && (
+        {(navigationMessage || loadMessage) && (
           <div className="mb-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
-            {loadMessage}
+            {navigationMessage || loadMessage}
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -480,6 +490,8 @@ export default function WalkInsListPage() {
         activeFilter={activeSmartFilter}
         onStatusChange={applyStatusFilter}
         canViewBranch={canFilterByBranch}
+        returnTo={returnTo}
+        listFilters={filters}
       />
 
       <div className="pt-2">
@@ -493,6 +505,8 @@ export default function WalkInsListPage() {
           activeFilter={activeSmartFilter}
           onStatusChange={applyStatusFilter}
           canViewBranch={canFilterByBranch}
+          returnTo={returnTo}
+          listFilters={filters}
         />
       </div>
     </div>

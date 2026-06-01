@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useLocation, useParams } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
@@ -7,6 +7,7 @@ import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
+import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const moduleConfig = {
   leads: { title: 'Lead Pending', endpoint: '/pending/leads/', detailPrefix: '/leads', followType: 'lead' },
@@ -41,6 +42,9 @@ function statusTone(status) {
 
 export default function PendingPage() {
   const { module = 'leads' } = useParams()
+  const location = useLocation()
+  const returnTo = currentReturnTo(location)
+  const navigationMessage = location.state?.message || ''
   const config = moduleConfig[module] || moduleConfig.leads
   const { user } = useSelector((state) => state.auth)
   const isAdmin = user?.role === 'super_admin'
@@ -60,6 +64,12 @@ export default function PendingPage() {
     importantOnly: false,
   })
   const debouncedSearch = useDebouncedValue(filters.search.trim())
+
+  useEffect(() => {
+    if (location.state?.listFilters) {
+      setFilters((current) => ({ ...current, ...location.state.listFilters }))
+    }
+  }, [location.state])
 
   const params = useMemo(() => {
     const next = {}
@@ -138,7 +148,7 @@ export default function PendingPage() {
 
   const leadWalkinColumns = [
     { key: 'due', header: 'Due Date', width: '92px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{formatDate(row.due_date)}</span> },
-    { key: 'name', header: 'Candidate', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.assigned_user} /><Link to={row.detail_url || `${config.detailPrefix}/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.phone || '-'}</p></div> },
+    { key: 'name', header: 'Candidate', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.assigned_user} /><Link to={withReturnTo(row.detail_url || `${config.detailPrefix}/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.phone || '-'}</p></div> },
     { key: 'course', header: 'Course', width: 'minmax(120px,0.9fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
     ...(isAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(90px,0.7fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || '-'}</span> }] : []),
     { key: 'status', header: 'Status', width: '108px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusTone(row.status)}>{row.status_display || row.status}</StatusBadge> },
@@ -148,13 +158,13 @@ export default function PendingPage() {
 
   const paymentColumns = [
     { key: 'due', header: 'Due Date', width: '92px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{formatDate(row.due_date)}</span> },
-    { key: 'student', header: 'Student', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.counselor_user} /><Link to={row.detail_url || `/payments/${row.id}`} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number || row.phone || '-'}</p></div> },
+    { key: 'student', header: 'Student', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><ImportantToggle active={!!row.is_important} onToggle={(nextValue) => toggleImportant(row, nextValue)} /><OwnerDot user={row.counselor_user} /><Link to={withReturnTo(row.detail_url || `/payments/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{row.student_name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number || row.phone || '-'}</p></div> },
     { key: 'course', header: 'Course', width: 'minmax(110px,0.85fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.course_name || '-'}</span> },
     ...(isAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(90px,0.7fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || '-'}</span> }] : []),
     { key: 'installment', header: 'Installment', width: 'minmax(120px,0.9fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.installment_label || '-'}</span> },
     { key: 'dueAmount', header: 'Due', width: '96px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.due_amount)}</span> },
     { key: 'balance', header: 'Balance', width: '100px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.pending_balance)}</span> },
-    { key: 'action', header: 'Action', width: '104px', className: 'flex items-center', render: (row) => <Link to={row.detail_url || `/payments/${row.id}`} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Collect</Link> },
+    { key: 'action', header: 'Action', width: '104px', className: 'flex items-center', render: (row) => <Link to={withReturnTo(row.detail_url || `/payments/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">Collect</Link> },
   ]
 
   return (
@@ -204,7 +214,7 @@ export default function PendingPage() {
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-        {message && <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700">{message}</div>}
+        {(navigationMessage || message) && <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700">{navigationMessage || message}</div>}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <h2 className="text-xl font-black tracking-tight text-slate-950">{rows.length} pending items</h2>
         </div>
