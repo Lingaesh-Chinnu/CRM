@@ -170,9 +170,28 @@ function UsageMetricCard({ label, value, tone = 'slate' }) {
   )
 }
 
+function formatScreenTimeDate(value) {
+  if (!value || value === '-') return '-'
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value))
+}
+
+function screenTimeDisplay(point) {
+  if (point?.display) return point.display
+  const totalSeconds = Math.max(Number(point?.seconds || 0), 0)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (hours) return `${hours}h ${minutes}m`
+  return `${minutes}m`
+}
+
 function UsageLineChart({ points }) {
+  const [activeIndex, setActiveIndex] = useState(null)
   const values = points?.length ? points : [{ date: '-', label: '-', seconds: 0, hours: 0 }]
-  const maxHours = Math.max(...values.map((item) => Number(item.hours || 0)), 1)
+  const maxHours = Math.max(...values.map((item) => Number(item.seconds || 0) / 3600), 1)
   const width = 640
   const height = 220
   const padX = 36
@@ -181,8 +200,9 @@ function UsageLineChart({ points }) {
   const usableHeight = height - padY * 2
   const plotted = values.map((item, index) => {
     const x = values.length <= 1 ? padX : padX + (index / (values.length - 1)) * usableWidth
-    const y = padY + usableHeight - (Number(item.hours || 0) / maxHours) * usableHeight
-    return { ...item, x, y }
+    const hours = Number(item.seconds || 0) / 3600
+    const y = padY + usableHeight - (hours / maxHours) * usableHeight
+    return { ...item, hours, x, y }
   })
   const path = plotted.map((point, index) => {
     if (index === 0) return `M ${point.x} ${point.y}`
@@ -190,6 +210,9 @@ function UsageLineChart({ points }) {
     const midX = (previous.x + point.x) / 2
     return `C ${midX} ${previous.y}, ${midX} ${point.y}, ${point.x} ${point.y}`
   }).join(' ')
+  const activePoint = activeIndex !== null ? plotted[activeIndex] : null
+  const tooltipLeft = activePoint ? Math.min(Math.max((activePoint.x / width) * 100, 14), 86) : 50
+  const tooltipTop = activePoint ? Math.min(Math.max((activePoint.y / height) * 100, 20), 82) : 50
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
@@ -200,15 +223,62 @@ function UsageLineChart({ points }) {
         </div>
         <p className="text-sm font-semibold text-slate-500">Hours per day</p>
       </div>
-      <div className="mt-5 overflow-hidden rounded-lg bg-slate-50 p-3">
-        <svg viewBox={`0 0 ${width} ${height}`} className="h-64 w-full" role="img" aria-label="Daily CRM usage trend">
+      <div className="relative mt-5 overflow-hidden rounded-lg bg-slate-50 p-3">
+        {activePoint && (
+          <div
+            className="pointer-events-none absolute z-10 min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-xl"
+            style={{
+              left: `${tooltipLeft}%`,
+              top: `${tooltipTop}%`,
+              transform: 'translate(-50%, calc(-100% - 12px))',
+            }}
+          >
+            <p className="font-black text-slate-950">Date: {formatScreenTimeDate(activePoint.date)}</p>
+            <p className="mt-1">Screen Time: {screenTimeDisplay(activePoint)}</p>
+          </div>
+        )}
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="h-64 w-full touch-manipulation"
+          role="img"
+          aria-label="Daily CRM screen time trend"
+          onMouseLeave={() => setActiveIndex(null)}
+        >
           {[0, 1, 2, 3].map((line) => {
             const y = padY + (line / 3) * usableHeight
             return <line key={line} x1={padX} x2={width - padX} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
           })}
           <path d={path} fill="none" stroke="#334155" strokeWidth="4" strokeLinecap="round" />
-          {plotted.map((point) => (
-            <circle key={point.date} cx={point.x} cy={point.y} r="4" fill="#334155" />
+          {plotted.map((point, index) => (
+            <g key={`${point.date}-${index}`}>
+              {activeIndex === index && (
+                <>
+                  <line x1={point.x} x2={point.x} y1={padY} y2={height - padY} stroke="#94a3b8" strokeDasharray="4 4" strokeWidth="1.5" />
+                  <circle cx={point.x} cy={point.y} r="9" fill="#334155" opacity="0.16" />
+                </>
+              )}
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r={activeIndex === index ? '6' : '4'}
+                fill={activeIndex === index ? '#0f172a' : '#334155'}
+                stroke="#ffffff"
+                strokeWidth="2"
+              />
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="14"
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseEnter={() => setActiveIndex(index)}
+                onFocus={() => setActiveIndex(index)}
+                onClick={() => setActiveIndex(index)}
+                tabIndex="0"
+                role="button"
+                aria-label={`${formatScreenTimeDate(point.date)} screen time ${screenTimeDisplay(point)}`}
+              />
+            </g>
           ))}
           <text x={padX} y={height - 4} className="fill-slate-500 text-xs font-semibold">{values[0]?.label || '-'}</text>
           <text x={width - padX} y={height - 4} textAnchor="end" className="fill-slate-500 text-xs font-semibold">

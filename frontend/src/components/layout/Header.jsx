@@ -194,6 +194,7 @@ export default function Header({ onMenuClick }) {
               </div>
             )}
           </div>
+          {user?.role !== 'super_admin' && (
           <Link
             to="/performance-hub?period=last_month"
             title="View Last Month Performance"
@@ -205,6 +206,7 @@ export default function Header({ onMenuClick }) {
               View Last Month Performance
             </span>
           </Link>
+          )}
           <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-700 p-[1px] shadow-lg shadow-slate-300/50">
             <button
               onClick={handleLogout}

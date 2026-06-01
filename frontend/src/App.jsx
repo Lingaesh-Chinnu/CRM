@@ -73,6 +73,16 @@ function RootRedirect() {
   return <Navigate to="/login" replace />
 }
 
+function UserPerformanceRoute() {
+  const { user, initialized } = useSelector((state) => state.auth)
+
+  if (!initialized) return null
+  if (user?.role === 'super_admin') {
+    return <Navigate to="/admin/reports" replace />
+  }
+  return <PerformanceHubPage />
+}
+
 export default function App() {
   const dispatch = useDispatch()
   const { initialized } = useSelector((state) => state.auth)
@@ -127,7 +137,7 @@ export default function App() {
         {/* Notifications */}
         <Route path="notifications"   element={<NotificationsPage />} />
         <Route path="team-board"      element={<TeamBoardPage />} />
-        <Route path="performance-hub" element={<PerformanceHubPage />} />
+        <Route path="performance-hub" element={<UserPerformanceRoute />} />
         <Route path="counselor-change-requests" element={<CounselorChangeRequestsPage />} />
         <Route path="pending/:module" element={<PendingPage />} />
 
