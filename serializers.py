@@ -512,9 +512,17 @@ class FollowUpSerializer(serializers.ModelSerializer):
             return ''
 
 
+def lead_course_display(obj):
+    return (
+        getattr(getattr(obj, 'course', None), 'name', '')
+        or safe_deferred_value(obj, 'external_course_interested', '')
+        or ''
+    )
+
+
 class LeadListSerializer(serializers.ModelSerializer):
     """Compact serializer for list endpoints."""
-    course_name  = serializers.CharField(source='course.name', read_only=True)
+    course_name = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     lead_status = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
@@ -591,9 +599,12 @@ class LeadListSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+    def get_course_name(self, obj):
+        return lead_course_display(obj)
+
 
 class LeadInboxSerializer(serializers.ModelSerializer):
-    course_name = serializers.CharField(source='course.name', read_only=True)
+    course_name = serializers.SerializerMethodField()
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     willing_to_join_display = serializers.CharField(source='get_willing_to_join_display', read_only=True)
@@ -613,10 +624,13 @@ class LeadInboxSerializer(serializers.ModelSerializer):
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
 
+    def get_course_name(self, obj):
+        return lead_course_display(obj)
+
 
 class LeadDetailSerializer(serializers.ModelSerializer):
     """Full serializer for retrieve/create/update."""
-    course_name      = serializers.CharField(source='course.name',        read_only=True)
+    course_name      = serializers.SerializerMethodField()
     assigned_to_name = serializers.SerializerMethodField()
     dob              = serializers.DateField(
         required=False,
@@ -721,6 +735,9 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             return obj.assigned_to.full_name if obj.assigned_to_id and obj.assigned_to else ''
         except Exception:
             return ''
+
+    def get_course_name(self, obj):
+        return lead_course_display(obj)
 
     def get_assigned_user(self, obj):
         if not getattr(obj, 'assigned_to_id', None):

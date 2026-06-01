@@ -208,6 +208,15 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
+PUBLIC_LEAD_COURSE_NAMES = [
+    'Artificial Intelligence',
+    'Data Analytics',
+    'Full Stack Python',
+    'Full Stack Java',
+    'MERN Stack',
+    'Cyber Security',
+    'Digital Marketing',
+]
 
 
 def missing_model_columns(model, field_names):
@@ -2814,6 +2823,25 @@ class LeadViewSet(viewsets.ModelViewSet):
             return LeadDetailSerializer
         return LeadDetailSerializer
 
+    def partial_update(self, request, *args, **kwargs):
+        if 'course' in request.data:
+            lead = self.get_object()
+            has_enrollment = Enrollment.objects.filter(
+                Q(lead_id=lead.id) | Q(walkin__lead_id=lead.id),
+                is_deleted=False,
+            ).exists()
+            converted = bool(lead.converted_to_type) or lead.status in {
+                Lead.Status.CONVERTED,
+                Lead.Status.CONVERTED_TO_WALKIN,
+                Lead.Status.ENROLLED,
+            }
+            if has_enrollment or converted:
+                return Response(
+                    {'detail': 'Course can be edited only while this record is still a lead. Use the enrollment course change workflow after enrollment.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        return super().partial_update(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='request-counselor-change')
     def request_counselor_change(self, request, pk=None):
         lead = self.get_object()
@@ -5322,10 +5350,9 @@ class PublicLeadFormView(APIView):
             is_active=True,
             name__in=['Gandhipuram', 'Hopes', 'Kuniyamuthur'],
         ).order_by('name')
-        courses = Course.objects.filter(is_active=True).order_by('name')
         return Response({
             'branches': BranchSerializer(branches, many=True).data,
-            'courses': [{'id': course.id, 'name': course.name} for course in courses],
+            'courses': [{'id': name, 'name': name} for name in PUBLIC_LEAD_COURSE_NAMES],
             'willing_to_join_options': self.willing_to_join_options,
             'qualification_options': self.qualification_options,
             'preferred_timing_options': self.preferred_timing_options,
@@ -5339,7 +5366,7 @@ class PublicLeadFormView(APIView):
         phone = normalize_phone_number(request.data.get('mobile_number'))
         preferred_timing = str(request.data.get('preferred_timing') or '').strip()
         branch_id = request.data.get('branch')
-        course_id = request.data.get('course_interested')
+        course_value = str(request.data.get('course_interested') or '').strip()
 
         if not name or not phone:
             return Response({'detail': 'Full Name and Mobile Number are required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -5350,16 +5377,28 @@ class PublicLeadFormView(APIView):
 
         if branch_id in (None, ''):
             return Response({'detail': 'Please select a valid branch.'}, status=status.HTTP_400_BAD_REQUEST)
-        if course_id in (None, ''):
+        if not course_value:
             return Response({'detail': 'Please select a valid course.'}, status=status.HTTP_400_BAD_REQUEST)
 
         branch = Branch.objects.filter(pk=branch_id, is_active=True).first()
         if not branch:
             return Response({'detail': 'Please select a valid branch.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        course = Course.objects.filter(pk=course_id, is_active=True).first()
-        if not course:
+        course = None
+        selected_course_name = course_value
+        if course_value.isdigit():
+            course = Course.objects.filter(pk=course_value, is_active=True).first()
+            selected_course_name = course.name if course else course_value
+        else:
+            course = Course.objects.filter(name__iexact=course_value, is_active=True).first()
+        valid_public_course_names = {name.lower() for name in PUBLIC_LEAD_COURSE_NAMES}
+        if selected_course_name.lower() not in valid_public_course_names and not course:
             return Response({'detail': 'Please select a valid course.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not course:
+            selected_course_name = next(
+                (name for name in PUBLIC_LEAD_COURSE_NAMES if name.lower() == selected_course_name.lower()),
+                selected_course_name,
+            )
 
         valid_timing = {item['value'] for item in self.preferred_timing_options}
         if preferred_timing not in valid_timing:
@@ -5371,8 +5410,13 @@ class PublicLeadFormView(APIView):
             existing_lead.next_follow_up_date = timezone.localdate()
             existing_lead.is_duplicate = True
             existing_lead.external_message = 'Duplicate public website lead submission.'
+            existing_lead.external_course_interested = selected_course_name
+            existing_lead.course = course or existing_lead.course
             existing_lead.preferred_timing = preferred_timing
-            existing_lead.save(update_fields=['next_follow_up_date', 'is_duplicate', 'external_message', 'preferred_timing', 'updated_at'])
+            existing_lead.save(update_fields=[
+                'next_follow_up_date', 'is_duplicate', 'external_message',
+                'external_course_interested', 'course', 'preferred_timing', 'updated_at',
+            ])
             return Response({
                 'duplicate': True,
                 'detail': 'Thank you! Our team will contact you shortly.',
@@ -5395,13 +5439,14 @@ class PublicLeadFormView(APIView):
             source=Lead.Source.WEBSITE,
             preferred_timing=preferred_timing,
             remarks='Public website lead form submission.',
+            external_course_interested=selected_course_name,
             created_by=None,
             assigned_to=None,
         )
         notify_branch_users(
             branch,
             'New website lead assigned',
-            f'{lead.name} submitted a website enquiry for {course.name}.',
+            f'{lead.name} submitted a website enquiry for {selected_course_name}.',
             Notification.NType.INFO,
             f'/leads/{lead.id}',
         )
@@ -6700,22 +6745,98 @@ def decimal_to_schedule_amount(value):
     return float(value)
 
 
+def course_change_installment_label(index):
+    known = {
+        1: '1st Installment',
+        2: '2nd Installment',
+        3: '3rd Installment',
+    }
+    if index in known:
+        return known[index]
+    if 10 <= index % 100 <= 20:
+        suffix = 'th'
+    else:
+        suffix = {1: 'st', 2: 'nd', 3: 'rd'}.get(index % 10, 'th')
+    return f'{index}{suffix} Installment'
+
+
+def schedule_total(schedule):
+    return sum(Decimal(str(item.get('amount') or 0)) for item in schedule or [])
+
+
+def log_decimal(value):
+    return '' if value is None else str(value)
+
+
+def course_change_log_context(change_request=None, enrollment=None, old_course=None, new_course=None, payment=None, **extra):
+    enrollment = enrollment or getattr(change_request, 'enrollment', None)
+    new_course = new_course or getattr(change_request, 'requested_course', None)
+    old_course = old_course or getattr(change_request, 'old_course', None) or getattr(enrollment, 'course', None)
+    branch = getattr(enrollment, 'branch', None)
+    context = {
+        'request_id': getattr(change_request, 'id', None),
+        'enrollment_id': getattr(enrollment, 'id', None) or getattr(change_request, 'enrollment_id', None),
+        'old_course_id': getattr(old_course, 'id', None),
+        'old_course': getattr(old_course, 'name', None),
+        'new_course_id': getattr(new_course, 'id', None),
+        'new_course': getattr(new_course, 'name', None),
+        'branch_id': getattr(branch, 'id', None),
+        'branch': getattr(branch, 'name', None),
+        'old_fee': log_decimal(extra.pop('old_fee', None)),
+        'new_fee': log_decimal(extra.pop('new_fee', None)),
+        'course_actual_fees': log_decimal(getattr(new_course, 'actual_fees', None)),
+        'course_discount_amount': log_decimal(getattr(new_course, 'discount_amount', None)),
+        'payment_id': getattr(payment, 'id', None),
+        'payment_total_fees': log_decimal(getattr(payment, 'total_fees', None)),
+        'payment_paid_amount': log_decimal(getattr(payment, 'paid_amount', None)),
+    }
+    context.update(extra)
+    return context
+
+
 def rebuild_pending_installment_schedule(enrollment, payment):
     new_total = Decimal(str(enrollment_payable_fee(enrollment) or 0))
     paid_amount = Decimal(str(payment.paid_amount or 0))
     if new_total <= 0:
+        logger.info(
+            'Course change payment schedule calculation: no payable fee context=%s',
+            course_change_log_context(enrollment=enrollment, payment=payment, new_fee=new_total),
+        )
         return []
 
     default_schedule = serialize_enrollment_payment_schedule(enrollment)
     if paid_amount <= 0:
+        logger.info(
+            'Course change payment schedule calculation: unpaid schedule rebuilt context=%s',
+            course_change_log_context(
+                enrollment=enrollment,
+                payment=payment,
+                new_fee=new_total,
+                default_schedule=default_schedule,
+                rebuilt_schedule=default_schedule,
+                rebuilt_schedule_total=str(schedule_total(default_schedule)),
+            ),
+        )
         return default_schedule
 
     if paid_amount >= new_total:
-        return [{
+        rebuilt_schedule = [{
             'label': 'Course Fee',
             'amount': decimal_to_schedule_amount(new_total),
             'due_date': enrollment.enrollment_date.isoformat() if enrollment.enrollment_date else None,
         }]
+        logger.info(
+            'Course change payment schedule calculation: already fully paid context=%s',
+            course_change_log_context(
+                enrollment=enrollment,
+                payment=payment,
+                new_fee=new_total,
+                default_schedule=default_schedule,
+                rebuilt_schedule=rebuilt_schedule,
+                rebuilt_schedule_total=str(schedule_total(rebuilt_schedule)),
+            ),
+        )
+        return rebuilt_schedule
 
     locked_items = []
     locked_total = Decimal('0')
@@ -6752,18 +6873,50 @@ def rebuild_pending_installment_schedule(enrollment, payment):
     for offset, amount in enumerate(amounts, start=1):
         index = len(locked_items) + offset
         default_item = default_schedule[index - 1] if index - 1 < len(default_schedule) else {}
+        label = default_item.get('label') or course_change_installment_label(index)
+        if locked_items:
+            label = course_change_installment_label(index)
         future_items.append({
-            'label': default_item.get('label') or f'{index} Installment',
+            'label': label,
             'amount': decimal_to_schedule_amount(amount),
             'due_date': due_dates[offset - 1].isoformat() if hasattr(due_dates[offset - 1], 'isoformat') else due_dates[offset - 1],
         })
-    return locked_items + future_items
+    rebuilt_schedule = locked_items + future_items
+    logger.info(
+        'Course change payment schedule calculation: partial payment schedule rebuilt context=%s',
+        course_change_log_context(
+            enrollment=enrollment,
+            payment=payment,
+            new_fee=new_total,
+            paid_amount=str(paid_amount),
+            locked_total=str(locked_total),
+            remaining_total=str(remaining_total),
+            pending_count=pending_count,
+            default_schedule=default_schedule,
+            locked_schedule=locked_items,
+            rebuilt_schedule=rebuilt_schedule,
+            rebuilt_schedule_total=str(schedule_total(rebuilt_schedule)),
+        ),
+    )
+    return rebuilt_schedule
 
 
 def apply_enrollment_course_change(enrollment, new_course, user, reason='', effective_date=None):
     effective_date = effective_date or timezone.localdate()
     old_course = enrollment.course
     old_fee = enrollment_payable_fee(enrollment)
+    logger.info(
+        'Course change apply starting context=%s',
+        course_change_log_context(
+            enrollment=enrollment,
+            old_course=old_course,
+            new_course=new_course,
+            old_fee=old_fee,
+            course_fee=str(getattr(new_course, 'actual_fees', '') or ''),
+            course_discount=str(getattr(new_course, 'discount_amount', '') or ''),
+            effective_date=effective_date.isoformat() if hasattr(effective_date, 'isoformat') else effective_date,
+        ),
+    )
 
     enrollment.course = new_course
     enrollment.final_enrollment_course = new_course
@@ -6775,6 +6928,20 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
         'custom_payable_fee', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
     ])
     new_fee = enrollment_payable_fee(enrollment)
+    logger.info(
+        'Course change enrollment fee recalculated context=%s',
+        course_change_log_context(
+            enrollment=enrollment,
+            old_course=old_course,
+            new_course=new_course,
+            old_fee=old_fee,
+            new_fee=new_fee,
+            enrollment_actual_fees=str(enrollment.actual_fees),
+            enrollment_discount_amount=str(enrollment.discount_amount),
+            enrollment_final_fees=str(enrollment.final_fees),
+            enrollment_net_payable_fee=str(enrollment.net_payable_fee),
+        ),
+    )
 
     CourseChangeHistory.objects.create(
         enrollment=enrollment,
@@ -6793,10 +6960,42 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
         payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
         payment.total_fees = new_fee
         payment.manual_installment_schedule = rebuild_pending_installment_schedule(enrollment, payment)
+        rebuilt_total = schedule_total(payment.manual_installment_schedule)
+        if rebuilt_total != Decimal(str(new_fee or 0)):
+            raise ValueError(
+                f'Rebuilt payment schedule total {rebuilt_total} does not match new course fee {new_fee}.'
+            )
         payment.save(update_fields=[
             'total_fees', 'paid_amount', 'manual_installment_schedule',
             'status', 'next_payment_date', 'updated_at',
         ])
+        logger.info(
+            'Course change payment schedule saved context=%s',
+            course_change_log_context(
+                enrollment=enrollment,
+                old_course=old_course,
+                new_course=new_course,
+                payment=payment,
+                old_fee=old_fee,
+                new_fee=new_fee,
+                rebuilt_schedule=payment.manual_installment_schedule,
+                rebuilt_schedule_total=str(rebuilt_total),
+                payment_status=payment.status,
+                next_payment_date=payment.next_payment_date.isoformat() if hasattr(payment.next_payment_date, 'isoformat') else payment.next_payment_date,
+                installment_count=payment.installments.count(),
+            ),
+        )
+    else:
+        logger.info(
+            'Course change has no payment record to rebuild context=%s',
+            course_change_log_context(
+                enrollment=enrollment,
+                old_course=old_course,
+                new_course=new_course,
+                old_fee=old_fee,
+                new_fee=new_fee,
+            ),
+        )
     return old_course, old_fee, new_fee
 
 
@@ -7482,52 +7681,111 @@ class CourseChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
     def approve(self, request, pk=None):
         if not request.user.is_super_admin:
             return Response({'detail': 'Only admin can approve course change requests.'}, status=status.HTTP_403_FORBIDDEN)
-        change_request = self.get_object()
-        if change_request.status != CourseChangeRequest.Status.PENDING:
-            return Response({'detail': 'Only pending course change requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
-        remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
+        try:
+            change_request = self.get_object()
+            if change_request.status != CourseChangeRequest.Status.PENDING:
+                return Response({'detail': 'Only pending course change requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+            remarks = str(request.data.get('admin_remarks') or request.data.get('remarks') or '').strip()
 
-        with transaction.atomic():
-            change_request = CourseChangeRequest.objects.select_for_update().select_related(
-                'enrollment', 'requested_course', 'requested_by',
-            ).get(pk=change_request.pk)
-            enrollment = Enrollment.objects.select_for_update().select_related('course', 'branch').get(pk=change_request.enrollment_id)
-            if enrollment.course_id == change_request.requested_course_id:
-                return Response({'detail': 'Enrollment is already in the requested course.'}, status=status.HTTP_400_BAD_REQUEST)
-            old_course, old_fee, new_fee = apply_enrollment_course_change(
-                enrollment,
-                change_request.requested_course,
-                request.user,
-                change_request.reason,
-                change_request.requested_batch_date or timezone.localdate(),
+            logger.info(
+                'Course change approval requested context=%s',
+                course_change_log_context(change_request=change_request),
             )
-            change_request.old_course = old_course
-            change_request.old_fee = old_fee
-            change_request.new_fee = new_fee
-            change_request.status = CourseChangeRequest.Status.APPROVED
-            change_request.reviewed_by = request.user
-            change_request.reviewed_at = timezone.now()
-            change_request.admin_remarks = remarks
-            change_request.save(update_fields=[
-                'old_course', 'old_fee', 'new_fee', 'status', 'reviewed_by',
-                'reviewed_at', 'admin_remarks', 'updated_at',
-            ])
-            mark_notifications_terminal(
-                Notification.objects.filter(
-                    title='Course Change Request',
-                    related_url=f'/admin/course-change-requests?request={change_request.id}',
+
+            with transaction.atomic():
+                change_request = CourseChangeRequest.objects.select_for_update().get(pk=change_request.pk)
+
+                if change_request.status != CourseChangeRequest.Status.PENDING:
+                    return Response({'detail': 'Only pending course change requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+                if not change_request.enrollment_id:
+                    return Response({'detail': 'Course change request is missing an enrollment.'}, status=status.HTTP_400_BAD_REQUEST)
+                requested_course = Course.objects.filter(pk=change_request.requested_course_id).first()
+                if not requested_course:
+                    return Response({'detail': 'Requested course no longer exists.'}, status=status.HTTP_400_BAD_REQUEST)
+                if requested_course.actual_fees is None:
+                    return Response({'detail': 'Course fee is missing for requested course.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                try:
+                    enrollment = Enrollment.objects.select_for_update().get(pk=change_request.enrollment_id)
+                except Enrollment.DoesNotExist:
+                    return Response({'detail': 'Enrollment for this course change request no longer exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+                logger.info(
+                    'Course change approval validation passed context=%s',
+                    course_change_log_context(
+                        change_request=change_request,
+                        enrollment=enrollment,
+                        old_course=enrollment.course,
+                        new_course=requested_course,
+                        old_fee=enrollment_payable_fee(enrollment),
+                        new_fee=max(
+                            Decimal(str(requested_course.actual_fees or 0))
+                            - Decimal(str(requested_course.discount_amount or 0)),
+                            Decimal('0'),
+                        ),
+                    ),
+                )
+
+                if enrollment.course_id == change_request.requested_course_id:
+                    return Response({'detail': 'Enrollment is already in the requested course.'}, status=status.HTTP_400_BAD_REQUEST)
+                old_course, old_fee, new_fee = apply_enrollment_course_change(
+                    enrollment,
+                    requested_course,
+                    request.user,
+                    change_request.reason,
+                    change_request.requested_batch_date or timezone.localdate(),
+                )
+                change_request.old_course = old_course
+                change_request.old_fee = old_fee
+                change_request.new_fee = new_fee
+                change_request.status = CourseChangeRequest.Status.APPROVED
+                change_request.reviewed_by = request.user
+                change_request.reviewed_at = timezone.now()
+                change_request.admin_remarks = remarks
+                change_request.save(update_fields=[
+                    'old_course', 'old_fee', 'new_fee', 'status', 'reviewed_by',
+                    'reviewed_at', 'admin_remarks', 'updated_at',
+                ])
+                mark_notifications_terminal(
+                    Notification.objects.filter(
+                        title='Course Change Request',
+                        related_url=f'/admin/course-change-requests?request={change_request.id}',
+                    ),
+                    Notification.Status.APPROVED,
+                )
+                create_user_notification(
+                    change_request.requested_by,
+                    'Course Change Request Approved',
+                    'Your course change request has been approved.',
+                    Notification.NType.SUCCESS,
+                    f'/enrollments/{change_request.enrollment_id}',
+                )
+
+            logger.info(
+                'Course change approval completed context=%s',
+                course_change_log_context(
+                    change_request=change_request,
+                    old_course=change_request.old_course,
+                    new_course=change_request.requested_course,
+                    old_fee=change_request.old_fee,
+                    new_fee=change_request.new_fee,
                 ),
-                Notification.Status.APPROVED,
             )
-            create_user_notification(
-                change_request.requested_by,
-                'Course Change Request Approved',
-                'Your course change request has been approved.',
-                Notification.NType.SUCCESS,
-                f'/enrollments/{change_request.enrollment_id}',
+            return Response(self.get_serializer(change_request).data)
+        except Exception as exc:
+            logger.exception(
+                'Course approval failed context=%s',
+                {
+                    'request_id': pk,
+                    'admin_user_id': getattr(request.user, 'id', None),
+                    'payload': dict(request.data) if hasattr(request.data, 'items') else request.data,
+                },
             )
-
-        return Response(self.get_serializer(change_request).data)
+            return Response({
+                'success': False,
+                'detail': str(exc),
+                'message': str(exc),
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path='reject')
     def reject(self, request, pk=None):

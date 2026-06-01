@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --ink: #0A0F1E;
+  --muted: #5C6580;
+  --light: #F5F6FA;
+  --white: #fff;
+  --border: #E2E5EF;
+  --blue: #2952FF;
+  --pink: #FF4FA3;
+  --grad: linear-gradient(135deg, #2952FF 0%, #FF4FA3 100%);
+  --grad2: linear-gradient(135deg, #FF4FA3 0%, #2952FF 100%);
+  --shadow: 0 16px 56px rgba(41, 82, 255, .14);
+}
+
 @font-face {
   font-family: 'Libertinus Serif';
   font-style: normal;
@@ -27,20 +40,53 @@
 }
 
 html {
-  background: #f3f6fb;
+  background: var(--light);
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top left, rgba(34, 211, 238, 0.12), transparent 30%),
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 28%),
-    linear-gradient(180deg, #f8fbff 0%, #eef3f9 100%);
-  color: #0f172a;
+    radial-gradient(circle at top left, rgba(41, 82, 255, 0.1), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 79, 163, 0.1), transparent 28%),
+    linear-gradient(180deg, #ffffff 0%, var(--light) 100%);
+  color: var(--ink);
   font-family: 'Libertinus Serif', 'Linux Libertine', 'Times New Roman', serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.brand-gradient {
+  background: var(--grad);
+}
+
+.brand-gradient-2 {
+  background: var(--grad2);
+}
+
+.brand-shadow {
+  box-shadow: var(--shadow);
+}
+
+.brand-cta {
+  background: var(--grad);
+  color: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.brand-cta:hover {
+  filter: brightness(1.04);
+}
+
+button.bg-slate-950,
+a.bg-slate-950 {
+  background: var(--grad) !important;
+  box-shadow: var(--shadow);
+}
+
+button.bg-slate-950:hover,
+a.bg-slate-950:hover {
+  filter: brightness(1.04);
 }
 
   #root {
@@ -953,10 +999,10 @@ body {
   align-items: center;
   justify-content: center;
   gap: 0.6rem;
-  background: linear-gradient(135deg, #020617 0%, #0f172a 35%, #312e81 100%);
+  background: var(--grad);
   box-shadow:
-    0 20px 40px -26px rgba(49, 46, 129, 0.9),
-    0 14px 30px -24px rgba(15, 23, 42, 0.9);
+    var(--shadow),
+    0 14px 30px -24px rgba(10, 15, 30, 0.9);
   transition:
     transform 180ms ease,
     box-shadow 180ms ease,
@@ -966,8 +1012,8 @@ body {
 .login-submit-btn:hover {
   transform: translateY(-2px) scale(1.01);
   box-shadow:
-    0 28px 50px -28px rgba(49, 46, 129, 0.95),
-    0 18px 34px -26px rgba(15, 23, 42, 0.95);
+    0 28px 50px -28px rgba(255, 79, 163, 0.72),
+    0 18px 34px -26px rgba(41, 82, 255, 0.86);
   filter: brightness(1.05);
 }
 
@@ -1276,39 +1322,39 @@ code {
 }
 
 .login-card-shell::before {
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(59, 130, 246, 0.06), rgba(255, 255, 255, 0.04));
+  background: linear-gradient(135deg, rgba(41, 82, 255, 0.08), rgba(255, 79, 163, 0.06), rgba(255, 255, 255, 0.04));
   opacity: 0.62;
 }
 
 .login-input:focus {
   box-shadow:
-    0 0 0 4px rgba(34, 211, 238, 0.1),
-    0 10px 22px -18px rgba(34, 211, 238, 0.42);
+    0 0 0 4px rgba(41, 82, 255, 0.1),
+    0 10px 22px -18px rgba(255, 79, 163, 0.42);
 }
 
 .login-submit-btn {
-  background: linear-gradient(135deg, #020617 0%, #0f172a 50%, #1e293b 100%);
+  background: var(--grad);
   box-shadow:
-    0 18px 34px -24px rgba(15, 23, 42, 0.6),
-    0 14px 28px -24px rgba(30, 41, 59, 0.72);
+    var(--shadow),
+    0 14px 28px -24px rgba(10, 15, 30, 0.72);
 }
 
 .login-submit-btn:hover {
   box-shadow:
-    0 22px 40px -24px rgba(15, 23, 42, 0.68),
-    0 18px 30px -24px rgba(30, 41, 59, 0.76);
+    0 22px 40px -24px rgba(41, 82, 255, 0.68),
+    0 18px 30px -24px rgba(255, 79, 163, 0.62);
   filter: brightness(1.03);
 }
 
 .login-feature-chip {
   background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(34, 211, 238, 0.15);
+  border-color: rgba(255, 79, 163, 0.2);
 }
 
 .login-feature-chip:hover {
-  border-color: rgba(34, 211, 238, 0.3);
+  border-color: rgba(41, 82, 255, 0.35);
   background: rgba(255, 255, 255, 0.055);
-  box-shadow: 0 10px 24px -20px rgba(34, 211, 238, 0.45);
+  box-shadow: 0 10px 24px -20px rgba(255, 79, 163, 0.45);
 }
 
 @media (prefers-reduced-motion: reduce) {

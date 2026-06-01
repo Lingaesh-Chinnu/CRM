@@ -719,6 +719,9 @@ export default function LeadDetailPage() {
     setDetailErrors((current) => ({ ...current, [field]: '' }))
   }
 
+  const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
+  const canEditLeadCourse = !convertedType && !['enrolled', 'converted_to_walkin'].includes(lead.status)
+
   const detailFields = [
     { field: 'name', label: 'Name', value: lead.name },
     { field: 'phone', label: 'Phone Number', value: lead.phone },
@@ -728,7 +731,7 @@ export default function LeadDetailPage() {
     { field: 'location', label: 'Address', value: lead.location },
     { field: 'conversion_date', payloadField: 'walkin_date', label: 'Visit Date', value: lead.walkin_date },
     ...(isSuperAdmin ? [{ field: 'branch', label: 'Branch', value: lead.branch, displayValue: lead.branch_name, displayNew: (value) => branches.find((branch) => String(branch.id) === String(value))?.name || value }] : []),
-    { field: 'course', label: 'Course Interested', value: lead.course, displayValue: lead.course_name, displayNew: (value) => courses.find((course) => String(course.id) === String(value))?.name || value },
+    ...(canEditLeadCourse ? [{ field: 'course', label: 'Course Interested', value: lead.course, displayValue: lead.course_name, displayNew: (value) => courses.find((course) => String(course.id) === String(value))?.name || value }] : []),
     { field: 'preferred_timing', label: 'Preferred Timing', value: lead.preferred_timing, displayValue: timingLabel(lead.preferred_timing), displayNew: timingLabel },
     { field: 'qualification', label: 'Qualification', value: lead.qualification, displayValue: lead.qualification_display || lead.qualification, displayNew: (value) => qualificationSelectOptions(value).find((option) => option.value === value)?.label || value },
     { field: 'degree', label: 'Degree', value: lead.degree },
@@ -799,7 +802,6 @@ export default function LeadDetailPage() {
   }
 
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
-  const convertedType = lead.converted_to_type || (lead.status === 'walk_in' ? 'walkin' : lead.status === 'converted' ? 'enrollment' : '')
   const convertedLabel = convertedType === 'walkin' ? 'Converted to Walk-in' : convertedType === 'enrollment' ? 'Enrolled' : ''
   const convertedLink = convertedType === 'walkin'
     ? `/walkins/${lead.converted_record_id}`
@@ -944,7 +946,7 @@ export default function LeadDetailPage() {
               </select>
               {detailErrorFor('branch')}
             </DetailField>
-            <DetailField label="Course Interested" value={lead.course_name} editing={editingDetails}>
+            <DetailField label="Course Interested" value={lead.course_name} editing={editingDetails && canEditLeadCourse}>
               <select value={detailsForm.course || ''} onChange={(event) => updateDetail('course', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
                 <option value="">Select Course</option>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}

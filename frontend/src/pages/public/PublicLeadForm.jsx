@@ -6,6 +6,16 @@ import ModalCloseButton from '../../components/common/ModalCloseButton'
 
 const REDIRECT_URL = 'https://www.indrainstitute.com'
 
+const defaultCourseOptions = [
+  'Artificial Intelligence',
+  'Data Analytics',
+  'Full Stack Python',
+  'Full Stack Java',
+  'MERN Stack',
+  'Cyber Security',
+  'Digital Marketing',
+]
+
 const timingOptions = [
   { value: 'morning', label: 'Morning' },
   { value: 'afternoon', label: 'Afternoon' },
@@ -67,7 +77,6 @@ export default function PublicLeadForm() {
 
   const [form, setForm] = useState(initialForm)
   const [branches, setBranches] = useState([])
-  const [courses, setCourses] = useState([])
   const [step, setStep] = useState(1)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -88,10 +97,8 @@ export default function PublicLeadForm() {
     api.get('/public/lead-form/')
       .then(({ data }) => {
         const branchOptions = data.branches || []
-        const courseOptions = data.courses || []
 
         setBranches(branchOptions)
-        setCourses(courseOptions)
 
         setForm((current) => {
           const next = { ...current }
@@ -104,10 +111,10 @@ export default function PublicLeadForm() {
           }
 
           if (!next.course_interested && queryDefaults.courseName) {
-            const matchedCourse = courseOptions.find(
-              (course) => course.name.trim().toLowerCase() === queryDefaults.courseName
+            const matchedCourse = defaultCourseOptions.find(
+              (courseName) => courseName.trim().toLowerCase() === queryDefaults.courseName
             )
-            if (matchedCourse) next.course_interested = matchedCourse.id
+            if (matchedCourse) next.course_interested = matchedCourse
           }
 
           return next
@@ -183,9 +190,9 @@ export default function PublicLeadForm() {
   }
 
   return (
-    <div className="min-h-screen overflow-y-auto bg-[rgba(2,6,23,0.68)] px-3 py-3 text-white sm:px-6 sm:py-6">
+    <div className="min-h-screen overflow-y-auto bg-[var(--light)] px-3 py-3 text-white sm:px-6 sm:py-6">
       <div className="flex min-h-[calc(100vh-1.5rem)] items-start justify-center sm:min-h-[calc(100vh-3rem)] sm:items-center">
-        <section className="lead-modal-in relative w-full max-w-[29rem] overflow-hidden rounded-[26px] border border-white/10 bg-[#050b18] shadow-[0_32px_90px_-34px_rgba(0,0,0,0.95),0_0_0_1px_rgba(255,255,255,0.04)] sm:rounded-[30px]">
+        <section className="lead-modal-in relative w-full max-w-[29rem] overflow-hidden rounded-[26px] border border-white/10 bg-[var(--ink)] shadow-[var(--shadow)] sm:rounded-[30px]">
           <style>{`
             @keyframes leadModalIn {
               from { opacity: 0; transform: translateY(14px) scale(0.985); }
@@ -205,7 +212,7 @@ export default function PublicLeadForm() {
             .lead-select option { color: #0f172a; }
           `}</style>
 
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(34,211,238,0.16),transparent_32%),radial-gradient(circle_at_100%_24%,rgba(129,140,248,0.14),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.055),transparent_44%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(41,82,255,0.24),transparent_34%),radial-gradient(circle_at_100%_24%,rgba(255,79,163,0.18),transparent_32%),linear-gradient(180deg,rgba(255,255,255,0.06),transparent_44%)]" />
 
           <ModalCloseButton
             onClick={requestClose}
@@ -236,7 +243,7 @@ export default function PublicLeadForm() {
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-cyan-300 via-sky-300 to-indigo-300 transition-all duration-300 ease-out"
+                    className="h-full rounded-full brand-gradient transition-all duration-300 ease-out"
                     style={{ width: step === 1 ? '50%' : '100%' }}
                   />
                 </div>
@@ -263,9 +270,9 @@ export default function PublicLeadForm() {
                       onChange={(event) => updateField('course_interested', event.target.value)}
                     >
                       <option value="">Select course</option>
-                      {courses.map((course) => (
-                        <option key={course.id} value={course.id}>
-                          {course.name}
+                      {defaultCourseOptions.map((course) => (
+                        <option key={course} value={course}>
+                          {course}
                         </option>
                       ))}
                     </SelectField>
@@ -295,7 +302,7 @@ export default function PublicLeadForm() {
                               onClick={() => updateField('preferred_timing', option.value)}
                               className={`min-h-[3rem] rounded-2xl border px-3 py-3 text-sm font-bold transition duration-200 ${
                                 active
-                                  ? 'border-cyan-200/70 bg-cyan-200 text-slate-950 shadow-[0_14px_32px_-22px_rgba(34,211,238,0.95)]'
+                                  ? 'border-pink-200/70 bg-white text-[var(--blue)] shadow-[0_14px_32px_-22px_rgba(255,79,163,0.95)]'
                                   : 'border-white/10 bg-white/[0.06] text-slate-200 hover:-translate-y-0.5 hover:border-cyan-200/35 hover:bg-white/[0.1]'
                               }`}
                               aria-pressed={active}
@@ -357,14 +364,14 @@ export default function PublicLeadForm() {
                     <button
                       type="button"
                       onClick={goNext}
-                      className="min-h-[3.2rem] flex-1 rounded-2xl bg-gradient-to-r from-cyan-200 via-sky-200 to-indigo-200 px-4 text-sm font-black text-slate-950 shadow-[0_18px_38px_-24px_rgba(34,211,238,0.9)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105"
+                      className="min-h-[3.2rem] flex-1 rounded-2xl brand-gradient px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105"
                     >
                       Next →
                     </button>
                   ) : (
                     <button
                       disabled={saving}
-                      className="min-h-[3.2rem] flex-1 rounded-2xl bg-gradient-to-r from-cyan-200 via-sky-200 to-indigo-200 px-4 text-sm font-black text-slate-950 shadow-[0_18px_38px_-24px_rgba(34,211,238,0.9)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
+                      className="min-h-[3.2rem] flex-1 rounded-2xl brand-gradient px-4 text-sm font-black text-white shadow-[var(--shadow)] transition duration-200 hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
                     >
                       {saving ? 'Submitting...' : 'Get a Call Back'}
                     </button>

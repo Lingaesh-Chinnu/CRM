@@ -497,7 +497,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="relative isolate overflow-hidden rounded-[30px] bg-slate-950 text-white shadow-[0_36px_90px_-42px_rgba(15,23,42,0.92)]">
+      <section className="relative isolate overflow-hidden rounded-[30px] bg-[var(--ink)] text-white shadow-[0_36px_90px_-42px_rgba(15,23,42,0.92)]">
         <LoginAnimatedBackground className="opacity-80" />
         <div className="relative z-10 grid gap-6 px-5 py-7 sm:px-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(300px,0.85fr)] xl:gap-8 xl:px-9 2xl:px-10">
           <div>
@@ -526,7 +526,7 @@ export default function DashboardPage() {
                       onClick={() => setDashboardBranch(branch.id)}
                       className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.16em] transition ${
                         active
-                          ? 'bg-cyan-300 text-slate-950 shadow-lg shadow-cyan-950/20'
+                          ? 'brand-gradient text-white shadow-[var(--shadow)]'
                           : 'border border-white/10 bg-white/6 text-slate-300 hover:bg-white/10 hover:text-white'
                       }`}
                     >
@@ -540,18 +540,18 @@ export default function DashboardPage() {
 
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
               {highlightRows(dashboardStats).map((item) => (
-                <div key={item.label} className={`rounded-[22px] border border-white/10 bg-white/6 p-5 backdrop-blur transition ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
+                <div key={item.label} className={`rounded-[22px] border border-white/10 brand-gradient p-5 shadow-[var(--shadow)] backdrop-blur transition ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/75">{item.label}</p>
                   <p className="mt-3 text-2xl font-black tracking-tight text-white">
                     {displayValue(item.actual, item.kind)}
                     {targetIsSet(item.target) && (
-                      <span className="text-slate-400"> / {displayValue(item.target, item.kind)}</span>
+                      <span className="text-white/70"> / {displayValue(item.target, item.kind)}</span>
                     )}
                   </p>
                   {targetIsSet(item.target) ? (
-                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                    <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/20">
                       <div
-                        className="h-full rounded-full bg-cyan-300"
+                        className="h-full rounded-full bg-white"
                         style={{ width: `${progressPercent(item.actual, item.target)}%` }}
                       />
                     </div>
@@ -560,7 +560,7 @@ export default function DashboardPage() {
                       Target not set
                     </p>
                   )}
-                  <p className="mt-2 text-sm text-slate-300">{item.note}</p>
+                  <p className="mt-2 text-sm text-white/80">{item.note}</p>
                 </div>
               ))}
             </div>

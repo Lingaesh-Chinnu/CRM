@@ -108,14 +108,14 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={() => setLoginType('admin')}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${loginType === 'admin' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-white'}`}
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${loginType === 'admin' ? 'brand-gradient text-white shadow-[var(--shadow)]' : 'text-slate-600 hover:bg-white'}`}
               >
                 Admin
               </button>
               <button
                 type="button"
                 onClick={() => setLoginType('user')}
-                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${loginType === 'user' ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-white'}`}
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold transition ${loginType === 'user' ? 'brand-gradient text-white shadow-[var(--shadow)]' : 'text-slate-600 hover:bg-white'}`}
               >
                 User
               </button>

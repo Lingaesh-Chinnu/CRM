@@ -8,7 +8,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
+from crm.models import Branch, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
 
 
 User = get_user_model()
@@ -290,6 +290,38 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.year_of_passing, 2026)
         self.assertEqual(walkin.college_company, 'IIE College')
         self.assertTrue(walkin.interested_global_certification)
+
+    def test_public_lead_form_uses_default_courses_without_course_records(self):
+        Course.objects.all().delete()
+
+        options_response = self.client.get('/api/public/lead-form/')
+
+        self.assertEqual(options_response.status_code, 200)
+        self.assertEqual(
+            [item['name'] for item in options_response.data['courses']],
+            [
+                'Artificial Intelligence',
+                'Data Analytics',
+                'Full Stack Python',
+                'Full Stack Java',
+                'MERN Stack',
+                'Cyber Security',
+                'Digital Marketing',
+            ],
+        )
+
+        response = self.client.post('/api/public/lead-form/', {
+            'full_name': 'Public AI Lead',
+            'mobile_number': '9876543211',
+            'course_interested': 'Artificial Intelligence',
+            'branch': self.branch.id,
+            'preferred_timing': Lead.PreferredTiming.MORNING,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead = Lead.objects.get(phone='9876543211')
+        self.assertIsNone(lead.course)
+        self.assertEqual(lead.external_course_interested, 'Artificial Intelligence')
 
     def test_manual_walkin_create_clears_conversion_fields(self):
         self.client.force_authenticate(self.staff)
@@ -972,6 +1004,111 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(history.changed_by, self.staff)
         self.assertEqual(history.reason, 'Student requested upgrade')
         self.assertEqual(str(history.effective_date), '2026-05-20')
+
+    def test_admin_can_approve_course_change_request_and_rebuild_payment_schedule(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Approval Course Student',
+            phone='9000000140',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            enrolled_by=self.staff,
+            created_by=self.staff,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            ],
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='1st Installment',
+            payment_date='2026-05-11',
+            receipt_number='RCPT-APPROVAL-CHANGE',
+        )
+        change_request = CourseChangeRequest.objects.create(
+            student=enrollment,
+            enrollment=enrollment,
+            old_course=self.course,
+            requested_course=self.final_course,
+            requested_batch_date='2026-05-20',
+            reason='Upgrade course',
+            requested_by=self.staff,
+            old_fee=enrollment.net_payable_fee,
+            new_fee=self.final_course.actual_fees,
+        )
+        self.client.force_authenticate(self.admin)
+
+        with self.assertLogs('views', level='INFO') as logs:
+            response = self.client.post(f'/api/course-change-requests/{change_request.id}/approve/', {
+                'admin_remarks': 'Approved by admin',
+            }, format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        enrollment.refresh_from_db()
+        payment.refresh_from_db()
+        change_request.refresh_from_db()
+        self.assertEqual(change_request.status, CourseChangeRequest.Status.APPROVED)
+        self.assertEqual(enrollment.course, self.final_course)
+        self.assertEqual(payment.total_fees, Decimal('15000.00'))
+        self.assertEqual(payment.paid_amount, Decimal('5000.00'))
+        self.assertEqual(PaymentInstallment.objects.filter(payment=payment).count(), 1)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+        ])
+        self.assertTrue(any('Course change approval completed' in entry for entry in logs.output))
+        self.assertTrue(any("'request_id': " in entry for entry in logs.output))
+        self.assertTrue(any("'rebuilt_schedule_total': '15000'" in entry for entry in logs.output))
+
+    def test_course_change_approval_returns_backend_error_message(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Approval Error Student',
+            phone='9000000141',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            enrolled_by=self.staff,
+            created_by=self.staff,
+        )
+        change_request = CourseChangeRequest.objects.create(
+            student=enrollment,
+            enrollment=enrollment,
+            old_course=self.course,
+            requested_course=self.final_course,
+            reason='Upgrade course',
+            requested_by=self.staff,
+            old_fee=enrollment.net_payable_fee,
+            new_fee=self.final_course.actual_fees,
+        )
+        self.client.force_authenticate(self.admin)
+
+        with mock.patch('views.apply_enrollment_course_change', side_effect=RuntimeError('fee schedule exploded')):
+            with self.assertLogs('views', level='ERROR') as logs:
+                response = self.client.post(f'/api/course-change-requests/{change_request.id}/approve/', format='json')
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(response.data['success'])
+        self.assertEqual(response.data['detail'], 'fee schedule exploded')
+        self.assertEqual(response.data['message'], 'fee schedule exploded')
+        self.assertTrue(any('Course approval failed' in entry for entry in logs.output))
 
     def test_admin_schedule_override_updates_candidate_payable_fee_and_payment_totals(self):
         enrollment = Enrollment.objects.create(
