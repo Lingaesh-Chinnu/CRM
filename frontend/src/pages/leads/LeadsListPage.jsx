@@ -8,7 +8,6 @@ import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
-import useDebouncedValue from '../../hooks/useDebouncedValue'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 function statusLabel(status) {
@@ -109,6 +108,7 @@ export default function LeadsListPage() {
     createdTo: '',
     importantOnly: false,
   })
+  const [appliedSearch, setAppliedSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [importOpen, setImportOpen] = useState(false)
@@ -129,7 +129,6 @@ export default function LeadsListPage() {
   const nextFollowUpDateFrom = searchParams.get('next_follow_up_date_from') || ''
   const nextFollowUpDateTo = searchParams.get('next_follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
-  const debouncedSearch = useDebouncedValue(filters.search.trim())
 
   const filteredLeads = useMemo(() => {
     const today = new Date()
@@ -224,7 +223,7 @@ export default function LeadsListPage() {
     filters.createdFrom,
     filters.createdTo,
     filters.importantOnly,
-    debouncedSearch,
+    appliedSearch,
   ])
 
   useEffect(() => {
@@ -236,6 +235,7 @@ export default function LeadsListPage() {
   useEffect(() => {
     if (location.state?.listFilters) {
       setFilters((current) => ({ ...current, ...location.state.listFilters }))
+      setAppliedSearch((location.state.listFilters.search || '').trim())
     }
   }, [location.state])
 
@@ -273,7 +273,7 @@ export default function LeadsListPage() {
       if (isSuperAdmin && filters.branch) params.branch = filters.branch
       if (filters.source) params.source = filters.source
       if (filters.followUpBy) params.follow_up_by = filters.followUpBy
-      if (debouncedSearch) params.search = debouncedSearch
+      if (appliedSearch) params.search = appliedSearch
       if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
       if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
@@ -336,6 +336,11 @@ export default function LeadsListPage() {
     setFilters((current) => ({ ...current, [field]: value }))
   }
 
+  const submitSearch = (event) => {
+    event.preventDefault()
+    setAppliedSearch(filters.search.trim())
+  }
+
   const clearFilters = () => {
     setFilters({
       search: '',
@@ -348,6 +353,7 @@ export default function LeadsListPage() {
       createdTo: '',
       importantOnly: false,
     })
+    setAppliedSearch('')
   }
 
   const submitImport = async (event) => {
@@ -490,7 +496,7 @@ export default function LeadsListPage() {
       )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] 2xl:items-end">
+        <form onSubmit={submitSearch} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(220px,0.75fr)_minmax(220px,0.75fr)_auto] 2xl:items-end">
           <label className="block md:col-span-2">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Search</span>
             <input
@@ -565,6 +571,13 @@ export default function LeadsListPage() {
             <ImportantFilter checked={filters.importantOnly} onChange={(value) => updateFilter('importantOnly', value)} />
           </div>
           <button
+            type="submit"
+            disabled={loading}
+            className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60 md:col-span-1"
+          >
+            {loading ? 'Searching...' : 'Search'}
+          </button>
+          <button
             type="button"
             onClick={clearFilters}
             disabled={!hasFilters}
@@ -572,7 +585,7 @@ export default function LeadsListPage() {
           >
             Clear Filters
           </button>
-        </div>
+        </form>
         <div className="mt-4 flex flex-wrap gap-2">
           {[
             ['today', 'Today Follow-up'],

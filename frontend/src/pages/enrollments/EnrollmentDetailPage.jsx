@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -9,7 +9,6 @@ import CourseChangeModal, { CourseChangeHistorySection } from '../../components/
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 import CandidateTimeline from '../../components/common/CandidateTimeline'
-import { FOLLOW_UP_SUCCESS_MESSAGE, resolveReturnTo } from '../../utils/returnNavigation'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -221,7 +220,6 @@ function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
 export default function EnrollmentDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const location = useLocation()
   const { user } = useSelector((state) => state.auth)
   const [row, setRow] = useState(null)
   const [branches, setBranches] = useState([])
@@ -388,10 +386,7 @@ export default function EnrollmentDetailPage() {
       setPendingDetailChanges([])
       setEditingDetails(false)
       setRulesErrors({})
-      navigate(resolveReturnTo(location, '/enrollments'), {
-        replace: true,
-        state: { message: FOLLOW_UP_SUCCESS_MESSAGE, listFilters: location.state?.listFilters },
-      })
+      setMessage('Enrollment updated successfully.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to update enrollment details.')
     } finally {

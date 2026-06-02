@@ -7,7 +7,6 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
-import useDebouncedValue from '../../hooks/useDebouncedValue'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -222,7 +221,6 @@ export default function WalkInsListPage() {
   const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = searchParams.get('follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
-  const debouncedSearch = useDebouncedValue(filters.search.trim())
   const publicWalkInPath = `${appBasePath}/public/walk-in${!canFilterByBranch && user?.branch_id ? `?branch=${user.branch_id}` : ''}`
   const publicWalkInLink = `${window.location.origin}${publicWalkInPath}`
 
@@ -281,7 +279,7 @@ export default function WalkInsListPage() {
           if (key === 'search') return
           if (value) params[key] = value
         })
-        if (debouncedSearch) params.search = debouncedSearch
+        if (appliedFilters.search) params.search = appliedFilters.search
         if (visitDateFrom) params.visit_date_from = visitDateFrom
         if (visitDateTo) params.visit_date_to = visitDateTo
         if (followUpDateFrom) params.follow_up_date_from = followUpDateFrom
@@ -305,7 +303,7 @@ export default function WalkInsListPage() {
     }
 
     fetchWalkins()
-  }, [appliedFilters, debouncedSearch, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus])
+  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus])
 
   const updateFilter = (key, value) => {
     setFilters((current) => ({ ...current, [key]: value }))
