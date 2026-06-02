@@ -3,6 +3,7 @@
 # Base abstract model — timestamps for all models
 # ============================================================
 from django.db import IntegrityError, models, transaction
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from decimal import Decimal
@@ -896,18 +897,26 @@ def get_default_installment_schedule(enrollment, split_count=2):
 
 
 def get_enrollment_installment_schedule(enrollment):
-    if int(round(float(enrollment_payable_fee(enrollment) or 0))) <= PAYMENT_SPLIT_THRESHOLD:
-        return normalize_installment_schedule(get_default_installment_schedule(enrollment))
     if getattr(enrollment, 'payment_schedule', None):
         return normalize_installment_schedule(enrollment.payment_schedule)
     return normalize_installment_schedule(get_default_installment_schedule(enrollment))
 
 
+def get_saved_enrollment_installment_schedule(enrollment):
+    try:
+        payment = getattr(enrollment, 'payment', None)
+    except ObjectDoesNotExist:
+        payment = None
+    if payment and getattr(payment, 'manual_installment_schedule', None):
+        return normalize_installment_schedule(payment.manual_installment_schedule)
+    if getattr(enrollment, 'payment_schedule', None):
+        return normalize_installment_schedule(enrollment.payment_schedule)
+    return []
+
+
 def get_payment_installment_schedule(payment):
-    if int(round(float(payment.total_fees or enrollment_payable_fee(payment.enrollment) or 0))) <= PAYMENT_SPLIT_THRESHOLD:
-        return normalize_installment_schedule(get_default_installment_schedule(payment.enrollment))
     if payment.manual_installment_schedule:
-        return payment.manual_installment_schedule
+        return normalize_installment_schedule(payment.manual_installment_schedule)
     return get_enrollment_installment_schedule(payment.enrollment)
 
 

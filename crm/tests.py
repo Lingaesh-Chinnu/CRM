@@ -1081,6 +1081,91 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(log.provider, 'whatsapp_web')
         self.assertEqual(log.status, WhatsAppMessage.MsgStatus.SENT)
 
+    def test_public_rules_form_uses_saved_enrollment_payment_schedule(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Custom Schedule Student',
+            phone='9000000134',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=26000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 4000, 'due_date': '2026-05-11'},
+                {'label': 'Lab Fee', 'amount': 6000, 'due_date': '2026-05-18'},
+                {'label': 'Project Fee', 'amount': 7000, 'due_date': '2026-06-18'},
+                {'label': 'Final Fee', 'amount': 9000, 'due_date': '2026-07-18'},
+            ],
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+
+        response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(item['label'], item['amount'], item['due_date']) for item in response.data['installments']],
+            [
+                ('Enrollment', 4000, '2026-05-11'),
+                ('Lab Fee', 6000, '2026-05-18'),
+                ('Project Fee', 7000, '2026-06-18'),
+                ('Final Fee', 9000, '2026-07-18'),
+            ],
+        )
+
+    def test_public_rules_form_prefers_linked_payment_schedule_after_rebuild(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Rebuilt Schedule Student',
+            phone='9000000135',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=26000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Old Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': 'Old 1st Installment', 'amount': 10500, 'due_date': '2026-05-12'},
+                {'label': 'Old 2nd Installment', 'amount': 10500, 'due_date': '2026-06-12'},
+            ],
+        )
+        Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=26000,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 7000, 'due_date': '2026-05-20'},
+                {'label': '2nd Installment', 'amount': 7000, 'due_date': '2026-06-20'},
+                {'label': '3rd Installment', 'amount': 7000, 'due_date': '2026-07-20'},
+            ],
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+
+        response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [(item['label'], item['amount'], item['due_date']) for item in response.data['installments']],
+            [
+                ('Enrollment', 5000, '2026-05-11'),
+                ('1st Installment', 7000, '2026-05-20'),
+                ('2nd Installment', 7000, '2026-06-20'),
+                ('3rd Installment', 7000, '2026-07-20'),
+            ],
+        )
+
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -1494,6 +1579,80 @@ class PublicWalkInFormTests(APITestCase):
 
         pdf_bytes = PaymentInstallmentViewSet()._build_document_pdf(installments[1])
         self.assertTrue(pdf_bytes.startswith(b'%PDF'))
+
+    def test_generated_bill_schedule_matches_saved_payment_schedule_variants(self):
+        self.client.force_authenticate(self.admin)
+
+        variants = [
+            (
+                'Single Payment Bill Student',
+                '9000000136',
+                6500,
+                [{'label': 'Full Payment', 'amount': 6500, 'due_date': '2026-05-11'}],
+            ),
+            (
+                'Three Installment Bill Student',
+                '9000000137',
+                25000,
+                [
+                    {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                    {'label': '1st Installment', 'amount': 10000, 'due_date': '2026-05-20'},
+                    {'label': '2nd Installment', 'amount': 10000, 'due_date': '2026-06-20'},
+                ],
+            ),
+            (
+                'Four Installment Bill Student',
+                '9000000138',
+                32000,
+                [
+                    {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                    {'label': '1st Installment', 'amount': 9000, 'due_date': '2026-05-25'},
+                    {'label': '2nd Installment', 'amount': 9000, 'due_date': '2026-06-25'},
+                    {'label': 'Final Installment', 'amount': 9000, 'due_date': '2026-07-25'},
+                ],
+            ),
+        ]
+
+        for name, phone, fee, schedule in variants:
+            enrollment = Enrollment.objects.create(
+                branch=self.branch,
+                course=self.course,
+                name=name,
+                phone=phone,
+                preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                enrollment_date='2026-05-11',
+                start_date='2026-05-12',
+                actual_fees=fee,
+                discount_amount=0,
+                status=Enrollment.Status.ACTIVE,
+                payment_schedule=schedule,
+            )
+            payment = Payment.objects.create(
+                enrollment=enrollment,
+                total_fees=fee,
+                manual_installment_schedule=schedule,
+            )
+            first_item = schedule[0]
+            installment = PaymentInstallment.objects.create(
+                payment=payment,
+                enrollment=enrollment,
+                amount=Decimal(str(first_item['amount'])),
+                installment_index=1,
+                installment_label=first_item['label'],
+                payment_date=first_item['due_date'],
+                payment_mode=PaymentInstallment.Mode.CASH,
+            )
+
+            response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+
+            self.assertEqual(response.status_code, 200)
+            installment.refresh_from_db()
+            self.assertEqual(
+                [(item['label'], Decimal(item['amount']), item['due_date']) for item in installment.document_snapshot['payment_schedule']],
+                [(item['label'], Decimal(str(item['amount'])), item['due_date']) for item in schedule],
+            )
+            self.assertIn('TOTAL PAYMENT PAID', installment.document_html)
+            self.assertNotIn('PAYMENT AMOUNT</div>', installment.document_html)
 
     def test_counselor_change_requires_counselor_and_admin_approval(self):
         new_counselor = User.objects.create_user(

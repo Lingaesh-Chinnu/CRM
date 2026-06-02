@@ -81,7 +81,8 @@ from crm.models import (
     PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
-    get_default_installment_schedule, get_enrollment_installment_schedule, normalize_installment_schedule,
+    get_default_installment_schedule, get_enrollment_installment_schedule, get_saved_enrollment_installment_schedule,
+    normalize_installment_schedule,
     enrollment_payable_fee, PAYMENT_SPLIT_THRESHOLD,
 )
 from serializers import (
@@ -1256,13 +1257,13 @@ def add_one_month(value):
     return value.replace(year=year, month=month, day=day)
 
 
-def build_default_installment_plan(enrollment):
+def build_rules_installment_plan(enrollment):
     return [
         {
             **item,
             'date': item.get('due_date'),
         }
-        for item in get_enrollment_installment_schedule(enrollment)
+        for item in get_saved_enrollment_installment_schedule(enrollment)
     ]
 
 
@@ -1477,7 +1478,7 @@ def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, 
     write_detail_grid(details)
 
     write_section('Payment Schedule')
-    for item in build_default_installment_plan(enrollment):
+    for item in build_rules_installment_plan(enrollment):
         write_installment(item)
 
     write_section('Rules and Regulations')
@@ -6914,7 +6915,7 @@ class PublicRulesSigningView(APIView):
             signing.status = RulesSigningRequest.Status.VIEWED
             signing.save(update_fields=['status', 'updated_at'])
         enrollment = signing.enrollment
-        installments = build_default_installment_plan(enrollment)
+        installments = build_rules_installment_plan(enrollment)
         return Response({
             'status': signing.status,
             'candidate': {
@@ -9431,6 +9432,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _snapshot_decimal(self, value):
         return f'{Decimal(str(value or 0)):.2f}'
 
+    def _snapshot_schedule_date(self, value):
+        if hasattr(value, 'isoformat'):
+            return value.isoformat()
+        return value or ''
+
     def _default_bill_address_lines(self):
         return ['Branch address not set']
 
@@ -9538,7 +9544,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'payment_schedule': [
                 {
                     'label': item.get('label') or f"{item.get('index') or ''} Installment".strip(),
-                    'due_date': self._receipt_date(item.get('due_date')),
+                    'due_date': self._snapshot_schedule_date(item.get('due_date')),
                     'amount': self._snapshot_decimal(item.get('required_amount') or 0),
                     'paid_amount': self._snapshot_decimal(item.get('paid_amount') or 0),
                     'pending_amount': self._snapshot_decimal(item.get('pending_amount') or 0),
@@ -9584,7 +9590,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             ]
         for item in schedule:
             label = item.get('label') or 'Installment'
-            due_date_display = item.get('due_date') or 'Not set'
+            due_date_display = self._receipt_date(item.get('due_date')) if item.get('due_date') else 'Not set'
             amount = Decimal(str(item.get('amount') or 0))
             row_status = item.get('status') or 'Upcoming'
             status_class = 'paid' if row_status == 'Paid' else 'upcoming'
@@ -9708,9 +9714,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
           <div class="field"><div class="label">REFERENCE NO</div><div class="value">{escape(reference_number)}</div></div>
           <div class="field"><div class="label">PAYMENT DATE</div><div class="value">{escape(payment_date)}</div></div>
           <div class="field"><div class="label">INSTALLMENT</div><div class="value">{escape(installment_label)}</div></div>
-          <div class="field"><div class="label">PAYMENT AMOUNT</div><div class="value amount">Rs {payment_amount:,.2f}</div></div>
+          <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {payment_amount:,.2f}</div></div>
           <div class="field"><div class="label">COURSE FEE</div><div class="value amount">Rs {total_fees:,.2f}</div></div>
-          <div class="field"><div class="label">PAID AMOUNT</div><div class="value amount">Rs {paid_amount:,.2f}</div></div>
+          <div class="field"><div class="label">TOTAL PAYMENT PAID</div><div class="value amount">Rs {paid_amount:,.2f}</div></div>
           <div class="field"><div class="label">PENDING AMOUNT</div><div class="value amount">Rs {balance:,.2f}</div></div>
         </div>
       </div>
@@ -9899,9 +9905,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             ('REFERENCE NO', snapshot.get('reference_number') or ''),
             ('PAYMENT DATE', snapshot.get('payment_date') or ''),
             ('INSTALLMENT', snapshot.get('installment_label') or ''),
-            ('PAYMENT AMOUNT', f"Rs {Decimal(str(snapshot.get('payment_amount') or 0)):,.2f}"),
+            ('PAID AMOUNT', f"Rs {Decimal(str(snapshot.get('payment_amount') or 0)):,.2f}"),
             ('COURSE FEE', f"Rs {Decimal(str(snapshot.get('total_fees') or 0)):,.2f}"),
-            ('PAID AMOUNT', f"Rs {Decimal(str(snapshot.get('paid_amount') or 0)):,.2f}"),
+            ('TOTAL PAYMENT PAID', f"Rs {Decimal(str(snapshot.get('paid_amount') or 0)):,.2f}"),
             ('BALANCE', f"Rs {Decimal(str(snapshot.get('balance') or 0)):,.2f}"),
         ]
 
@@ -9931,7 +9937,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         for item in (snapshot.get('payment_schedule') or [])[:8]:
             values = [
                 item.get('label') or '',
-                item.get('due_date') or '',
+                self._receipt_date(item.get('due_date')) if item.get('due_date') else '',
                 f"Rs {Decimal(str(item.get('amount') or 0)):,.2f}",
                 item.get('status') or '',
             ]
