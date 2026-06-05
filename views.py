@@ -1909,11 +1909,19 @@ def seconds_to_duration(total_seconds):
     return f'{minutes}m'
 
 
+SESSION_ACTIVITY_GRACE_SECONDS = 90
+
+
 def session_duration_seconds(session, end_limit=None):
     login_at = session.login_at
-    end_at = session.logout_at or session.last_seen_at or timezone.now()
-    if session.is_active_session:
-        end_at = min(timezone.now(), end_at)
+    last_seen_at = session.last_seen_at or login_at
+    active_until = last_seen_at + timedelta(seconds=SESSION_ACTIVITY_GRACE_SECONDS)
+    if session.logout_at:
+        end_at = min(session.logout_at, active_until)
+    elif session.is_active_session:
+        end_at = min(timezone.now(), active_until)
+    else:
+        end_at = last_seen_at
     if end_limit:
         end_at = min(end_at, end_limit)
     return max(int((end_at - login_at).total_seconds()), 0)
@@ -1935,11 +1943,14 @@ def usage_seconds_for(user, start_date, end_date):
     for session in sessions:
         if not session.login_at:
             continue
-        raw_end = session.logout_at or session.last_seen_at
-        if not raw_end:
+        if not session.last_seen_at:
             continue
-        if session.is_active_session:
-            raw_end = min(raw_end, now)
+        if session.logout_at:
+            raw_end = min(session.logout_at, session.last_seen_at + timedelta(seconds=SESSION_ACTIVITY_GRACE_SECONDS))
+        elif session.is_active_session:
+            raw_end = min(now, session.last_seen_at + timedelta(seconds=SESSION_ACTIVITY_GRACE_SECONDS))
+        else:
+            raw_end = session.last_seen_at
         if raw_end <= session.login_at:
             continue
         session_start = max(session.login_at, start_dt)
@@ -2042,12 +2053,14 @@ def performance_comparison_rows(current, previous, keys):
     return rows
 
 
-def daily_usage_points(daily_usage, start_date, end_date):
+def daily_usage_points(daily_usage, start_date, end_date, cap_day=True):
     points = []
     cursor = start_date
     while cursor <= end_date:
         key = cursor.isoformat()
-        seconds = min(int((daily_usage or {}).get(key, 0) or 0), 86400)
+        seconds = int((daily_usage or {}).get(key, 0) or 0)
+        if cap_day:
+            seconds = min(seconds, 86400)
         points.append({
             'date': key,
             'label': cursor.strftime('%d %b'),
@@ -2357,7 +2370,10 @@ class PerformanceHubView(APIView):
         branch_rows.sort(key=lambda item: (-item['enrollments'], -float(item['revenue'] or 0), item['branch_name']))
 
         days_in_range = max((end_date - start_date).days + 1, 1)
-        average_screen_seconds = int(total_user_seconds / max(users.count(), 1)) if users.exists() else 0
+        daily_points = daily_usage_points(daily_totals, start_date, end_date, cap_day=False)
+        total_screen_seconds = sum(point['seconds'] for point in daily_points)
+        average_screen_seconds = int(total_screen_seconds / max(users.count(), 1)) if users.exists() else 0
+        average_daily_seconds = int(total_screen_seconds / days_in_range)
         return Response({
             'role': User.Role.SUPER_ADMIN,
             'dashboard_type': 'admin',
@@ -2374,12 +2390,12 @@ class PerformanceHubView(APIView):
             'top_performers': ranked_users[:5],
             'lowest_performers': sorted(ranked_users, key=lambda item: (item['enrollments'], float(item['revenue'] or 0), item['rating_score'], item['name']))[:5],
             'screen_time': {
-                'total_seconds': total_user_seconds,
-                'total_display': seconds_to_duration(total_user_seconds),
+                'total_seconds': total_screen_seconds,
+                'total_display': seconds_to_duration(total_screen_seconds),
                 'average_user_seconds': average_screen_seconds,
                 'average_user_display': seconds_to_duration(average_screen_seconds),
-                'average_daily_seconds': int(total_user_seconds / days_in_range),
-                'average_daily_display': seconds_to_duration(int(total_user_seconds / days_in_range)),
+                'average_daily_seconds': average_daily_seconds,
+                'average_daily_display': seconds_to_duration(average_daily_seconds),
                 'user_wise': [
                     {
                         'user_id': row['user_id'],
@@ -2399,7 +2415,7 @@ class PerformanceHubView(APIView):
                     }
                     for row in branch_rows
                 ],
-                'daily': daily_usage_points(daily_totals, start_date, end_date),
+                'daily': daily_points,
             },
         })
 

@@ -80,6 +80,32 @@ function money(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
 
+function growthMeta(current, previous) {
+  const currentValue = Number(current || 0)
+  const previousValue = Number(previous || 0)
+  if (previousValue === 0) {
+    if (currentValue > 0) return { label: 'New', tone: 'text-emerald-700 bg-emerald-50' }
+    return { label: '0%', tone: 'text-slate-500 bg-slate-100' }
+  }
+  const percent = ((currentValue - previousValue) / previousValue) * 100
+  if (percent > 0) return { label: `↑ +${Math.round(percent)}%`, tone: 'text-emerald-700 bg-emerald-50' }
+  if (percent < 0) return { label: `↓ ${Math.round(percent)}%`, tone: 'text-rose-700 bg-rose-50' }
+  return { label: '0%', tone: 'text-slate-500 bg-slate-100' }
+}
+
+function SummaryCard({ label, value, current, previous }) {
+  const growth = growthMeta(current, previous)
+  return (
+    <article className="relative rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+      <span className={`absolute right-4 top-4 rounded-full px-2.5 py-1 text-xs font-black ${growth.tone}`}>
+        {growth.label}
+      </span>
+      <p className="pr-20 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
+      <p className="mt-3 text-2xl font-black text-slate-950">{value}</p>
+    </article>
+  )
+}
+
 function isoDate(value) {
   return value.toISOString().slice(0, 10)
 }
@@ -99,6 +125,8 @@ const lastMonthRange = monthBounds(-1)
 
 export default function EnrollmentsListPage() {
   const [rows, setRows] = useState([])
+  const [metricRows, setMetricRows] = useState([])
+  const [previousMetricRows, setPreviousMetricRows] = useState([])
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
   const [filters, setFilters] = useState({
@@ -151,28 +179,37 @@ export default function EnrollmentsListPage() {
     setLoading(true)
 
     try {
-      const params = {}
+      const baseParams = {}
 
       if (isSuperAdmin && filters.branch) {
-        params.branch = filters.branch
+        baseParams.branch = filters.branch
       }
       if (filters.course) {
-        params.course = filters.course
+        baseParams.course = filters.course
       }
       if (filters.status) {
-        params.status = filters.status
+        baseParams.status = filters.status
       }
       if (debouncedSearch) {
-        params.search = debouncedSearch
+        baseParams.search = debouncedSearch
       }
+      const params = { ...baseParams }
       if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
       if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
 
-      const { data } = await api.get('/enrollments/', { params })
-      setRows(normaliseListResponse(data))
+      const [rowsRes, currentMetricsRes, previousMetricsRes] = await Promise.all([
+        api.get('/enrollments/', { params }),
+        api.get('/enrollments/', { params: { ...baseParams, enrolled_from: thisMonthRange.from, enrolled_to: thisMonthRange.to } }),
+        api.get('/enrollments/', { params: { ...baseParams, enrolled_from: lastMonthRange.from, enrolled_to: lastMonthRange.to } }),
+      ])
+      setRows(normaliseListResponse(rowsRes.data))
+      setMetricRows(normaliseListResponse(currentMetricsRes.data))
+      setPreviousMetricRows(normaliseListResponse(previousMetricsRes.data))
       setMessage('')
     } catch (error) {
       setRows([])
+      setMetricRows([])
+      setPreviousMetricRows([])
       setMessage(apiErrorMessage(error, 'Failed to load enrollments.'))
     } finally {
       setLoading(false)
@@ -186,19 +223,10 @@ export default function EnrollmentsListPage() {
     { label: 'Pending', value: 'pending', count: statusCount('pending') },
     { label: 'Completed', value: 'completed', count: statusCount('completed') },
   ]
-  const totalRevenue = rows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
-  const branchSummary = rows.reduce((summary, row) => {
-    const label = row.branch_name || 'No branch'
-    summary[label] = (summary[label] || 0) + 1
-    return summary
-  }, {})
-  const counselorSummary = rows.reduce((summary, row) => {
-    const label = row.counselor_name || 'Unassigned'
-    summary[label] = (summary[label] || 0) + 1
-    return summary
-  }, {})
-  const topBranch = Object.entries(branchSummary).sort((a, b) => b[1] - a[1])[0]
-  const topCounselor = Object.entries(counselorSummary).sort((a, b) => b[1] - a[1])[0]
+  const currentMonthEnrollmentCount = metricRows.length
+  const previousMonthEnrollmentCount = previousMetricRows.length
+  const totalRevenue = metricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
+  const previousRevenue = previousMetricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
 
   const setPeriod = (period) => {
     if (period === 'this_month') {
@@ -328,25 +356,19 @@ export default function EnrollmentsListPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Total Enrollments</p>
-          <p className="mt-3 text-2xl font-black text-slate-950">{rows.length}</p>
-        </article>
-        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Revenue Generated</p>
-          <p className="mt-3 text-2xl font-black text-slate-950">{money(totalRevenue)}</p>
-        </article>
-        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top Branch</p>
-          <p className="mt-3 truncate text-2xl font-black text-slate-950">{topBranch?.[0] || '-'}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-500">{topBranch ? `${topBranch[1]} enrollments` : 'No enrollments'}</p>
-        </article>
-        <article className="rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Top Counselor</p>
-          <p className="mt-3 truncate text-2xl font-black text-slate-950">{topCounselor?.[0] || '-'}</p>
-          <p className="mt-1 text-sm font-semibold text-slate-500">{topCounselor ? `${topCounselor[1]} enrollments` : 'No enrollments'}</p>
-        </article>
+      <section className="grid gap-4 md:grid-cols-2">
+        <SummaryCard
+          label="Total Enrollments"
+          value={currentMonthEnrollmentCount}
+          current={currentMonthEnrollmentCount}
+          previous={previousMonthEnrollmentCount}
+        />
+        <SummaryCard
+          label="Revenue Generated"
+          value={money(totalRevenue)}
+          current={totalRevenue}
+          previous={previousRevenue}
+        />
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">

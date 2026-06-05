@@ -18,17 +18,30 @@ export default function MainLayout() {
   const warningTimeoutRef = useRef(null)
   const logoutTimeoutRef = useRef(null)
   const countdownIntervalRef = useRef(null)
+  const lastActivityRef = useRef(Date.now())
 
   useEffect(() => {
     if (!user) return undefined
 
-    const heartbeat = window.setInterval(() => {
+    const markActivity = () => {
+      lastActivityRef.current = Date.now()
+    }
+    const sendHeartbeat = () => {
+      if (document.visibilityState !== 'visible') return
+      if (Date.now() - lastActivityRef.current > 2 * 60 * 1000) return
       api.post('/auth/heartbeat/', {
         session_log_id: localStorage.getItem('session_log_id'),
       }).catch(() => {})
-    }, 60000)
+    }
+    const activityEvents = ['mousemove', 'mousedown', 'click', 'keydown', 'touchstart']
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, markActivity, { passive: true }))
+    sendHeartbeat()
+    const heartbeat = window.setInterval(sendHeartbeat, 60000)
 
-    return () => window.clearInterval(heartbeat)
+    return () => {
+      window.clearInterval(heartbeat)
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, markActivity))
+    }
   }, [user])
 
   useEffect(() => {
