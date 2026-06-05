@@ -63,12 +63,12 @@ class WATIClient:
         )
         return self._response_payload(response)
 
-    def send_session_file(self, phone, file_bytes, filename, caption=''):
+    def send_session_file(self, phone, file_bytes, filename, caption='', content_type='application/pdf'):
         if not self.is_configured:
             return {'error': 'WATI is not configured.'}
         url = f'{self.base_url}/api/v1/sendSessionFile/{phone}'
         headers = {'Authorization': f'Bearer {self.access_token}'}
-        files = {'file': (filename, file_bytes, 'application/pdf')}
+        files = {'file': (filename, file_bytes, content_type or 'application/octet-stream')}
         data = {'caption': caption or ''}
         response = requests.post(
             url,
@@ -289,6 +289,7 @@ def send_candidate_document(
     caption,
     file_bytes,
     filename,
+    content_type='application/pdf',
     sent_by=None,
     related_model='',
     related_id=None,
@@ -306,7 +307,7 @@ def send_candidate_document(
             related_id=related_id,
         )
 
-    result = WATIClient().send_session_file(normalized_phone, file_bytes, filename, caption)
+    result = WATIClient().send_session_file(normalized_phone, file_bytes, filename, caption, content_type)
     return log_whatsapp_message(
         candidate_name=candidate_name,
         phone=normalized_phone,

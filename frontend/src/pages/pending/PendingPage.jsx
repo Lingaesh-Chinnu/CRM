@@ -17,7 +17,6 @@ const moduleConfig = {
 
 const durationOptions = [
   { value: '', label: 'All overdue' },
-  { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'last7', label: 'Last 7 Days' },
   { value: 'month', label: 'This Month' },

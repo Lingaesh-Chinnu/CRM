@@ -30,6 +30,48 @@ function formatDate(value) {
   })
 }
 
+function billWasSent(installment) {
+  return Boolean(installment?.bill_last_sent_at || installment?.bill_last_sent_at_display)
+}
+
+function sendBillButtonClass(installment, mobile = false) {
+  const radius = mobile ? 'rounded-2xl' : 'rounded-xl'
+  const padding = mobile ? 'px-4 py-3 text-sm' : 'px-2 py-2 text-xs'
+  const color = billWasSent(installment)
+    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+    : 'bg-slate-950 text-white hover:bg-slate-800'
+  return `w-full whitespace-nowrap ${radius} ${color} ${padding} font-semibold transition disabled:opacity-60`
+}
+
+async function shareBillImageFile(data) {
+  let blob
+  if (data.bill_image_data) {
+    const byteCharacters = window.atob(data.bill_image_data)
+    const byteArrays = []
+    for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+      const slice = byteCharacters.slice(offset, offset + 1024)
+      byteArrays.push(new Uint8Array([...slice].map((char) => char.charCodeAt(0))))
+    }
+    blob = new Blob(byteArrays, { type: data.bill_image_content_type || 'image/png' })
+  } else {
+    throw new Error('Bill image was not returned by the server.')
+  }
+  const file = new File(
+    [blob],
+    data.document_filename || `${data.document_number || 'bill'}.png`,
+    { type: blob.type || 'image/png' },
+  )
+  const sharePayload = {
+    files: [file],
+    text: data.whatsapp_message || '',
+    title: 'Payment Receipt',
+  }
+  if (!navigator.share || (navigator.canShare && !navigator.canShare({ files: [file] }))) {
+    throw new Error('Image sharing is not supported in this browser. Use a WhatsApp API-enabled device or browser.')
+  }
+  await navigator.share(sharePayload)
+}
+
 function referenceConfig(mode) {
   const config = {
     cash: {
@@ -235,13 +277,16 @@ export default function PaymentDetailPage() {
     setMessage('')
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
-      if (data.whatsapp_url) {
-        window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
+      let sentData = data
+      if (data.share_mode === 'browser_file_share') {
+        await shareBillImageFile(data)
+        const confirmation = await api.post(`/installments/${installment.id}/confirm-bill-sent/`)
+        sentData = confirmation.data
       }
-      setMessage(data.whatsapp_url ? data.detail : data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || data.detail || 'Bill send request failed.')
+      setMessage(sentData.whatsapp_sent ? 'Bill sent successfully.' : sentData.whatsapp_error || sentData.detail || 'Bill send request failed.')
       await loadPayment()
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to send bill.')
+      setMessage(error.response?.data?.detail || error.message || 'Failed to send bill.')
     } finally {
       setBillActionId(null)
     }
@@ -495,18 +540,12 @@ export default function PaymentDetailPage() {
                                       type="button"
                                       onClick={() => sendBill(installment)}
                                       disabled={billActionId === installment.id}
-                                      className="w-full whitespace-nowrap rounded-xl bg-slate-950 px-2 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                      className={sendBillButtonClass(installment)}
                                     >
-                                      {billActionId === installment.id ? 'Sending...' : 'Send Bill'}
+                                      {billActionId === installment.id ? 'Sending...' : billWasSent(installment) ? 'Bill Sent' : 'Send Bill'}
                                     </button>
                                   ) : null}
                                 </>
-                              ) : null}
-                              {installment.bill_last_sent_at_display ? (
-                                <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-                                  <p><span className="font-semibold text-slate-700">Last Sent:</span> {installment.bill_last_sent_at_display}</p>
-                                  <p><span className="font-semibold text-slate-700">Sent By:</span> {installment.bill_last_sent_by_name || '-'}</p>
-                                </div>
                               ) : null}
                             </div>
                           </td>
@@ -564,18 +603,12 @@ export default function PaymentDetailPage() {
                                 type="button"
                                 onClick={() => sendBill(installment)}
                                 disabled={billActionId === installment.id}
-                                className="w-full whitespace-nowrap rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                                className={sendBillButtonClass(installment, true)}
                               >
-                                {billActionId === installment.id ? 'Sending...' : 'Send Bill'}
+                                {billActionId === installment.id ? 'Sending...' : billWasSent(installment) ? 'Bill Sent' : 'Send Bill'}
                               </button>
                             ) : null}
                           </>
-                        ) : null}
-                        {installment.bill_last_sent_at_display ? (
-                          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-500">
-                            <p><span className="font-semibold text-slate-700">Last Sent:</span> {installment.bill_last_sent_at_display}</p>
-                            <p><span className="font-semibold text-slate-700">Sent By:</span> {installment.bill_last_sent_by_name || '-'}</p>
-                          </div>
                         ) : null}
                       </div>
                     </div>

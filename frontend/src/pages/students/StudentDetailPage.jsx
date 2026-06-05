@@ -46,6 +46,45 @@ function money(value) {
   return Number(value || 0).toLocaleString('en-IN')
 }
 
+function billWasSent(installment) {
+  return Boolean(installment?.bill_last_sent_at || installment?.bill_last_sent_at_display)
+}
+
+function sendBillButtonClass(installment) {
+  const color = billWasSent(installment)
+    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+    : 'bg-slate-950 text-white hover:bg-slate-800'
+  return `inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl ${color} px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50`
+}
+
+async function shareBillImageFile(data) {
+  let blob
+  if (data.bill_image_data) {
+    const byteCharacters = window.atob(data.bill_image_data)
+    const byteArrays = []
+    for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+      const slice = byteCharacters.slice(offset, offset + 1024)
+      byteArrays.push(new Uint8Array([...slice].map((char) => char.charCodeAt(0))))
+    }
+    blob = new Blob(byteArrays, { type: data.bill_image_content_type || 'image/png' })
+  } else {
+    throw new Error('Bill image was not returned by the server.')
+  }
+  const file = new File(
+    [blob],
+    data.document_filename || `${data.document_number || 'bill'}.png`,
+    { type: blob.type || 'image/png' },
+  )
+  if (!navigator.share || (navigator.canShare && !navigator.canShare({ files: [file] }))) {
+    throw new Error('Image sharing is not supported in this browser. Use a WhatsApp API-enabled device or browser.')
+  }
+  await navigator.share({
+    files: [file],
+    text: data.whatsapp_message || '',
+    title: 'Payment Receipt',
+  })
+}
+
 function latestGeneratedBill(paymentInfo) {
   const bills = [...(paymentInfo?.installments || [])]
     .filter((installment) => installment.bill_number || installment.document_status === 'bill_generated')
@@ -176,19 +215,22 @@ export default function StudentDetailPage() {
     setMessage('')
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
-      if (data.whatsapp_url) {
-        window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
+      let sentData = data
+      if (data.share_mode === 'browser_file_share') {
+        await shareBillImageFile(data)
+        const confirmation = await api.post(`/installments/${installment.id}/confirm-bill-sent/`)
+        sentData = confirmation.data
       }
-      setMessage(data.whatsapp_url ? data.detail : data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')
-      if (data.whatsapp_sent) {
+      setMessage(sentData.whatsapp_sent ? 'Bill sent successfully.' : sentData.whatsapp_error || sentData.detail || 'Bill send request failed.')
+      if (sentData.whatsapp_sent) {
         setRow((current) => {
           const installments = (current?.payment_info?.installments || []).map((item) => (
             Number(item.id) === Number(installment.id)
               ? {
                 ...item,
-                bill_last_sent_at: data.sent_at,
-                bill_last_sent_at_display: data.sent_at_display || item.bill_last_sent_at_display,
-                bill_last_sent_by_name: data.sent_by || item.bill_last_sent_by_name,
+                bill_last_sent_at: sentData.sent_at,
+                bill_last_sent_at_display: sentData.sent_at_display || item.bill_last_sent_at_display,
+                bill_last_sent_by_name: sentData.sent_by || item.bill_last_sent_by_name,
               }
               : item
           ))
@@ -202,7 +244,7 @@ export default function StudentDetailPage() {
         })
       }
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to send bill.'))
+      setMessage(apiErrorMessage(error, error.message || 'Failed to send bill.'))
     } finally {
       setSendingBillId(null)
     }
@@ -296,12 +338,6 @@ export default function StudentDetailPage() {
             {latestBill ? (
               <div className="mt-4 space-y-1 text-sm font-semibold text-slate-500">
                 <p>Latest bill: {latestBill.document_number || latestBill.bill_number} / {formatDate(latestBill.bill_generated_at || latestBill.payment_date, 'Not set')}</p>
-                {latestBill.bill_last_sent_at_display ? (
-                  <>
-                    <p>Last Sent: {latestBill.bill_last_sent_at_display}</p>
-                    <p>Sent By: {latestBill.bill_last_sent_by_name || '-'}</p>
-                  </>
-                ) : null}
               </div>
             ) : (
               <p className="mt-4 text-sm font-semibold text-slate-500">No generated bill is available for this student yet.</p>
@@ -321,9 +357,9 @@ export default function StudentDetailPage() {
                 type="button"
                 onClick={() => sendBill(latestBill)}
                 disabled={!latestBill || sendingBillId === latestBill?.id}
-                className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className={sendBillButtonClass(latestBill)}
               >
-                {sendingBillId === latestBill?.id ? 'Sending...' : 'Send Bill'}
+                {sendingBillId === latestBill?.id ? 'Sending...' : billWasSent(latestBill) ? 'Bill Sent' : 'Send Bill'}
               </button>
             )}
           </div>

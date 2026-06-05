@@ -69,7 +69,7 @@ import re
 import textwrap
 import uuid
 import zipfile
-from whatsapp_service import WATIClient, send_candidate_document, send_candidate_message, send_whatsapp_message
+from whatsapp_service import WATIClient, log_whatsapp_message, send_candidate_document, send_candidate_message, send_whatsapp_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
@@ -729,15 +729,61 @@ class PhoneNumberUpdateView(APIView):
 ADMIN_APPROVAL_NOTIFICATION_TITLES = {
     'Counselor Change Request',
     'Counselor Change Approval Needed',
+    'Counselor Change Approved by Counselor',
+    'Counselor Change Rejected by Counselor',
     'Course Change Request',
     'Installment Added by User',
     'Installment Edited by User',
     'Installment Deleted by User',
+    'Lead Assigned',
+    'Lead Transferred',
+    'Walk-in Transfer Request',
+    'Walk-in Transferred',
+    'Branch Transfer Request',
+    'Branch Transfer Approval Required',
+    'Student Status Change Request',
+    'Enrollment Created',
+    'New Enrollment Created',
     'Payment Awaiting Approval',
+    'Payment Added',
     'Payment Reason Response Submitted',
     'Lead Transfer Approval Required',
     'Enrollment Approval Request',
 }
+
+ADMIN_ACTION_NOTIFICATION_KEYWORDS = (
+    'counselor change',
+    'course change request',
+    'installment added',
+    'installment edited',
+    'installment deleted',
+    'lead transfer',
+    'lead transferred',
+    'walk-in transfer',
+    'walkin transfer',
+    'walk-in transferred',
+    'branch transfer',
+    'student status change',
+    'new enrollment created',
+    'enrollment created',
+    'enrollment approval',
+    'payment added',
+    'payment awaiting approval',
+    'payment reason response submitted',
+)
+
+ADMIN_EXCLUDED_NOTIFICATION_KEYWORDS = (
+    'rules & regulations',
+    'rules form',
+    'student handbook',
+    'dashboard visit',
+    'dashboard viewed',
+    'performance hub',
+    'page visit',
+    'viewed form',
+    'viewed page',
+    'general activity',
+)
 
 SYSTEM_NOTIFICATION_KEYWORDS = (
     'error',
@@ -759,6 +805,8 @@ def notification_category_for(title, notification_type=Notification.NType.INFO, 
     if normalized_title in ADMIN_APPROVAL_NOTIFICATION_TITLES:
         return Notification.Category.APPROVAL
     lower_title = normalized_title.lower()
+    if any(keyword in lower_title for keyword in ADMIN_ACTION_NOTIFICATION_KEYWORDS):
+        return Notification.Category.APPROVAL
     if notification_type == Notification.NType.ERROR or any(keyword in lower_title for keyword in SYSTEM_NOTIFICATION_KEYWORDS):
         return Notification.Category.SYSTEM
     return Notification.Category.INFO
@@ -766,9 +814,14 @@ def notification_category_for(title, notification_type=Notification.NType.INFO, 
 
 def admin_action_required_filter():
     title_filter = Q(title__in=ADMIN_APPROVAL_NOTIFICATION_TITLES)
+    for keyword in ADMIN_ACTION_NOTIFICATION_KEYWORDS:
+        title_filter |= Q(title__icontains=keyword)
     for keyword in SYSTEM_NOTIFICATION_KEYWORDS:
         title_filter |= Q(title__icontains=keyword)
-    return Q(category__in=ADMIN_VISIBLE_NOTIFICATION_CATEGORIES) | title_filter
+    excluded_filter = Q()
+    for keyword in ADMIN_EXCLUDED_NOTIFICATION_KEYWORDS:
+        excluded_filter |= Q(title__icontains=keyword) | Q(message__icontains=keyword)
+    return (Q(category__in=ADMIN_VISIBLE_NOTIFICATION_CATEGORIES) | title_filter) & ~excluded_filter
 
 
 def create_user_notification(user, title, message, notification_type=Notification.NType.INFO, related_url='', category=None):
@@ -852,6 +905,18 @@ def is_admin_operational_noise(user, title):
 def notify_admin_users(title, message, notification_type=Notification.NType.INFO, related_url='', category=None):
     for admin_user in active_admin_users():
         create_user_notification(admin_user, title, message, notification_type, related_url, category=category)
+
+
+def notify_admin_enrollment_created(enrollment, created_by=None):
+    actor_name = (created_by.full_name or created_by.username) if created_by else 'System'
+    course_name = enrollment.course.name if enrollment.course else 'Course not set'
+    notify_admin_users(
+        'New Enrollment Created',
+        f'{enrollment.name} enrolled for {course_name} by {actor_name}.',
+        Notification.NType.INFO,
+        f'/enrollments/{enrollment.id}',
+        category=Notification.Category.APPROVAL,
+    )
 
 
 def notify_counselor_request_submitted(change_request):
@@ -1170,6 +1235,19 @@ def apply_pending_date_filter(queryset, field_name, request):
     if end:
         queryset = queryset.filter(**{f'{field_name}__lte': end})
     return queryset
+
+
+def apply_overdue_follow_up_date_filter(queryset, field_name, request):
+    today = timezone.localdate()
+    overdue_end = today - timedelta(days=1)
+    start, end = pending_duration_bounds(request)
+    if end is None or end >= today:
+        end = overdue_end
+    if start and start >= today:
+        return queryset.none()
+    if start:
+        queryset = queryset.filter(**{f'{field_name}__gte': start})
+    return queryset.filter(**{f'{field_name}__lte': end})
 
 
 class CRMSearchFilter(SearchFilter):
@@ -1592,6 +1670,7 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
     transfer_request.reviewed_by = reviewer
     transfer_request.reviewed_at = timezone.now()
     transfer_request.save(update_fields=['enrollment', 'status', 'reviewed_by', 'reviewed_at', 'updated_at'])
+    notify_admin_enrollment_created(enrollment, reviewer)
     return enrollment
 
 
@@ -3842,6 +3921,7 @@ class LeadViewSet(viewsets.ModelViewSet):
 
             mark_lead_enrollment_converted(lead, enrollment, request.user, data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
+        notify_admin_enrollment_created(enrollment, request.user)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
     @action(detail=True, methods=['post'], url_path='follow-ups')
@@ -6056,7 +6136,7 @@ class PendingManagementView(APIView):
             'next_follow_up_date',
             LEAD_CLOSED_FOLLOW_UP_STATUSES,
         ).exclude(next_follow_up_date__isnull=True)
-        return apply_pending_date_filter(qs, 'next_follow_up_date', request).order_by('next_follow_up_date', 'name')
+        return apply_overdue_follow_up_date_filter(qs, 'next_follow_up_date', request).order_by('next_follow_up_date', 'name')
 
     def base_walkins(self, request):
         qs = visible_candidate_queryset(WalkIn.objects.select_related('branch', 'course', 'assigned_to'))
@@ -6080,7 +6160,7 @@ class PendingManagementView(APIView):
             'follow_up_date',
             WALKIN_CLOSED_FOLLOW_UP_STATUSES,
         ).exclude(follow_up_date__isnull=True)
-        return apply_pending_date_filter(qs, 'follow_up_date', request).order_by('follow_up_date', 'name')
+        return apply_overdue_follow_up_date_filter(qs, 'follow_up_date', request).order_by('follow_up_date', 'name')
 
     def base_payments(self, request):
         qs = visible_payment_queryset(Payment.objects.select_related(
@@ -6183,7 +6263,7 @@ class PendingManagementView(APIView):
                 'lead_pending': leads,
                 'walkin_pending': walkins,
                 'payment_pending': payments,
-                'total_pending': leads + walkins + payments,
+                'total_pending': leads + walkins,
             })
         if section == 'leads':
             rows = [self.lead_row(lead) for lead in self.base_leads(request)[:500]]
@@ -6749,6 +6829,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
             mark_walkin_enrollment_converted(walkin, enrollment, request.user, data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         resolve_public_walkin_notifications(walkin.id)
+        notify_admin_enrollment_created(enrollment, request.user)
         return Response(EnrollmentDetailSerializer(enrollment).data, status=201)
 
     def destroy(self, request, *args, **kwargs):
@@ -7748,7 +7829,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         return enrollment.payment_schedule
 
     def perform_create(self, serializer):
-        serializer.save(enrolled_by=self.request.user, created_by=self.request.user)
+        enrollment = serializer.save(enrolled_by=self.request.user, created_by=self.request.user)
+        notify_admin_enrollment_created(enrollment, self.request.user)
 
     def update(self, request, *args, **kwargs):
         if 'branch' in request.data and not request.user.is_super_admin:
@@ -9541,13 +9623,30 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         saved_path = default_storage.save(storage_path, ContentFile(pdf_bytes))
         return request.build_absolute_uri(default_storage.url(saved_path))
 
-    def _bill_whatsapp_message(self, enrollment, bill_url):
+    def _stored_bill_image_path(self, installment):
+        document_number = self._document_number(installment) or f'bill-{installment.id}'
+        safe_document_number = re.sub(r'[^A-Za-z0-9_.-]', '-', str(document_number)).strip('-') or f'bill-{installment.id}'
+        return f'bills/{installment.id}/{safe_document_number}.png'
+
+    def _store_bill_image(self, request, installment, image_bytes):
+        storage_path = self._stored_bill_image_path(installment)
+        if default_storage.exists(storage_path):
+            default_storage.delete(storage_path)
+        saved_path = default_storage.save(storage_path, ContentFile(image_bytes))
+        return request.build_absolute_uri(default_storage.url(saved_path))
+
+    def _bill_whatsapp_message(self, enrollment, installment):
+        snapshot = installment.document_snapshot or {}
+        course_name = snapshot.get('course_name') or (enrollment.course.name if enrollment.course else '')
+        installment_name = snapshot.get('installment_label') or installment.installment_label or str(installment.installment_index)
+        paid_amount = Decimal(str(snapshot.get('payment_amount') or installment.amount or 0))
         return (
             f'Dear {enrollment.name},\n\n'
             'Your payment receipt has been generated.\n\n'
-            'View / Download Bill:\n\n'
-            f'{bill_url}\n\n'
-            '* Team IIE'
+            f'Course: {course_name}\n'
+            f'Installment: {installment_name}\n'
+            f'Paid Amount: \u20b9{paid_amount:,.2f}\n\n'
+            '-Team IIE'
         )
 
     def _bill_api_delivery_enabled(self):
@@ -9976,11 +10075,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment.save(update_fields=['document_snapshot', 'document_html', 'bill_total'])
         return html
 
-    def _build_document_pdf(self, installment):
+    def _build_document_image(self, installment):
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError as exc:
-            raise RuntimeError('Pillow is required to generate bill PDFs.') from exc
+            raise RuntimeError('Pillow is required to generate bill documents.') from exc
 
         snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
         branch = installment.enrollment.branch
@@ -10102,8 +10201,19 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         footer_bbox = draw.textbbox((0, 0), footer_text, font=font)
         draw.text((width - margin - (footer_bbox[2] - footer_bbox[0]), footer_y + 34), footer_text, fill='white', font=font)
 
+        return page
+
+    def _build_document_pdf(self, installment):
+        page = self._build_document_image(installment)
         output = io.BytesIO()
         page.save(output, format='PDF')
+        output.seek(0)
+        return output.read()
+
+    def _build_document_png(self, installment):
+        page = self._build_document_image(installment)
+        output = io.BytesIO()
+        page.save(output, format='PNG')
         output.seek(0)
         return output.read()
 
@@ -10128,56 +10238,90 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Generate the bill before sending it.'}, status=400)
 
         enrollment = installment.enrollment
-        filename = f'{document_number}.pdf'
+        image_filename = f'{document_number}.png'
         installment.document_snapshot = self._build_document_snapshot(installment)
         installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
         installment.save(update_fields=['document_snapshot', 'document_html'])
         try:
-            pdf_bytes = self._build_document_pdf(installment)
+            image_bytes = self._build_document_png(installment)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
-        bill_url = self._store_bill_pdf(request, installment, pdf_bytes)
-        fallback_message = self._bill_whatsapp_message(enrollment, bill_url)
+        whatsapp_message = self._bill_whatsapp_message(enrollment, installment)
         if self._bill_api_delivery_enabled() and WATIClient().is_configured:
-            caption = (
-                f'Hi {enrollment.name},\n\n'
-                f'Please find your bill {document_number} attached.\n\n'
-                '-Team IIE'
-            )
             log = send_candidate_document(
                 candidate_name=enrollment.name,
                 phone=enrollment.phone,
                 message_type=WhatsAppMessage.MsgType.MANUAL,
-                caption=caption,
-                file_bytes=pdf_bytes,
-                filename=filename,
+                caption=whatsapp_message,
+                file_bytes=image_bytes,
+                filename=image_filename,
+                content_type='image/png',
                 sent_by=request.user,
                 related_model='payment_installment',
                 related_id=installment.id,
             )
             detail = 'Bill sent successfully.' if log.status == WhatsAppMessage.MsgStatus.SENT else 'Bill send request failed.'
-            whatsapp_message = caption
-        else:
-            log = send_whatsapp_message(
-                candidate_name=enrollment.name,
-                phone=enrollment.phone,
-                message_type=WhatsAppMessage.MsgType.MANUAL,
-                message_body=fallback_message,
-                sent_by=request.user,
-                related_model='payment_installment',
-                related_id=installment.id,
-                provider='whatsapp_web',
-            )
-            detail = 'Bill generated successfully. WhatsApp will open with the bill link.'
-            whatsapp_message = fallback_message
+            return Response({
+                'detail': detail,
+                'phone': enrollment.phone,
+                'document_number': document_number,
+                'document_filename': image_filename,
+                'whatsapp_message': whatsapp_message,
+                'sent_at': log.sent_at or log.created_at,
+                'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
+                'sent_by': request.user.full_name or request.user.username,
+                **whatsapp_send_payload(log),
+            })
+
+        self._store_bill_image(request, installment, image_bytes)
         return Response({
-            'detail': detail,
+            'detail': 'Bill image generated. Share it through WhatsApp.',
             'phone': enrollment.phone,
             'document_number': document_number,
-            'bill_url': bill_url,
-            'bill_download_url': bill_url,
-            'document_filename': filename,
+            'document_filename': image_filename,
+            'bill_image_data': base64.b64encode(image_bytes).decode('ascii'),
+            'bill_image_content_type': 'image/png',
+            'share_mode': 'browser_file_share',
             'whatsapp_message': whatsapp_message,
+            'whatsapp_sent': False,
+            'whatsapp_status': 'prepared',
+            'whatsapp_error': '',
+            'whatsapp_provider': 'browser_file_share',
+        })
+
+    @action(detail=True, methods=['post'], url_path='confirm-bill-sent')
+    def confirm_bill_sent(self, request, pk=None):
+        installment = self.get_object()
+        if request.user.is_super_admin:
+            return Response({'detail': 'Admins can generate and verify bills, but cannot send bills.'}, status=403)
+        document_number = installment.bill_number
+        if not document_number:
+            return Response({'detail': 'Generate the bill before sending it.'}, status=400)
+
+        enrollment = installment.enrollment
+        message = self._bill_whatsapp_message(enrollment, installment)
+        log = log_whatsapp_message(
+            candidate_name=enrollment.name,
+            phone=enrollment.phone,
+            message_type=WhatsAppMessage.MsgType.MANUAL,
+            message_body=message,
+            result={
+                'provider': 'browser_file_share',
+                'document_number': document_number,
+                'filename': f'{document_number}.png',
+            },
+            template_name=f'{document_number}.png',
+            sent_by=request.user,
+            related_model='payment_installment',
+            related_id=installment.id,
+            provider='browser_file_share',
+        )
+        return Response({
+            'detail': 'Bill sent successfully.',
+            'phone': enrollment.phone,
+            'document_number': document_number,
+            'document_filename': f'{document_number}.png',
+            'whatsapp_message': message,
             'sent_at': log.sent_at or log.created_at,
             'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
             'sent_by': request.user.full_name or request.user.username,
