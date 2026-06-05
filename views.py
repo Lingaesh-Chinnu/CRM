@@ -9463,12 +9463,10 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _public_bill_url(self, request, installment):
         return request.build_absolute_uri(self._public_bill_path(installment))
 
-    def _bill_whatsapp_message(self, enrollment, bill_link):
+    def _bill_whatsapp_message(self, enrollment):
         return (
             f'Dear {enrollment.name},\n\n'
-            'Your payment receipt has been generated.\n\n'
-            'View / Download Bill:\n\n'
-            f'{bill_link}\n\n'
+            'Please find your payment receipt attached.\n\n'
             '* Team IIE'
         )
 
@@ -10052,8 +10050,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             pdf_bytes = self._build_document_pdf(installment)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
-        bill_link = self._public_bill_url(request, installment)
-        fallback_message = self._bill_whatsapp_message(enrollment, bill_link)
+        bill_download_url = self._public_bill_url(request, installment)
+        fallback_message = self._bill_whatsapp_message(enrollment)
         if WATIClient().is_configured:
             caption = (
                 f'Hi {enrollment.name},\n\n'
@@ -10084,13 +10082,14 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 related_id=installment.id,
                 provider='whatsapp_web',
             )
-            detail = 'Bill link ready. WhatsApp will open for manual sending.'
+            detail = 'Bill generated successfully. Attach the generated PDF and send via WhatsApp.'
             whatsapp_message = fallback_message
         return Response({
             'detail': detail,
             'phone': enrollment.phone,
             'document_number': document_number,
-            'bill_link': bill_link,
+            'bill_download_url': bill_download_url,
+            'document_filename': filename,
             'whatsapp_message': whatsapp_message,
             'sent_at': log.sent_at or log.created_at,
             'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
