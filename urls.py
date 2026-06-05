@@ -31,6 +31,7 @@ from views import (
     PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
     RulesSignedPdfView, RulesSelfieView, PublicRulesSignedPdfView, PublicRulesReviewPdfView,
+    PublicBillView,
 )
 
 router = DefaultRouter()
@@ -106,6 +107,7 @@ urlpatterns = [
     path('rules-selfie/<int:enrollment_id>/', RulesSelfieView.as_view(), name='rules_selfie'),
     path('public/rules-review-pdf/<uuid:token>/', PublicRulesReviewPdfView.as_view(), name='public_rules_review_pdf'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
+    path('public/bills/<int:installment_id>/<str:document_number>/', PublicBillView.as_view(), name='public_bill'),
     re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|consolidated-report|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),

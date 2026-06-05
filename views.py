@@ -68,7 +68,7 @@ import re
 import textwrap
 import uuid
 import zipfile
-from whatsapp_service import send_candidate_document, send_candidate_message, send_whatsapp_message
+from whatsapp_service import WATIClient, send_candidate_document, send_candidate_message, send_whatsapp_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
@@ -9440,6 +9440,22 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return installment.bill_number
         return installment.receipt_number
 
+    def _public_bill_path(self, installment):
+        document_number = self._document_number(installment)
+        return f'/public/bills/{installment.id}/{document_number}/'
+
+    def _public_bill_url(self, request, installment):
+        return request.build_absolute_uri(self._public_bill_path(installment))
+
+    def _bill_whatsapp_message(self, enrollment, bill_link):
+        return (
+            f'Dear {enrollment.name},\n\n'
+            'Your payment receipt has been generated.\n\n'
+            'View / Download Bill:\n\n'
+            f'{bill_link}\n\n'
+            '* Team IIE'
+        )
+
     def _receipt_date(self, value):
         if not value:
             return 'Not set'
@@ -10020,32 +10036,77 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             pdf_bytes = self._build_document_pdf(installment)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
-        caption = (
-            f'Hi {enrollment.name},\n\n'
-            f'Please find your bill {document_number} attached.\n\n'
-            '-Team IIE'
-        )
-        log = send_candidate_document(
-            candidate_name=enrollment.name,
-            phone=enrollment.phone,
-            message_type=WhatsAppMessage.MsgType.MANUAL,
-            caption=caption,
-            file_bytes=pdf_bytes,
-            filename=filename,
-            sent_by=request.user,
-            related_model='payment_installment',
-            related_id=installment.id,
-        )
+        bill_link = self._public_bill_url(request, installment)
+        fallback_message = self._bill_whatsapp_message(enrollment, bill_link)
+        if WATIClient().is_configured:
+            caption = (
+                f'Hi {enrollment.name},\n\n'
+                f'Please find your bill {document_number} attached.\n\n'
+                '-Team IIE'
+            )
+            log = send_candidate_document(
+                candidate_name=enrollment.name,
+                phone=enrollment.phone,
+                message_type=WhatsAppMessage.MsgType.MANUAL,
+                caption=caption,
+                file_bytes=pdf_bytes,
+                filename=filename,
+                sent_by=request.user,
+                related_model='payment_installment',
+                related_id=installment.id,
+            )
+            detail = 'Bill sent successfully.' if log.status == WhatsAppMessage.MsgStatus.SENT else 'Bill send request failed.'
+            whatsapp_message = caption
+        else:
+            log = send_whatsapp_message(
+                candidate_name=enrollment.name,
+                phone=enrollment.phone,
+                message_type=WhatsAppMessage.MsgType.MANUAL,
+                message_body=fallback_message,
+                sent_by=request.user,
+                related_model='payment_installment',
+                related_id=installment.id,
+                provider='whatsapp_web',
+            )
+            detail = 'Bill link ready. WhatsApp will open for manual sending.'
+            whatsapp_message = fallback_message
         return Response({
-            'detail': 'Bill sent successfully.' if log.status == WhatsAppMessage.MsgStatus.SENT else 'Bill send request failed.',
+            'detail': detail,
             'phone': enrollment.phone,
             'document_number': document_number,
-            'whatsapp_message': caption,
+            'bill_link': bill_link,
+            'whatsapp_message': whatsapp_message,
             'sent_at': log.sent_at or log.created_at,
             'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
             'sent_by': request.user.full_name or request.user.username,
             **whatsapp_send_payload(log),
         })
+
+
+class PublicBillView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, installment_id, document_number):
+        installment = PaymentInstallment.objects.select_related(
+            'payment',
+            'enrollment__branch',
+            'enrollment__course',
+            'bill_generated_by',
+        ).filter(pk=installment_id, bill_number=document_number).first()
+        if not installment:
+            return Response({'detail': 'Bill not found.'}, status=404)
+
+        builder = PaymentInstallmentViewSet()
+        try:
+            pdf_bytes = builder._build_document_pdf(installment)
+        except RuntimeError:
+            response = HttpResponse(builder._immutable_document_html(installment), content_type='text/html; charset=utf-8')
+            response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
+            return response
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{document_number}.pdf"'
+        return response
 
 
 class AdminReceiptViewSet(viewsets.ModelViewSet):

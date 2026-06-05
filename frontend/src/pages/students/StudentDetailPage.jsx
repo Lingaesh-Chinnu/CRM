@@ -176,7 +176,10 @@ export default function StudentDetailPage() {
     setMessage('')
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
-      setMessage(data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')
+      if (data.whatsapp_url) {
+        window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
+      }
+      setMessage(data.whatsapp_url ? data.detail : data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')
       if (data.whatsapp_sent) {
         setRow((current) => {
           const installments = (current?.payment_info?.installments || []).map((item) => (
