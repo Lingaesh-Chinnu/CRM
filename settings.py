@@ -310,6 +310,8 @@ WATI_API_URL         = os.environ.get('WATI_API_URL', '').rstrip('/')
 WATI_ACCESS_TOKEN    = os.environ.get('WATI_ACCESS_TOKEN', '')
 WATI_INSTANCE_ID     = os.environ.get('WATI_INSTANCE_ID', '')
 DEFAULT_WHATSAPP_COUNTRY_CODE = os.environ.get('DEFAULT_WHATSAPP_COUNTRY_CODE', '91')
+BILL_WHATSAPP_API_ENABLED = env_bool('BILL_WHATSAPP_API_ENABLED', False)
+WHATSCHIMP_ENABLED = env_bool('WHATSCHIMP_ENABLED', False)
 LEAD_CAPTURE_API_KEY = os.environ.get('LEAD_CAPTURE_API_KEY', '')
 
 # ── Email ─────────────────────────────────────────────────────

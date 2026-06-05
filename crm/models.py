@@ -1578,10 +1578,16 @@ class Notification(models.Model):
         APPROVED = 'approved', 'Approved'
         REJECTED = 'rejected', 'Rejected'
 
+    class Category(models.TextChoices):
+        APPROVAL = 'approval', 'Approval'
+        SYSTEM = 'system', 'System'
+        INFO = 'info', 'Info'
+
     user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     title       = models.CharField(max_length=200)
     message     = models.TextField()
     type        = models.CharField(max_length=10, choices=NType.choices, default=NType.INFO)
+    category    = models.CharField(max_length=20, choices=Category.choices, default=Category.INFO, db_index=True)
     status      = models.CharField(max_length=20, choices=Status.choices, default=Status.UNREAD, db_index=True)
     is_read     = models.BooleanField(default=False, db_index=True)
     related_url = models.CharField(max_length=300, blank=True)

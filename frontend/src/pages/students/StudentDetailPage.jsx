@@ -170,20 +170,6 @@ export default function StudentDetailPage() {
     }
   }
 
-  const downloadBillPdf = async (installment, fallbackName = 'bill.pdf') => {
-    const { data } = await api.get(`/installments/${installment.id}/view-bill/`, {
-      responseType: 'blob',
-    })
-    const url = window.URL.createObjectURL(data)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = fallbackName
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000)
-  }
-
   const sendBill = async (installment) => {
     if (!installment || sendingBillId) return
     setSendingBillId(installment.id)
@@ -191,7 +177,6 @@ export default function StudentDetailPage() {
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
       if (data.whatsapp_url) {
-        await downloadBillPdf(installment, data.document_filename || `${data.document_number || 'bill'}.pdf`)
         window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
       }
       setMessage(data.whatsapp_url ? data.detail : data.whatsapp_sent ? 'Bill sent successfully.' : data.whatsapp_error || 'Bill send request failed.')

@@ -47,6 +47,7 @@ from django.core.cache import cache
 from django.core.mail import send_mail
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.db import IntegrityError, connection, transaction
@@ -725,7 +726,52 @@ class PhoneNumberUpdateView(APIView):
         })
 
 
-def create_user_notification(user, title, message, notification_type=Notification.NType.INFO, related_url=''):
+ADMIN_APPROVAL_NOTIFICATION_TITLES = {
+    'Counselor Change Request',
+    'Counselor Change Approval Needed',
+    'Course Change Request',
+    'Installment Added by User',
+    'Installment Edited by User',
+    'Installment Deleted by User',
+    'Payment Awaiting Approval',
+    'Payment Reason Response Submitted',
+    'Lead Transfer Approval Required',
+    'Enrollment Approval Request',
+}
+
+SYSTEM_NOTIFICATION_KEYWORDS = (
+    'error',
+    'failed',
+    'failure',
+    'crashed',
+)
+
+ADMIN_VISIBLE_NOTIFICATION_CATEGORIES = (
+    Notification.Category.APPROVAL,
+    Notification.Category.SYSTEM,
+)
+
+
+def notification_category_for(title, notification_type=Notification.NType.INFO, category=None):
+    if category:
+        return category
+    normalized_title = str(title or '').strip()
+    if normalized_title in ADMIN_APPROVAL_NOTIFICATION_TITLES:
+        return Notification.Category.APPROVAL
+    lower_title = normalized_title.lower()
+    if notification_type == Notification.NType.ERROR or any(keyword in lower_title for keyword in SYSTEM_NOTIFICATION_KEYWORDS):
+        return Notification.Category.SYSTEM
+    return Notification.Category.INFO
+
+
+def admin_action_required_filter():
+    title_filter = Q(title__in=ADMIN_APPROVAL_NOTIFICATION_TITLES)
+    for keyword in SYSTEM_NOTIFICATION_KEYWORDS:
+        title_filter |= Q(title__icontains=keyword)
+    return Q(category__in=ADMIN_VISIBLE_NOTIFICATION_CATEGORIES) | title_filter
+
+
+def create_user_notification(user, title, message, notification_type=Notification.NType.INFO, related_url='', category=None):
     if not user or not getattr(user, 'is_active', False):
         return None
     if is_admin_operational_noise(user, title):
@@ -735,6 +781,7 @@ def create_user_notification(user, title, message, notification_type=Notificatio
         title=title,
         message=message,
         type=notification_type,
+        category=notification_category_for(title, notification_type, category),
         status=Notification.Status.UNREAD,
         is_read=False,
         related_url=related_url,
@@ -746,7 +793,7 @@ def notify_branch_users(branch, title, message, notification_type=Notification.N
         create_user_notification(user, title, message, notification_type, related_url)
 
 
-def create_notification_once(user, title, message, notification_type=Notification.NType.INFO, related_url=''):
+def create_notification_once(user, title, message, notification_type=Notification.NType.INFO, related_url='', category=None):
     if not user:
         return None
     if is_admin_operational_noise(user, title):
@@ -764,6 +811,7 @@ def create_notification_once(user, title, message, notification_type=Notificatio
         title=title,
         message=message,
         type=notification_type,
+        category=notification_category_for(title, notification_type, category),
         status=Notification.Status.UNREAD,
         is_read=False,
         related_url=related_url,
@@ -801,9 +849,9 @@ def is_admin_operational_noise(user, title):
     return bool(getattr(user, 'is_super_admin', False) and title in ADMIN_OPERATIONAL_NOTIFICATION_TITLES)
 
 
-def notify_admin_users(title, message, notification_type=Notification.NType.INFO, related_url=''):
+def notify_admin_users(title, message, notification_type=Notification.NType.INFO, related_url='', category=None):
     for admin_user in active_admin_users():
-        create_user_notification(admin_user, title, message, notification_type, related_url)
+        create_user_notification(admin_user, title, message, notification_type, related_url, category=category)
 
 
 def notify_counselor_request_submitted(change_request):
@@ -5956,7 +6004,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         generate_smart_notifications(self.request.user)
         queryset = Notification.objects.filter(user=self.request.user).order_by('-created_at')
         if self.request.user.is_super_admin:
-            queryset = queryset.exclude(title__in=ADMIN_OPERATIONAL_NOTIFICATION_TITLES)
+            queryset = queryset.filter(admin_action_required_filter())
         scope = self.request.query_params.get('scope', 'active')
         status_filter = self.request.query_params.get('status', '').strip()
         state_filter = self.request.query_params.get('state', '').strip()
@@ -9372,14 +9420,27 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
 
     def _notify_admins_payment_added(self, installment):
-        message = f'{installment.enrollment.name} payment added and awaiting approval.'
+        message = f'{installment.enrollment.name} payment installment added and awaiting approval.'
         for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
             create_user_notification(
                 admin_user,
-                'Payment Awaiting Approval',
+                'Installment Added by User',
                 message,
                 Notification.NType.INFO,
                 f'/payments/{installment.payment_id}',
+                category=Notification.Category.APPROVAL,
+            )
+
+    def _notify_admins_installment_changed(self, installment, title):
+        message = f'{installment.enrollment.name} payment installment was {title.replace("Installment ", "").replace(" by User", "").lower()} by {self.request.user.full_name or self.request.user.username}.'
+        for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+            create_user_notification(
+                admin_user,
+                title,
+                message,
+                Notification.NType.WARNING,
+                f'/payments/{installment.payment_id}',
+                category=Notification.Category.APPROVAL,
             )
 
     def _notify_collector_document_generated(self, installment):
@@ -9399,6 +9460,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if self._document_number(installment) or installment.bill_generated_at:
             return Response({'detail': 'Generated payment documents cannot be edited.'}, status=400)
         response = super().update(request, *args, **kwargs)
+        if not request.user.is_super_admin:
+            installment.refresh_from_db()
+            self._notify_admins_installment_changed(installment, 'Installment Edited by User')
         installment.payment.refresh_from_db()
         resolve_payment_due_notifications_if_inactive(installment.payment)
         return response
@@ -9407,6 +9471,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment = self.get_object()
         if self._document_number(installment) or installment.bill_generated_at:
             return Response({'detail': 'Generated payment documents cannot be deleted.'}, status=400)
+        if not request.user.is_super_admin:
+            self._notify_admins_installment_changed(installment, 'Installment Deleted by User')
         return super().destroy(request, *args, **kwargs)
 
     def _active_installment(self, payment):
@@ -9463,11 +9529,31 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _public_bill_url(self, request, installment):
         return request.build_absolute_uri(self._public_bill_path(installment))
 
-    def _bill_whatsapp_message(self, enrollment):
+    def _stored_bill_pdf_path(self, installment):
+        document_number = self._document_number(installment) or f'bill-{installment.id}'
+        safe_document_number = re.sub(r'[^A-Za-z0-9_.-]', '-', str(document_number)).strip('-') or f'bill-{installment.id}'
+        return f'bills/{installment.id}/{safe_document_number}.pdf'
+
+    def _store_bill_pdf(self, request, installment, pdf_bytes):
+        storage_path = self._stored_bill_pdf_path(installment)
+        if default_storage.exists(storage_path):
+            default_storage.delete(storage_path)
+        saved_path = default_storage.save(storage_path, ContentFile(pdf_bytes))
+        return request.build_absolute_uri(default_storage.url(saved_path))
+
+    def _bill_whatsapp_message(self, enrollment, bill_url):
         return (
             f'Dear {enrollment.name},\n\n'
-            'Please find your payment receipt attached.\n\n'
+            'Your payment receipt has been generated.\n\n'
+            'View / Download Bill:\n\n'
+            f'{bill_url}\n\n'
             '* Team IIE'
+        )
+
+    def _bill_api_delivery_enabled(self):
+        return bool(
+            getattr(settings, 'WHATSCHIMP_ENABLED', False)
+            or getattr(settings, 'BILL_WHATSAPP_API_ENABLED', False)
         )
 
     def _receipt_date(self, value):
@@ -10050,9 +10136,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             pdf_bytes = self._build_document_pdf(installment)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
-        bill_download_url = self._public_bill_url(request, installment)
-        fallback_message = self._bill_whatsapp_message(enrollment)
-        if WATIClient().is_configured:
+        bill_url = self._store_bill_pdf(request, installment, pdf_bytes)
+        fallback_message = self._bill_whatsapp_message(enrollment, bill_url)
+        if self._bill_api_delivery_enabled() and WATIClient().is_configured:
             caption = (
                 f'Hi {enrollment.name},\n\n'
                 f'Please find your bill {document_number} attached.\n\n'
@@ -10082,13 +10168,14 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 related_id=installment.id,
                 provider='whatsapp_web',
             )
-            detail = 'Bill generated successfully. Attach the generated PDF and send via WhatsApp.'
+            detail = 'Bill generated successfully. WhatsApp will open with the bill link.'
             whatsapp_message = fallback_message
         return Response({
             'detail': detail,
             'phone': enrollment.phone,
             'document_number': document_number,
-            'bill_download_url': bill_download_url,
+            'bill_url': bill_url,
+            'bill_download_url': bill_url,
             'document_filename': filename,
             'whatsapp_message': whatsapp_message,
             'sent_at': log.sent_at or log.created_at,

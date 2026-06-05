@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 
 const statusOptions = [
@@ -43,6 +44,8 @@ function statusClass(status) {
 }
 
 export default function NotificationsPage() {
+  const { user } = useSelector((state) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [notifications, setNotifications] = useState([])
   const [state, setState] = useState('')
   const [date, setDate] = useState('')
@@ -64,9 +67,11 @@ export default function NotificationsPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Notifications</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Notification history</h1>
+        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{isSuperAdmin ? 'Action Required Inbox' : 'Notification history'}</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          Review active, read, and completed notifications without removing records.
+          {isSuperAdmin
+            ? 'Review approval requests and system alerts that need admin attention.'
+            : 'Review active, read, and completed notifications without removing records.'}
         </p>
       </section>
 
