@@ -57,6 +57,11 @@ export default function WalkInCreatePage() {
   const [form, setForm] = useState(initialForm)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [duplicateRecords, setDuplicateRecords] = useState([])
+  const [checkingPhone, setCheckingPhone] = useState(false)
+  const [createAnyway, setCreateAnyway] = useState(false)
+
+  const existingLead = duplicateRecords.find((record) => record.type === 'Lead')
 
   useEffect(() => {
     Promise.all([api.get('/courses/'), api.get('/branches/')]).then(([coursesRes, branchesRes]) => {
@@ -80,9 +85,66 @@ export default function WalkInCreatePage() {
       .catch(() => setStaffUsers([]))
   }, [isSuperAdmin, form.branch])
 
+  useEffect(() => {
+    const phone = form.phone.trim()
+    setCreateAnyway(false)
+    if (phone.replace(/\D/g, '').length < 6) {
+      setDuplicateRecords([])
+      setCheckingPhone(false)
+      return undefined
+    }
+
+    let cancelled = false
+    setCheckingPhone(true)
+    const timeoutId = window.setTimeout(() => {
+      api.get('/leads/duplicate-check/', { params: { phone } })
+        .then(({ data }) => {
+          if (!cancelled) setDuplicateRecords(data.records || [])
+        })
+        .catch(() => {
+          if (!cancelled) setDuplicateRecords([])
+        })
+        .finally(() => {
+          if (!cancelled) setCheckingPhone(false)
+        })
+    }, 350)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [form.phone])
+
+  const updateForm = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }))
+    if (field === 'phone') setCreateAnyway(false)
+  }
+
+  const convertExistingLead = async () => {
+    if (!existingLead || saving) return
+    setSaving(true)
+    setErrorMessage('')
+    try {
+      const { data } = await api.post(`/leads/${existingLead.id}/convert-to-walkin/`, {
+        visit_date: form.visit_date,
+        preferred_timing: form.preferred_timing,
+        remarks: form.remarks,
+      })
+      navigate(`/walkins/${data.id}`)
+    } catch (error) {
+      setErrorMessage(apiErrorMessage(error, 'Failed to convert existing lead. Open the lead and complete any missing mandatory details.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     if (saving) return
+    if (existingLead && !createAnyway) {
+      setErrorMessage('Existing Lead Found. Convert the existing lead or choose Create New Walk-in Anyway.')
+      return
+    }
     setSaving(true)
     setErrorMessage('')
     try {
@@ -119,14 +181,14 @@ export default function WalkInCreatePage() {
           </div>
           <div>
             <FieldLabel>Full Name</FieldLabel>
-            <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            <input value={form.name} onChange={(event) => updateForm('name', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           </div>
           <div>
             <FieldLabel>Date of Birth</FieldLabel>
             <input
               type="date"
               value={form.dob}
-              onChange={(event) => setForm({ ...form, dob: event.target.value })}
+              onChange={(event) => updateForm('dob', event.target.value)}
               placeholder="Date of Birth"
               aria-label="Date of Birth"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
@@ -135,23 +197,55 @@ export default function WalkInCreatePage() {
           </div>
           <div>
             <FieldLabel>Phone Number</FieldLabel>
-            <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            <input value={form.phone} onChange={(event) => updateForm('phone', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            {checkingPhone && <p className="mt-2 text-xs font-semibold text-slate-500">Checking existing records...</p>}
           </div>
+          {existingLead && (
+            <div className="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm font-black text-amber-950">Existing Lead Found</p>
+              <div className="mt-3 grid gap-2 text-sm text-amber-950 sm:grid-cols-3">
+                <p><span className="font-semibold">Name:</span> {existingLead.name || 'Not provided'}</p>
+                <p><span className="font-semibold">Phone:</span> {existingLead.phone || 'Not provided'}</p>
+                <p><span className="font-semibold">Course:</span> {existingLead.course_name || 'Not provided'}</p>
+              </div>
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={convertExistingLead}
+                  disabled={saving}
+                  className="inline-flex justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {saving ? 'Converting...' : 'Convert Existing Lead'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateAnyway(true)
+                    setErrorMessage('')
+                  }}
+                  disabled={saving}
+                  className="inline-flex justify-center rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-amber-100 disabled:opacity-60"
+                >
+                  Create New Walk-in Anyway
+                </button>
+              </div>
+            </div>
+          )}
           <div>
             <FieldLabel>Email</FieldLabel>
-            <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            <input type="email" value={form.email} onChange={(event) => updateForm('email', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           </div>
           <div>
             <FieldLabel>Pincode</FieldLabel>
-            <input value={form.pincode} onChange={(event) => setForm({ ...form, pincode: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            <input value={form.pincode} onChange={(event) => updateForm('pincode', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Address</FieldLabel>
-            <textarea value={form.location} onChange={(event) => setForm({ ...form, location: event.target.value })} className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
+            <textarea value={form.location} onChange={(event) => updateForm('location', event.target.value)} className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required />
           </div>
           <div>
             <FieldLabel>Qualification</FieldLabel>
-            <select value={form.qualification} onChange={(event) => setForm({ ...form, qualification: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <select value={form.qualification} onChange={(event) => updateForm('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select qualification</option>
               {qualificationOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
@@ -161,7 +255,7 @@ export default function WalkInCreatePage() {
             <input
               placeholder="Example: BCA, B.Com, BE CSE, MBA"
               value={form.degree}
-              onChange={(event) => setForm({ ...form, degree: event.target.value })}
+              onChange={(event) => updateForm('degree', event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
           </div>
@@ -173,7 +267,7 @@ export default function WalkInCreatePage() {
               max="2100"
               placeholder="2026"
               value={form.year_of_passing}
-              onChange={(event) => setForm({ ...form, year_of_passing: event.target.value })}
+              onChange={(event) => updateForm('year_of_passing', event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               required
             />
@@ -183,21 +277,21 @@ export default function WalkInCreatePage() {
             <input
               placeholder="College, school, or company name"
               value={form.college_company}
-              onChange={(event) => setForm({ ...form, college_company: event.target.value })}
+              onChange={(event) => updateForm('college_company', event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
               required
             />
           </div>
           <div>
             <FieldLabel>Course Interested</FieldLabel>
-            <select value={form.course} onChange={(event) => setForm({ ...form, course: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <select value={form.course} onChange={(event) => updateForm('course', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select course</option>
               {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
             </select>
           </div>
           <div>
             <FieldLabel>Preferred Timing</FieldLabel>
-            <select value={form.preferred_timing} onChange={(event) => setForm({ ...form, preferred_timing: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <select value={form.preferred_timing} onChange={(event) => updateForm('preferred_timing', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select timing</option>
               <option value="weekday_morning">Weekdays (Morning)</option>
               <option value="weekday_evening">Weekdays (Evening)</option>
@@ -209,7 +303,7 @@ export default function WalkInCreatePage() {
             <input
               type="date"
               value={form.visit_date}
-              onChange={(event) => setForm({ ...form, visit_date: event.target.value })}
+              onChange={(event) => updateForm('visit_date', event.target.value)}
               placeholder="Visit Date"
               aria-label="Visit Date"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
@@ -221,7 +315,7 @@ export default function WalkInCreatePage() {
             <input
               type="date"
               value={form.follow_up_date}
-              onChange={(event) => setForm({ ...form, follow_up_date: event.target.value })}
+              onChange={(event) => updateForm('follow_up_date', event.target.value)}
               placeholder="Next Follow-up Date"
               aria-label="Next Follow-up Date"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
@@ -231,7 +325,7 @@ export default function WalkInCreatePage() {
             <FieldLabel>Walk-in By</FieldLabel>
             <select
               value={form.assigned_to}
-              onChange={(event) => setForm({ ...form, assigned_to: event.target.value })}
+              onChange={(event) => updateForm('assigned_to', event.target.value)}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             >
               <option value="">Unassigned</option>
@@ -240,14 +334,14 @@ export default function WalkInCreatePage() {
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Source</FieldLabel>
-            <select value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+            <select value={form.source} onChange={(event) => updateForm('source', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select source</option>
               {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Remarks</FieldLabel>
-            <textarea value={form.remarks} onChange={(event) => setForm({ ...form, remarks: event.target.value })} className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
+            <textarea value={form.remarks} onChange={(event) => updateForm('remarks', event.target.value)} className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
           </div>
         </div>
         {errorMessage && (
@@ -255,8 +349,8 @@ export default function WalkInCreatePage() {
             {errorMessage}
           </div>
         )}
-        <button disabled={saving} className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
-          {saving ? 'Saving...' : 'Save Walk-in'}
+        <button disabled={saving || (existingLead && !createAnyway)} className="mt-6 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+          {saving ? 'Saving...' : createAnyway ? 'Save Walk-in Anyway' : 'Save Walk-in'}
         </button>
       </form>
     </div>

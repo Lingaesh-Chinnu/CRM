@@ -3287,8 +3287,16 @@ class LeadViewSet(viewsets.ModelViewSet):
         right = normalize_phone_number(right)
         if not left or not right:
             return False
-        left_variants = {left, left[2:] if left.startswith('91') and len(left) == 12 else left}
-        right_variants = {right, right[2:] if right.startswith('91') and len(right) == 12 else right}
+        left_variants = {left}
+        right_variants = {right}
+        if left.startswith('91') and len(left) == 12:
+            left_variants.add(left[2:])
+        if left.startswith('0') and len(left) == 11:
+            left_variants.add(left[1:])
+        if right.startswith('91') and len(right) == 12:
+            right_variants.add(right[2:])
+        if right.startswith('0') and len(right) == 11:
+            right_variants.add(right[1:])
         return bool(left_variants & right_variants)
 
     def _find_existing_walkin_for_lead_conversion(self, lead, phone):
@@ -3826,8 +3834,17 @@ class LeadViewSet(viewsets.ModelViewSet):
         phone = request.query_params.get('phone', '').strip()
         if not phone:
             return Response({'duplicate': False, 'records': []})
+        normalized_phone = normalize_phone_number(phone)
+        if normalized_phone.startswith('91') and len(normalized_phone) == 12:
+            normalized_phone = normalized_phone[2:]
+        if normalized_phone.startswith('0') and len(normalized_phone) == 11:
+            normalized_phone = normalized_phone[1:]
         records = []
-        for lead in Lead.objects.filter(phone=phone).select_related('branch', 'course')[:10]:
+        matched_leads = [
+            lead for lead in Lead.objects.exclude(phone='').select_related('branch', 'course')
+            if self._phone_numbers_match(lead.phone, normalized_phone)
+        ][:10]
+        for lead in matched_leads:
             records.append({
                 'type': 'Lead',
                 'id': lead.id,
@@ -3838,7 +3855,11 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'status': automated_lead_status_display(lead),
                 'url': f'/leads/{lead.id}',
             })
-        for walkin in WalkIn.objects.filter(phone=phone).select_related('branch', 'course')[:10]:
+        matched_walkins = [
+            walkin for walkin in WalkIn.objects.exclude(phone='').select_related('branch', 'course')
+            if self._phone_numbers_match(walkin.phone, normalized_phone)
+        ][:10]
+        for walkin in matched_walkins:
             records.append({
                 'type': 'Walk-in',
                 'id': walkin.id,
@@ -3849,7 +3870,11 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'status': automated_walkin_status_display(walkin),
                 'url': f'/walkins/{walkin.id}',
             })
-        for enrollment in Enrollment.objects.filter(phone=phone).select_related('branch', 'course')[:10]:
+        matched_enrollments = [
+            enrollment for enrollment in Enrollment.objects.exclude(phone='').select_related('branch', 'course')
+            if self._phone_numbers_match(enrollment.phone, normalized_phone)
+        ][:10]
+        for enrollment in matched_enrollments:
             records.append({
                 'type': 'Student',
                 'id': enrollment.id,

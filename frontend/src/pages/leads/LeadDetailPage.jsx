@@ -125,6 +125,7 @@ function buildConversionForm(lead) {
     assigned_to: lead?.assigned_to || lead?.follow_up_by || lead?.assigned_user?.id || '',
     source: lead?.source || 'manual',
     source_description: lead?.source_description || '',
+    remarks: lead?.remarks || lead?.latest_remark || '',
   }
 }
 
@@ -290,8 +291,8 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       ]
     : ['name', 'phone', 'course', ...(showBranchField ? ['branch'] : []), 'conversion_date']
   const shouldShowField = (field) => {
-    if (field === 'branch') return showBranchField
-    if (!isEnrollment) return true
+    if (field === 'branch') return showBranchField && (isEnrollment || !form.branch)
+    if (!isEnrollment) return ['preferred_timing', 'conversion_date'].includes(field)
     return ['name', 'phone', 'course', 'branch', 'preferred_timing', 'conversion_date', 'start_date'].includes(field)
   }
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
@@ -339,6 +340,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
       payload.degree = form.degree.trim()
       payload.year_of_passing = form.year_of_passing
       payload.college_company = form.college_company.trim()
+      payload.remarks = form.remarks.trim()
     }
 
     if (isEnrollment && lead?.course && String(lead.course) !== String(payload.course)) {
@@ -357,7 +359,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           <p className="pr-10 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Convert Lead</p>
           <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Convert to {label}</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Fill the available details. Optional fields can be completed later from the Walk-in page.
+            {isEnrollment ? 'Fill the enrollment details.' : 'Lead details are copied automatically. Update only the visit details if needed.'}
           </p>
         </div>
         <div className="overflow-y-auto px-5 pb-5 sm:px-6">
@@ -386,19 +388,38 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
             </div>
           </div>
         )}
+        {!isEnrollment && (
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Copied from lead</p>
+            <div className="mt-3 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+              <p><span className="font-semibold text-slate-950">Name:</span> {form.name || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Phone:</span> {form.phone || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Email:</span> {form.email || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Qualification:</span> {qualificationSelectOptions(form.qualification).find((option) => option.value === form.qualification)?.label || form.qualification || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Course:</span> {selectedCourse?.name || lead?.course_name || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Location:</span> {form.location || 'Not provided'}</p>
+              <p><span className="font-semibold text-slate-950">Source:</span> {sourceLabel(form.source)}</p>
+              <p><span className="font-semibold text-slate-950">Existing Remarks:</span> {form.remarks || 'Not provided'}</p>
+            </div>
+          </div>
+        )}
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <div>
-            <FormField label="Full Name">
-              <input value={form.name} onChange={(event) => updateField('name', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-            </FormField>
-            {errorFor('name')}
-          </div>
-          <div>
-            <FormField label="Phone Number">
-              <input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-            </FormField>
-            {errorFor('phone')}
-          </div>
+          {isEnrollment && (
+            <>
+              <div>
+                <FormField label="Full Name">
+                  <input value={form.name} onChange={(event) => updateField('name', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                </FormField>
+                {errorFor('name')}
+              </div>
+              <div>
+                <FormField label="Phone Number">
+                  <input value={form.phone} onChange={(event) => updateField('phone', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+                </FormField>
+                {errorFor('phone')}
+              </div>
+            </>
+          )}
           {shouldShowField('dob') && (
             <div>
               <FormField label="Date of Birth">
@@ -425,7 +446,7 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           )}
           <div>
             <FormField label="Course Interested">
-              <select value={form.course} onChange={(event) => updateCourse(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+              <select value={form.course} onChange={(event) => updateCourse(event.target.value)} disabled={!isEnrollment} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-slate-100">
                 <option value="">Select course</option>
                 {courses.map((course) => <option key={course.id} value={course.id}>{course.name}</option>)}
               </select>
@@ -464,44 +485,10 @@ function ConversionFormModal({ type, lead, courses, branches, canChooseBranch, s
           )}
           {!isEnrollment && (
             <>
-              <div>
-                <FormField label="Qualification">
-                  <select value={form.qualification} onChange={(event) => updateField('qualification', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                    <option value="">Select qualification</option>
-                    {qualificationSelectOptions(form.qualification).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
-                </FormField>
-                {errorFor('qualification')}
-              </div>
-              <div>
-                <FormField label="Degree">
-                  <input value={form.degree} onChange={(event) => updateField('degree', event.target.value)} placeholder="Example: BCA, B.Com, BE CSE, MBA" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-                </FormField>
-              </div>
-              <div>
-                <FormField label="Passed Out Year">
-                  <input
-                    type="number"
-                    min="1900"
-                    max="2100"
-                    value={form.year_of_passing}
-                    onChange={(event) => updateField('year_of_passing', event.target.value)}
-                    placeholder="2026"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                  />
-                </FormField>
-                {errorFor('year_of_passing')}
-              </div>
               <div className="md:col-span-2">
-                <FormField label="College / Company Name">
-                  <input
-                    value={form.college_company}
-                    onChange={(event) => updateField('college_company', event.target.value)}
-                    placeholder="College, school, or company name"
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm"
-                  />
+                <FormField label="Walk-in Remarks">
+                  <textarea value={form.remarks} onChange={(event) => updateField('remarks', event.target.value)} className="min-h-[92px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
                 </FormField>
-                {errorFor('college_company')}
               </div>
             </>
           )}
@@ -674,6 +661,22 @@ export default function LeadDetailPage() {
       converted_at: new Date().toISOString(),
     }))
     setConversionType('')
+  }
+
+  const directConvertToWalkIn = async () => {
+    if (converting) return
+    setConverting(true)
+    setConversionError('')
+    setMessage('')
+    try {
+      const { data } = await api.post(`/leads/${lead.id}/convert-to-walkin/`, {})
+      handleConverted(data, 'walkin')
+    } catch (err) {
+      setConversionError(formatBackendError(err, 'Conversion failed. Please check the details and try again.'))
+      setConversionType('walkin')
+    } finally {
+      setConverting(false)
+    }
   }
 
   const startConversion = (type) => {
@@ -1035,8 +1038,11 @@ export default function LeadDetailPage() {
                 Complete any missing candidate details before conversion.
               </p>
               <div className="mt-6 grid gap-3">
-                <button onClick={() => startConversion('walkin')} className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">
-                  Convert to Walk-in
+                <button onClick={directConvertToWalkIn} disabled={converting} className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                  {converting ? 'Converting...' : 'Convert to Walk-in'}
+                </button>
+                <button onClick={() => startConversion('walkin')} disabled={converting} className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+                  Update Visit Details
                 </button>
                 <button onClick={() => startConversion('enrollment')} className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
                   Convert to Enrollment
