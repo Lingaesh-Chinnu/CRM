@@ -3,7 +3,9 @@
 # Base abstract model — timestamps for all models
 # ============================================================
 from django.db import IntegrityError, models, transaction
+from django.db.models.signals import post_delete
 from django.core.exceptions import ObjectDoesNotExist
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from decimal import Decimal
@@ -1326,6 +1328,22 @@ class Payment(TimeStampedModel):
             self.total_fees,
         )
 
+    def recalculate_from_installments(self, save=True):
+        actual_paid = self.installments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+        previous_paid_amount = Decimal(str(self.paid_amount or 0))
+        previous_status = self.status
+        previous_next_payment_date = self.next_payment_date
+        self.paid_amount = Decimal(str(actual_paid or 0))
+        self.update_status()
+        changed = (
+            previous_paid_amount != Decimal(str(self.paid_amount or 0))
+            or previous_status != self.status
+            or previous_next_payment_date != self.next_payment_date
+        )
+        if save and self.pk and changed:
+            self.save(update_fields=['paid_amount', 'status', 'next_payment_date', 'updated_at'])
+        return self
+
     def save(self, *args, **kwargs):
         self.update_status()
         super().save(*args, **kwargs)
@@ -1379,15 +1397,60 @@ class PaymentInstallment(models.Model):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        # Recalculate aggregate
-        total_paid          = self.payment.installments.aggregate(
-                                  models.Sum('amount'))['amount__sum'] or 0
-        self.payment.paid_amount = total_paid
-        self.payment.update_status()
-        self.payment.save()
+        self.payment.recalculate_from_installments()
 
     def __str__(self):
         return f'₹{self.amount} on {self.payment_date}'
+
+
+def build_payment_installment_summary_from_records(payment):
+    schedule = get_payment_installment_schedule(payment)
+    actual_paid = payment.installments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+    remaining_paid = Decimal(str(actual_paid or 0))
+
+    summary = []
+    for index, item in enumerate(schedule, start=1):
+        required_amount = Decimal(str(item.get('amount') or 0))
+        paid_amount = min(remaining_paid, required_amount)
+        remaining_paid = max(remaining_paid - paid_amount, Decimal('0'))
+        pending_amount = max(required_amount - paid_amount, Decimal('0'))
+        if paid_amount >= required_amount and required_amount > 0:
+            status = 'paid'
+        elif paid_amount > 0:
+            status = 'partial'
+        else:
+            status = 'pending'
+        due_date = item.get('due_date')
+        summary.append({
+            'index': index,
+            'label': item.get('label') or f'{index} Installment',
+            'required_amount': required_amount,
+            'paid_amount': paid_amount,
+            'pending_amount': pending_amount,
+            'status': status,
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
+        })
+    return summary
+
+
+def rebuild_enrollment_payment_schedule_from_records(enrollment, save=True):
+    try:
+        payment = getattr(enrollment, 'payment', None)
+    except ObjectDoesNotExist:
+        payment = None
+    if not payment:
+        return []
+    payment.recalculate_from_installments(save=save)
+    return build_payment_installment_summary_from_records(payment)
+
+
+@receiver(post_delete, sender=PaymentInstallment)
+def recalculate_payment_after_installment_delete(sender, instance, **kwargs):
+    if not instance.payment_id:
+        return
+    payment = Payment.objects.select_related('enrollment').filter(pk=instance.payment_id).first()
+    if payment:
+        rebuild_enrollment_payment_schedule_from_records(payment.enrollment, save=True)
 
 
 class PaymentReasonRequest(models.Model):

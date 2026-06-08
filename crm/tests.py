@@ -1078,6 +1078,80 @@ class PublicWalkInFormTests(APITestCase):
             {'label': 'Full Payment', 'amount': 7000, 'due_date': '2026-05-11'},
         ])
 
+    def test_deleted_payment_installment_rebuilds_payment_summary_and_schedule_statuses(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.final_course,
+            name='Installment Delete Student',
+            phone='9000000135',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-02-01',
+            start_date='2026-02-10',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            student_number='STU202602-0018',
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment Fee', 'amount': 5000, 'due_date': '2026-02-01'},
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-02-10'},
+                {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-03-10'},
+            ],
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment Fee',
+            reference_number='STU202602-0018-P01',
+            payment_mode=PaymentInstallment.Mode.CASH,
+            payment_date='2026-02-01',
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=2,
+            installment_label='1st Installment',
+            reference_number='STU202602-0018-P02',
+            payment_mode=PaymentInstallment.Mode.CASH,
+            payment_date='2026-02-10',
+        )
+        second_installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=3,
+            installment_label='2nd Installment',
+            reference_number='STU202602-0018-P03',
+            payment_mode=PaymentInstallment.Mode.CASH,
+            payment_date='2026-03-10',
+        )
+
+        second_installment.delete()
+        payment.refresh_from_db()
+
+        self.assertEqual(payment.paid_amount, Decimal('10000.00'))
+        self.assertEqual(payment.balance, Decimal('5000.00'))
+        self.assertEqual(payment.status, Payment.Status.PARTIAL)
+        self.assertEqual(str(payment.next_payment_date), '2026-03-10')
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.get(f'/api/payments/{payment.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Decimal(str(response.data['paid_amount'])), Decimal('10000.00'))
+        self.assertEqual(Decimal(str(response.data['balance'])), Decimal('5000.00'))
+        self.assertEqual(response.data['status'], Payment.Status.PARTIAL)
+        statuses = {item['label']: item['status'] for item in response.data['installment_summary']}
+        self.assertEqual(statuses['Enrollment Fee'], 'paid')
+        self.assertEqual(statuses['1st Installment'], 'paid')
+        self.assertEqual(statuses['2nd Installment'], 'pending')
+
     def test_payment_schedule_allows_added_installment_before_rules_send(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,

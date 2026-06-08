@@ -1704,36 +1704,11 @@ class BranchTransferRequestSerializer(serializers.ModelSerializer):
 # ============================================================
 from decimal import Decimal
 
-from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, WhatsAppMessage, get_payment_installment_schedule
+from crm.models import Payment, PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, WhatsAppMessage, build_payment_installment_summary_from_records, get_payment_installment_schedule
 
 
 def payment_installment_summary(payment):
-    schedule = get_payment_installment_schedule(payment)
-    remaining_paid = Decimal(str(payment.paid_amount or 0))
-
-    summary = []
-    for index, item in enumerate(schedule, start=1):
-        required_amount = Decimal(str(item.get('amount') or 0))
-        paid_amount = min(remaining_paid, required_amount)
-        remaining_paid = max(remaining_paid - paid_amount, Decimal('0'))
-        pending_amount = max(required_amount - paid_amount, Decimal('0'))
-        if paid_amount >= required_amount and required_amount > 0:
-            status = 'paid'
-        elif paid_amount > 0:
-            status = 'partial'
-        else:
-            status = 'pending'
-        due_date = item.get('due_date')
-        summary.append({
-            'index': index,
-            'label': item.get('label') or f'{index} Installment',
-            'required_amount': required_amount,
-            'paid_amount': paid_amount,
-            'pending_amount': pending_amount,
-            'status': status,
-            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
-        })
-    return summary
+    return build_payment_installment_summary_from_records(payment)
 
 
 class PaymentInstallmentSerializer(serializers.ModelSerializer):
@@ -1979,6 +1954,10 @@ class PaymentSerializer(serializers.ModelSerializer):
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
                   'installments','active_reason_requests','latest_reason_request','updated_at']
         read_only_fields = ['paid_amount','balance','status']
+
+    def to_representation(self, instance):
+        instance.recalculate_from_installments(save=True)
+        return super().to_representation(instance)
 
     def get_branch_name(self, obj):
         return obj.enrollment.branch.name if obj.enrollment.branch else None

@@ -9802,9 +9802,15 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment = self.get_object()
         if self._document_number(installment) or installment.bill_generated_at:
             return Response({'detail': 'Generated payment documents cannot be deleted.'}, status=400)
+        payment_id = installment.payment_id
         if not request.user.is_super_admin:
             self._notify_admins_installment_changed(installment, 'Installment Deleted by User')
-        return super().destroy(request, *args, **kwargs)
+        response = super().destroy(request, *args, **kwargs)
+        payment = Payment.objects.filter(pk=payment_id).first()
+        if payment:
+            payment.recalculate_from_installments()
+            resolve_payment_due_notifications_if_inactive(payment)
+        return response
 
     def _active_installment(self, payment):
         summary = payment_installment_summary(payment)
