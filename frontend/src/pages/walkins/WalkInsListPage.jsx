@@ -6,7 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
-import { ImportantFilter, ImportantToggle } from '../../components/common/CandidateIdentity'
+import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -92,6 +92,20 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
+function counselorLabel(walkin) {
+  return walkin.counseling_user?.name || walkin.counseling_by_name || 'Not Assigned'
+}
+
+function CounselorBadge({ walkin }) {
+  const user = walkin.counseling_user || null
+  return (
+    <span className="inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-semibold text-slate-700">
+      <OwnerDot user={user} />
+      <span className="truncate">{counselorLabel(walkin)}</span>
+    </span>
+  )
+}
+
 function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters }) {
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
@@ -114,6 +128,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
             onChange={onStatusChange}
             className="xl:justify-end"
           />
+          <TeamColorLegend users={walkins.map((walkin) => walkin.counseling_user)} />
         </div>
       </div>
 
@@ -150,6 +165,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                 ),
               },
               { key: 'course', header: 'Course', width: 'minmax(105px,0.9fr)', className: 'flex items-center', render: (walkin) => <span className="overflow-hidden break-words text-sm font-semibold leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{walkin.course_name || 'Course pending'}</span> },
+              { key: 'counselingBy', header: 'Counseling By', width: 'minmax(105px,0.85fr)', className: 'flex min-w-0 items-center', render: (walkin) => <CounselorBadge walkin={walkin} /> },
               { key: 'status', header: 'Status', width: '102px', className: 'flex items-center', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
               { key: 'nextFollowUp', header: 'Next Follow Up', width: '84px', className: 'flex items-center', render: (walkin) => <span className="whitespace-nowrap text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
               ...(canViewBranch ? [{
