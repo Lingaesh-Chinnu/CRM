@@ -97,10 +97,8 @@ function counselorLabel(walkin) {
 }
 
 function CounselorBadge({ walkin }) {
-  const user = walkin.counseling_user || null
   return (
-    <span className="inline-flex min-w-0 max-w-full items-center gap-2 text-sm font-semibold text-slate-700">
-      <OwnerDot user={user} />
+    <span className="inline-flex min-w-0 max-w-full items-center text-sm font-semibold text-slate-700">
       <span className="truncate">{counselorLabel(walkin)}</span>
     </span>
   )

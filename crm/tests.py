@@ -518,12 +518,14 @@ class PublicWalkInFormTests(APITestCase):
         walkin_by_ids = {row['id'] for row in walkin_by_response.data}
         self.assertIn(self.staff.id, walkin_by_ids)
         self.assertIn(self.other_staff.id, walkin_by_ids)
+        self.assertNotIn(self.admin.id, walkin_by_ids)
 
         counseling_options_response = self.client.get('/api/walkins/staff-options/', {'branch': self.branch.id})
         self.assertEqual(counseling_options_response.status_code, 200)
         counseling_ids = {row['id'] for row in counseling_options_response.data}
         self.assertIn(self.staff.id, counseling_ids)
         self.assertNotIn(self.other_staff.id, counseling_ids)
+        self.assertNotIn(self.admin.id, counseling_ids)
 
         walkin_by_update = self.client.patch(
             f'/api/walkins/{walkin.id}/',
@@ -588,8 +590,8 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(change_request.previous_user, self.staff)
         self.assertEqual(change_request.requested_user, self.other_staff)
         self.assertEqual(change_request.requested_by, self.staff)
-        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING)
-        self.assertTrue(Notification.objects.filter(title='Walk-in Assignment Change Request').exists())
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING_COUNSELOR)
+        self.assertTrue(Notification.objects.filter(title='Counselor Change Request', user=self.other_staff).exists())
 
         staff_approval = self.client.post(
             f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
@@ -597,6 +599,21 @@ class PublicWalkInFormTests(APITestCase):
             format='json',
         )
         self.assertEqual(staff_approval.status_code, 403)
+
+        self.client.force_authenticate(self.other_staff)
+        counselor_approval = self.client.post(
+            f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
+            {'remarks': 'Accepted.'},
+            format='json',
+        )
+        self.assertEqual(counselor_approval.status_code, 200)
+        change_request.refresh_from_db()
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.assigned_to, self.staff)
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING_ADMIN)
+        self.assertEqual(change_request.counselor_reviewed_by, self.other_staff)
+        self.assertIsNotNone(change_request.counselor_reviewed_at)
+        self.assertTrue(Notification.objects.filter(title='Approved Counselor Change Request Awaiting Final Approval').exists())
 
         self.client.force_authenticate(self.admin)
         admin_approval = self.client.post(

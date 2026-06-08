@@ -183,13 +183,14 @@ export default function WalkInDetailPage() {
   const [editingDetails, setEditingDetails] = useState(false)
   const [pendingDetailChanges, setPendingDetailChanges] = useState([])
   const [savingDetails, setSavingDetails] = useState(false)
+  const [assignmentEditing, setAssignmentEditing] = useState(false)
+  const [savingAssignments, setSavingAssignments] = useState(false)
+  const [changeRequestModal, setChangeRequestModal] = useState(null)
   const [branchCorrectionOpen, setBranchCorrectionOpen] = useState(false)
   const [branchCorrection, setBranchCorrection] = useState({ branch: '', reason: '' })
   const [assignmentRequest, setAssignmentRequest] = useState({
-    assigned_to_user: '',
-    assigned_to_reason: '',
-    counseling_by_user: '',
-    counseling_by_reason: '',
+    requested_user: '',
+    reason: '',
   })
   const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
   const [form, setForm] = useState({
@@ -533,41 +534,50 @@ export default function WalkInDetailPage() {
     }
   }
 
-  const saveWalkInBy = async (event) => {
-    const assignedTo = event.target.value
-    setForm((current) => ({ ...current, assigned_to: assignedTo }))
+  const saveAssignments = async () => {
+    const payload = {}
+    if (!walkin.assigned_to && form.assigned_to) payload.assigned_to = Number(form.assigned_to)
+    if (!walkin.counseling_by && form.counseling_by) payload.counseling_by = Number(form.counseling_by)
+    if (Object.keys(payload).length === 0) {
+      setMessage('No assignment changes to save.')
+      return
+    }
     try {
-      const { data } = await api.patch(`/walkins/${id}/`, {
-        assigned_to: assignedTo ? Number(assignedTo) : null,
-      })
+      setSavingAssignments(true)
+      const { data } = await api.patch(`/walkins/${id}/`, payload)
       setWalkin(data)
-      setMessage('Walk-in by updated.')
+      setForm((current) => ({
+        ...current,
+        assigned_to: data.assigned_to || '',
+        counseling_by: data.counseling_by || '',
+      }))
+      setAssignmentEditing(false)
+      setMessage('Assignment details updated.')
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Failed to update walk-in by.')
+      setMessage(error.response?.data?.detail || 'Failed to update assignment details.')
+    } finally {
+      setSavingAssignments(false)
     }
   }
 
-  const saveCounselingBy = async (event) => {
-    const counselingBy = event.target.value
-    setForm((current) => ({ ...current, counseling_by: counselingBy }))
-    try {
-      const { data } = await api.patch(`/walkins/${id}/`, {
-        counseling_by: counselingBy ? Number(counselingBy) : null,
-      })
-      setWalkin(data)
-      setForm((current) => ({ ...current, counseling_by: data.counseling_by || '' }))
-      setMessage('Counseling by updated.')
-    } catch (error) {
-      setForm((current) => ({ ...current, counseling_by: walkin.counseling_by || '' }))
-      setMessage(error.response?.data?.detail || 'Failed to update counseling by.')
-    }
+  const cancelAssignmentEdit = () => {
+    setForm((current) => ({
+      ...current,
+      assigned_to: walkin.assigned_to || '',
+      counseling_by: walkin.counseling_by || '',
+    }))
+    setAssignmentEditing(false)
   }
 
-  const requestAssignmentChange = async (fieldType) => {
-    const userKey = fieldType === 'assigned_to' ? 'assigned_to_user' : 'counseling_by_user'
-    const reasonKey = fieldType === 'assigned_to' ? 'assigned_to_reason' : 'counseling_by_reason'
-    const requestedUser = assignmentRequest[userKey]
-    const reason = assignmentRequest[reasonKey].trim()
+  const openAssignmentChangeRequest = (fieldType) => {
+    setAssignmentRequest({ requested_user: '', reason: '' })
+    setChangeRequestModal({ fieldType })
+  }
+
+  const requestAssignmentChange = async () => {
+    const fieldType = changeRequestModal?.fieldType
+    const requestedUser = assignmentRequest.requested_user
+    const reason = assignmentRequest.reason.trim()
     if (!requestedUser) {
       setMessage('Select the requested user.')
       return
@@ -582,49 +592,16 @@ export default function WalkInDetailPage() {
         requested_user: Number(requestedUser),
         reason,
       })
-      setAssignmentRequest((current) => ({
-        ...current,
-        [userKey]: '',
-        [reasonKey]: '',
-      }))
-      setMessage('Assignment change request sent for admin approval.')
+      setAssignmentRequest({ requested_user: '', reason: '' })
+      setChangeRequestModal(null)
+      setMessage('Change request sent to the requested counselor for approval.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to submit assignment change request.')
     }
   }
 
-  const assignmentRequestField = (fieldType, users) => {
-    const userKey = fieldType === 'assigned_to' ? 'assigned_to_user' : 'counseling_by_user'
-    const reasonKey = fieldType === 'assigned_to' ? 'assigned_to_reason' : 'counseling_by_reason'
-    return (
-      <div className="mt-3 space-y-3">
-        <select
-          value={assignmentRequest[userKey]}
-          onChange={(event) => setAssignmentRequest((current) => ({ ...current, [userKey]: event.target.value }))}
-          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
-        >
-          <option value="">Request change to</option>
-          {users.map((staff) => (
-            <option key={staff.id} value={staff.id}>{staff.name}</option>
-          ))}
-        </select>
-        <textarea
-          value={assignmentRequest[reasonKey]}
-          onChange={(event) => setAssignmentRequest((current) => ({ ...current, [reasonKey]: event.target.value }))}
-          rows={2}
-          placeholder="Reason for change"
-          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => requestAssignmentChange(fieldType)}
-          className="w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100"
-        >
-          Request Change
-        </button>
-      </div>
-    )
-  }
+  const requestUsersFor = (fieldType) => fieldType === 'assigned_to' ? walkInByUsers : counselingUsers
+  const currentAssignmentLabel = (fieldType) => fieldType === 'assigned_to' ? walkInByLabel(walkin) : counselingByLabel(walkin)
 
   const changeBranch = async () => {
     if (!branchCorrection.branch) {
@@ -657,6 +634,7 @@ export default function WalkInDetailPage() {
   const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id || walkin.status === 'converted')
   const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
   const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
+  const canAssignEmptyOwnership = !walkin.assigned_to || !walkin.counseling_by
 
   return (
     <div className="space-y-6">
@@ -682,7 +660,16 @@ export default function WalkInDetailPage() {
         <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-xl font-black tracking-tight text-slate-950">Candidate details</h2>
-            {editingDetails && (
+            {assignmentEditing ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <button type="button" onClick={cancelAssignmentEdit} disabled={savingAssignments} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
+                  Cancel
+                </button>
+                <button type="button" onClick={saveAssignments} disabled={savingAssignments} className="inline-flex min-w-[130px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                  {savingAssignments ? 'Saving...' : 'Save Assignment'}
+                </button>
+              </div>
+            ) : editingDetails ? (
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <button type="button" onClick={resetDetailsEdit} disabled={savingDetails} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50 disabled:opacity-60">
                   Cancel
@@ -691,7 +678,11 @@ export default function WalkInDetailPage() {
                   {savingDetails ? 'Saving...' : 'Save Update'}
                 </button>
               </div>
-            )}
+            ) : canAssignEmptyOwnership ? (
+              <button type="button" onClick={() => { setAssignmentEditing(true); setMessage('') }} className="inline-flex w-fit justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">
+                Edit Assignment
+              </button>
+            ) : null}
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <DetailField label="Branch" value={walkin.branch_name} editing={editingDetails && isSuperAdmin}>
@@ -790,13 +781,13 @@ export default function WalkInDetailPage() {
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
-              {isSuperAdmin || !walkin.assigned_to ? (
+              {assignmentEditing && !walkin.assigned_to ? (
                 <select
                   value={form.assigned_to || ''}
-                  onChange={saveWalkInBy}
+                  onChange={(event) => setForm((current) => ({ ...current, assigned_to: event.target.value }))}
                   className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
                 >
-                  <option value="">{walkInByLabel(walkin)}</option>
+                  <option value="">Select Walk-in By</option>
                   {walkInByUsers.map((staff) => (
                     <option key={staff.id} value={staff.id}>{staff.name}</option>
                   ))}
@@ -804,20 +795,26 @@ export default function WalkInDetailPage() {
               ) : (
                 <>
                   <p className="mt-2 font-semibold text-slate-900">{walkInByLabel(walkin)}</p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
-                  {assignmentRequestField('assigned_to', walkInByUsers)}
+                  {walkin.assigned_to ? (
+                    <>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
+                      <button type="button" onClick={() => openAssignmentChangeRequest('assigned_to')} className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+                        Change Request
+                      </button>
+                    </>
+                  ) : null}
                 </>
               )}
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Counseling By</p>
-              {isSuperAdmin || !walkin.counseling_by ? (
+              {assignmentEditing && !walkin.counseling_by ? (
                 <select
                   value={form.counseling_by || ''}
-                  onChange={saveCounselingBy}
+                  onChange={(event) => setForm((current) => ({ ...current, counseling_by: event.target.value }))}
                   className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
                 >
-                  <option value="">{counselingByLabel(walkin)}</option>
+                  <option value="">Select Counseling By</option>
                   {counselingUsers.map((staff) => (
                     <option key={staff.id} value={staff.id}>{staff.name}</option>
                   ))}
@@ -825,8 +822,14 @@ export default function WalkInDetailPage() {
               ) : (
                 <>
                   <p className="mt-2 font-semibold text-slate-900">{counselingByLabel(walkin)}</p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
-                  {assignmentRequestField('counseling_by', counselingUsers)}
+                  {walkin.counseling_by ? (
+                    <>
+                      <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
+                      <button type="button" onClick={() => openAssignmentChangeRequest('counseling_by')} className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
+                        Change Request
+                      </button>
+                    </>
+                  ) : null}
                 </>
               )}
             </div>
@@ -1070,6 +1073,51 @@ export default function WalkInDetailPage() {
           )}
         </form>
       </section>
+      {changeRequestModal && (
+        <div onClick={() => setChangeRequestModal(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+            <ModalCloseButton onClick={() => setChangeRequestModal(null)} label="Close change request modal" />
+            <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Change Request</h3>
+            <div className="mt-5 space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current Counselor</span>
+                <input value={currentAssignmentLabel(changeRequestModal.fieldType)} readOnly className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700" />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Requested Counselor</span>
+                <select
+                  value={assignmentRequest.requested_user}
+                  onChange={(event) => setAssignmentRequest((current) => ({ ...current, requested_user: event.target.value }))}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+                >
+                  <option value="">Select user</option>
+                  {requestUsersFor(changeRequestModal.fieldType).map((staff) => (
+                    <option key={staff.id} value={staff.id}>{staff.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Reason</span>
+                <textarea
+                  value={assignmentRequest.reason}
+                  onChange={(event) => setAssignmentRequest((current) => ({ ...current, reason: event.target.value }))}
+                  rows={4}
+                  placeholder="Enter reason for this change"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+              <button type="button" onClick={() => setChangeRequestModal(null)} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700">
+                Cancel
+              </button>
+              <button type="button" onClick={requestAssignmentChange} className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white">
+                Submit Request
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {pendingDetailChanges.length > 0 && (
         <ConfirmChangesModal
           changes={pendingDetailChanges}

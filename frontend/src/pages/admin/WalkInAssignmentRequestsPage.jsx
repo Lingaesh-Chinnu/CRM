@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const statuses = [
   { value: '', label: 'All' },
-  { value: 'pending', label: 'Pending' },
+  { value: 'pending_counselor_approval', label: 'Counselor Approval' },
+  { value: 'pending_admin_approval', label: 'Admin Approval' },
   { value: 'approved', label: 'Approved' },
   { value: 'rejected', label: 'Rejected' },
 ]
@@ -19,6 +21,7 @@ const fieldTypes = [
 function statusClass(status) {
   if (status === 'approved') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (status === 'rejected') return 'border-rose-200 bg-rose-50 text-rose-700'
+  if (status === 'pending_admin_approval') return 'border-cyan-200 bg-cyan-50 text-cyan-700'
   return 'border-amber-200 bg-amber-50 text-amber-700'
 }
 
@@ -36,9 +39,10 @@ function formatDateTime(value) {
 
 export default function WalkInAssignmentRequestsPage() {
   const [searchParams] = useSearchParams()
+  const { user } = useSelector((state) => state.auth)
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
-  const [filters, setFilters] = useState({ status: 'pending', field_type: '', branch: '', search: '' })
+  const [filters, setFilters] = useState({ status: '', field_type: '', branch: '', search: '' })
   const [remarks, setRemarks] = useState({})
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -83,13 +87,21 @@ export default function WalkInAssignmentRequestsPage() {
     }
   }
 
+  const canAct = (row) => {
+    if (row.status === 'pending_counselor_approval') return Number(row.requested_user) === Number(user?.id)
+    if (row.status === 'pending_admin_approval') return user?.role === 'super_admin'
+    return false
+  }
+
+  const remarksLabel = (row) => row.status === 'pending_counselor_approval' ? 'Counselor Remarks' : 'Admin Remarks'
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Approvals</p>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Walk-in Assignment Requests</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-          Approve or reject locked Walk-in By and Counseling By change requests.
+          Requested counselors review changes first. Admin gives final approval after counselor acceptance.
         </p>
         {message && <p className="mt-4 text-sm font-semibold text-slate-700">{message}</p>}
       </section>
@@ -149,24 +161,32 @@ export default function WalkInAssignmentRequestsPage() {
                     <p className="mt-2 text-sm text-slate-600">Requested by {row.requested_by_name || '-'}</p>
                     <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{row.reason}</p>
                     <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                      Reviewed: {row.reviewed_at ? formatDateTime(row.reviewed_at) : 'Pending'}
+                      Counselor: {row.counselor_reviewed_at ? formatDateTime(row.counselor_reviewed_at) : 'Pending'}
+                      {' | '}
+                      Admin: {row.reviewed_at ? formatDateTime(row.reviewed_at) : 'Pending'}
                     </p>
+                    {row.counselor_remarks && <p className="mt-2 text-sm text-slate-600"><span className="font-semibold text-slate-900">Counselor:</span> {row.counselor_remarks}</p>}
                     {row.admin_remarks && <p className="mt-2 text-sm text-slate-600"><span className="font-semibold text-slate-900">Admin:</span> {row.admin_remarks}</p>}
                     <Link to={`/walkins/${row.walkin}`} className="mt-4 inline-flex rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                       Open Walk-in
                     </Link>
                   </div>
 
-                  {row.status === 'pending' && (
+                  {canAct(row) && (
                     <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:w-[420px]">
                       <label>
-                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Admin Remarks</span>
+                        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{remarksLabel(row)}</span>
                         <textarea value={remarks[row.id] || ''} onChange={(event) => setRemarks((current) => ({ ...current, [row.id]: event.target.value }))} rows={3} className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
                       </label>
                       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:justify-end">
                         <button type="button" onClick={() => act(row, 'reject')} className="rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-semibold text-rose-700 hover:bg-rose-100">Reject</button>
                         <button type="button" onClick={() => act(row, 'approve')} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">Approve</button>
                       </div>
+                    </div>
+                  )}
+                  {!canAct(row) && row.status !== 'approved' && row.status !== 'rejected' && (
+                    <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600 xl:w-[420px]">
+                      Waiting for {row.status === 'pending_counselor_approval' ? 'requested counselor' : 'admin'} approval.
                     </div>
                   )}
                 </div>

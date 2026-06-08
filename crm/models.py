@@ -680,7 +680,8 @@ class WalkInAssignmentChangeRequest(models.Model):
         COUNSELING_BY = 'counseling_by', 'Counseling By'
 
     class Status(models.TextChoices):
-        PENDING = 'pending', 'Pending'
+        PENDING_COUNSELOR = 'pending_counselor_approval', 'Pending Counselor Approval'
+        PENDING_ADMIN = 'pending_admin_approval', 'Pending Admin Approval'
         APPROVED = 'approved', 'Approved'
         REJECTED = 'rejected', 'Rejected'
 
@@ -697,7 +698,11 @@ class WalkInAssignmentChangeRequest(models.Model):
     requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                      related_name='walkin_assignment_change_requests')
     reason = models.TextField()
-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    status = models.CharField(max_length=40, choices=Status.choices, default=Status.PENDING_COUNSELOR, db_index=True)
+    counselor_reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                              related_name='walkin_assignment_counselor_reviewed_requests')
+    counselor_reviewed_at = models.DateTimeField(null=True, blank=True)
+    counselor_remarks = models.TextField(blank=True)
     reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                     related_name='walkin_assignment_reviewed_requests')
     reviewed_at = models.DateTimeField(null=True, blank=True)

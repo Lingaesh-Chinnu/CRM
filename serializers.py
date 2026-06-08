@@ -1181,6 +1181,7 @@ class WalkInAssignmentChangeRequestSerializer(serializers.ModelSerializer):
     previous_user_name = serializers.CharField(source='previous_user.full_name', read_only=True)
     requested_user_name = serializers.CharField(source='requested_user.full_name', read_only=True)
     requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
+    counselor_reviewed_by_name = serializers.CharField(source='counselor_reviewed_by.full_name', read_only=True)
     reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True)
 
     class Meta:
@@ -1189,7 +1190,10 @@ class WalkInAssignmentChangeRequestSerializer(serializers.ModelSerializer):
             'id', 'walkin', 'field_type', 'field_type_display', 'branch', 'branch_name',
             'candidate_name', 'candidate_phone', 'previous_user', 'previous_user_name',
             'requested_user', 'requested_user_name', 'requested_by', 'requested_by_name',
-            'reason', 'status', 'status_display', 'reviewed_by', 'reviewed_by_name',
+            'reason', 'status', 'status_display',
+            'counselor_reviewed_by', 'counselor_reviewed_by_name',
+            'counselor_reviewed_at', 'counselor_remarks',
+            'reviewed_by', 'reviewed_by_name',
             'reviewed_at', 'admin_remarks', 'created_at', 'updated_at',
         ]
 
