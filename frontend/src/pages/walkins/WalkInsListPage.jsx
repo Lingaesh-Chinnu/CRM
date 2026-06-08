@@ -157,10 +157,11 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                 render: (walkin) => (
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
+                      <OwnerDot user={walkin.counseling_user} />
                       <ImportantToggle active={!!walkin.is_important} onToggle={(nextValue) => onImportantToggle(walkin, nextValue)} />
                       <Link to={withReturnTo(`/walkins/${walkin.id}`, returnTo)} state={{ returnTo, listFilters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
                     </div>
-                    <p className="mt-1 truncate text-xs text-slate-500">{walkin.phone || 'Phone not set'}</p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-800">{walkin.phone || 'Phone not set'}</p>
                   </div>
                 ),
               },
