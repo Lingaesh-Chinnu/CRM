@@ -77,7 +77,7 @@ function formatSubmitError(error) {
   }
   if (typeof data === 'string') {
     return data.includes('<!doctype html') || data.includes('<html')
-      ? 'Server error while submitting the form. Please try again.'
+      ? 'The server could not process this submission right now. Please try again or contact the selected branch.'
       : data
   }
   if (data.detail) return data.detail
@@ -103,6 +103,7 @@ export default function PublicWalkInForm() {
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
+  const [successOpen, setSuccessOpen] = useState(false)
 
   useEffect(() => {
     api.get('/public/walkin/').then(({ data }) => {
@@ -127,6 +128,32 @@ export default function PublicWalkInForm() {
   const submit = async (event) => {
     event.preventDefault()
     if (saving || redirecting) return
+
+    const requiredFields = [
+      ['branch', 'Branch'],
+      ['name', 'Full Name'],
+      ['dob', 'Date of Birth'],
+      ['phone', 'Phone Number'],
+      ['email', 'Email'],
+      ['pincode', 'Pincode'],
+      ['location', 'Address'],
+      ['qualification', 'Qualification'],
+      ['year_of_passing', 'Passed Out Year'],
+      ['college_company', 'College / Company Name'],
+      ['course', 'Course Interested'],
+      ['preferred_timing', 'Preferred Timing'],
+      ['demo_class', 'Demo class required'],
+      ['interested_global_certification', 'Global Certification interest'],
+      ['source', 'How do you know about IIE'],
+    ]
+    const missing = requiredFields
+      .filter(([field]) => !String(form[field] || '').trim())
+      .map(([, label]) => label)
+    if (missing.length > 0) {
+      setMessage(`Please fill: ${missing.join(', ')}.`)
+      return
+    }
+
     setSaving(true)
     setMessage('')
 
@@ -140,12 +167,12 @@ export default function PublicWalkInForm() {
         dob: form.dob || null,
         visit_date: new Date().toISOString().slice(0, 10),
       })
-      setMessage('Thanks for filling out the form.')
+      setSuccessOpen(true)
       setRedirecting(true)
       setForm(initialForm)
       window.setTimeout(() => {
         window.location.href = 'https://www.indrainstitute.com'
-      }, 2500)
+      }, 3000)
     } catch (error) {
       setRedirecting(false)
       setMessage(formatSubmitError(error))
@@ -157,6 +184,20 @@ export default function PublicWalkInForm() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-10 sm:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.22),transparent_30%)]" />
+      {successOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
+          <div role="dialog" aria-modal="true" aria-labelledby="walkin-success-title" className="w-full max-w-md rounded-[28px] bg-white p-7 text-center shadow-[0_30px_80px_-35px_rgba(15,23,42,1)]">
+            <h2 id="walkin-success-title" className="text-2xl font-black tracking-tight text-slate-950">
+              ✅ Enquiry Submitted Successfully
+            </h2>
+            <div className="mt-5 space-y-3 text-sm font-medium leading-6 text-slate-600">
+              <p>Thank you for contacting Indra Institute of Education.</p>
+              <p>Your enquiry has been submitted successfully.</p>
+              <p>Our team will contact you shortly.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="relative mx-auto max-w-6xl">
         <div className="grid gap-8 lg:grid-cols-[0.92fr_1.08fr]">

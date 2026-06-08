@@ -242,20 +242,26 @@ export default function EnrollmentDetailPage() {
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
+    let cancelled = false
     setLoadError('')
-    Promise.all([
-      api.get(`/enrollments/${id}/`),
-      isSuperAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
-      api.get('/courses/'),
-      isSuperAdmin ? api.get('/users/', { params: { role: 'staff', is_active: true } }) : api.get('/leads/staff-options/'),
-    ])
-      .then(([enrollmentRes, branchesRes, coursesRes, usersRes]) => {
+    const loadEnrollment = async () => {
+      try {
+        const [enrollmentRes, branchesRes, coursesRes] = await Promise.all([
+          api.get(`/enrollments/${id}/`),
+          isSuperAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
+          api.get('/courses/'),
+        ])
+        if (cancelled) return
         const data = enrollmentRes.data
+        const usersRes = await api.get('/walkins/staff-options/', {
+          params: data.branch ? { branch: data.branch } : {},
+        })
+        if (cancelled) return
         setRow(data)
         setBranches(branchesRes.data.results || branchesRes.data)
         setCourses(coursesRes.data.results || coursesRes.data)
         const users = usersRes.data.results || usersRes.data || []
-        setCounselors(data.branch ? users.filter((item) => String(item.branch_id || item.branch || '') === String(data.branch)) : users)
+        setCounselors(users)
         setBranch(data.branch || '')
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
@@ -263,8 +269,14 @@ export default function EnrollmentDetailPage() {
         const installmentCount = Math.max((data.installment_schedule || []).length - 1, 2)
         setSplitCount(Math.min(installmentCount, 12))
         setScheduleDraft(cloneSchedule(data.installment_schedule?.length ? data.installment_schedule : buildSchedule(data, data.start_date || '', Math.min(installmentCount, 12))))
-      })
-      .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load enrollment.')))
+      } catch (error) {
+        if (!cancelled) setLoadError(apiErrorMessage(error, 'Failed to load enrollment.'))
+      }
+    }
+    loadEnrollment()
+    return () => {
+      cancelled = true
+    }
   }, [id, isSuperAdmin])
 
   if (!row) {

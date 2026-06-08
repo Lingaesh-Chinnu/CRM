@@ -124,19 +124,31 @@ export default function StudentDetailPage() {
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
+    let cancelled = false
     setLoadError('')
-    Promise.all([
-      api.get(`/enrollments/${id}/`),
-      api.get('/courses/'),
-      isSuperAdmin ? api.get('/users/', { params: { role: 'staff', is_active: true } }) : api.get('/leads/staff-options/'),
-    ])
-      .then(([enrollmentRes, coursesRes, usersRes]) => {
+    const loadStudent = async () => {
+      try {
+        const [enrollmentRes, coursesRes] = await Promise.all([
+          api.get(`/enrollments/${id}/`),
+          api.get('/courses/'),
+        ])
+        if (cancelled) return
+        const usersRes = await api.get('/walkins/staff-options/', {
+          params: enrollmentRes.data.branch ? { branch: enrollmentRes.data.branch } : {},
+        })
+        if (cancelled) return
         setRow(enrollmentRes.data)
         setCourses(coursesRes.data.results || coursesRes.data)
         const users = usersRes.data.results || usersRes.data || []
-        setCounselors(enrollmentRes.data.branch ? users.filter((item) => String(item.branch_id || item.branch || '') === String(enrollmentRes.data.branch)) : users)
-      })
-      .catch((error) => setLoadError(apiErrorMessage(error, 'Failed to load student profile.')))
+        setCounselors(users)
+      } catch (error) {
+        if (!cancelled) setLoadError(apiErrorMessage(error, 'Failed to load student profile.'))
+      }
+    }
+    loadStudent()
+    return () => {
+      cancelled = true
+    }
   }, [id, isSuperAdmin])
 
   if (!row) {
