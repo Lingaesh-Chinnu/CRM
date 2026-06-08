@@ -593,6 +593,8 @@ class WalkIn(TimeStampedModel):
                                          related_name='walkins')
     assigned_to      = models.ForeignKey(User,     null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='assigned_walkins')
+    counseling_by    = models.ForeignKey(User,     null=True, blank=True, on_delete=models.SET_NULL,
+                                         related_name='counseled_walkins')
     course           = models.ForeignKey(Course,   null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='walkins')
     created_by       = models.ForeignKey(User,     null=True, blank=True, on_delete=models.SET_NULL,

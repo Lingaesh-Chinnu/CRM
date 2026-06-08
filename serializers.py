@@ -913,6 +913,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
     branch_name  = serializers.CharField(source='branch.name',  read_only=True)
     assigned_name= serializers.SerializerMethodField()
     assigned_user = serializers.SerializerMethodField()
+    counseling_by_name = serializers.SerializerMethodField()
+    counseling_user = serializers.SerializerMethodField()
     created_by_name = serializers.SerializerMethodField()
     converted_by_name = serializers.SerializerMethodField()
     preferred_timing_display = serializers.SerializerMethodField()
@@ -926,7 +928,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
         model  = WalkIn
         fields = ['id','candidate_number','name','phone','email','course_name',
                   'branch_name','status','visit_date','follow_up_date','remarks','demo_class','assigned_name',
-                  'assigned_to','assigned_user','created_by','created_by_name','converted_by_name',
+                  'assigned_to','assigned_user','counseling_by','counseling_by_name','counseling_user',
+                  'created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
@@ -936,6 +939,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
         defaults = {
             'preferred_timing': '',
             'walk_in_by': '',
+            'counseling_by_id': None,
             'converted_to_type': '',
             'converted_record_id': None,
             'converted_at': None,
@@ -958,6 +962,20 @@ class WalkInListSerializer(serializers.ModelSerializer):
             return None
         try:
             return user_identity_payload(obj.assigned_to)
+        except Exception:
+            return None
+
+    def get_counseling_by_name(self, obj):
+        try:
+            return obj.counseling_by.full_name if obj.counseling_by_id and obj.counseling_by else ''
+        except Exception:
+            return ''
+
+    def get_counseling_user(self, obj):
+        if not getattr(obj, 'counseling_by_id', None):
+            return None
+        try:
+            return user_identity_payload(obj.counseling_by)
         except Exception:
             return None
 
@@ -1018,6 +1036,8 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     branch_name   = serializers.CharField(source='branch.name',          read_only=True)
     course_interested = serializers.CharField(source='course.name', read_only=True)
     assigned_name = serializers.CharField(source='assigned_to.full_name', read_only=True)
+    counseling_by_name = serializers.CharField(source='counseling_by.full_name', read_only=True)
+    counseling_user = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.full_name', read_only=True)
     converted_by_name = serializers.CharField(source='converted_by.full_name', read_only=True)
     preferred_timing_display = serializers.SerializerMethodField()
@@ -1050,6 +1070,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             'preferred_timing': '',
             'interested_global_certification': False,
             'walk_in_by': '',
+            'counseling_by_id': None,
             'follow_up_date': None,
             'converted_to_type': '',
             'converted_record_id': None,
@@ -1087,6 +1108,14 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             return obj.get_walk_in_by_display()
         except Exception:
             return ''
+
+    def get_counseling_user(self, obj):
+        if not getattr(obj, 'counseling_by_id', None):
+            return None
+        try:
+            return user_identity_payload(obj.counseling_by)
+        except Exception:
+            return None
 
     def get_branch_change_history(self, obj):
         try:

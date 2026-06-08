@@ -53,7 +53,6 @@ export default function WalkInCreatePage() {
   const isSuperAdmin = user?.role === 'super_admin'
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
-  const [staffUsers, setStaffUsers] = useState([])
   const [form, setForm] = useState(initialForm)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -77,13 +76,6 @@ export default function WalkInCreatePage() {
       assigned_to: !isSuperAdmin && user?.id ? String(user.id) : current.assigned_to,
     }))
   }, [isSuperAdmin, user?.branch_id, user?.id])
-
-  useEffect(() => {
-    const params = isSuperAdmin && form.branch ? { branch: form.branch } : undefined
-    api.get('/walkins/staff-options/', { params })
-      .then(({ data }) => setStaffUsers(data || []))
-      .catch(() => setStaffUsers([]))
-  }, [isSuperAdmin, form.branch])
 
   useEffect(() => {
     const phone = form.phone.trim()
@@ -174,7 +166,7 @@ export default function WalkInCreatePage() {
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <FieldLabel>Branch</FieldLabel>
-            <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value, assigned_to: isSuperAdmin ? '' : form.assigned_to })} disabled={!isSuperAdmin} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 disabled:cursor-not-allowed disabled:bg-slate-100" required>
+            <select value={form.branch} onChange={(event) => setForm({ ...form, branch: event.target.value })} disabled={!isSuperAdmin} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 disabled:cursor-not-allowed disabled:bg-slate-100" required>
               <option value="">Select branch</option>
               {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
@@ -320,17 +312,6 @@ export default function WalkInCreatePage() {
               aria-label="Next Follow-up Date"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
-          </div>
-          <div className="md:col-span-2">
-            <FieldLabel>Walk-in By</FieldLabel>
-            <select
-              value={form.assigned_to}
-              onChange={(event) => updateForm('assigned_to', event.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
-            >
-              <option value="">Unassigned</option>
-              {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
-            </select>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Source</FieldLabel>

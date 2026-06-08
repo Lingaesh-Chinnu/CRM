@@ -6,7 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
-import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
+import { ImportantFilter, ImportantToggle } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -14,7 +14,6 @@ const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, ''
 const emptyFilters = {
   search: '',
   branch: '',
-  assigned_to: '',
   course: '',
   status: '',
   source: '',
@@ -41,7 +40,6 @@ function readFilters(searchParams, canFilterByBranch) {
   return {
     search: searchParams.get('search') || '',
     branch: canFilterByBranch ? searchParams.get('branch') || '' : '',
-    assigned_to: searchParams.get('assigned_to') || searchParams.get('created_by') || '',
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
     source: searchParams.get('source') || '',
@@ -49,15 +47,6 @@ function readFilters(searchParams, canFilterByBranch) {
     date_to: canFilterByBranch ? searchParams.get('date_to') || '' : '',
     important_only: searchParams.get('important_only') || '',
   }
-}
-
-function uniqueStaffUsers(rows) {
-  const seen = new Set()
-  return rows.filter((row) => {
-    if (seen.has(row.id)) return false
-    seen.add(row.id)
-    return true
-  })
 }
 
 function formatDate(value) {
@@ -104,7 +93,6 @@ function todayIso() {
 }
 
 function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters }) {
-  const walkInByText = (walkin) => walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
   const todayWalkInCount = walkins.filter((walkin) => walkin.visit_date === todayIso()).length
@@ -126,7 +114,6 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
             onChange={onStatusChange}
             className="xl:justify-end"
           />
-          <TeamColorLegend users={walkins.map((walkin) => walkin.assigned_user)} />
         </div>
       </div>
 
@@ -156,7 +143,6 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
                       <ImportantToggle active={!!walkin.is_important} onToggle={(nextValue) => onImportantToggle(walkin, nextValue)} />
-                      <OwnerDot user={walkin.assigned_user} />
                       <Link to={withReturnTo(`/walkins/${walkin.id}`, returnTo)} state={{ returnTo, listFilters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
                     </div>
                     <p className="mt-1 truncate text-xs text-slate-500">{walkin.phone || 'Phone not set'}</p>
@@ -165,7 +151,6 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
               },
               { key: 'course', header: 'Course', width: 'minmax(105px,0.9fr)', className: 'flex items-center', render: (walkin) => <span className="overflow-hidden break-words text-sm font-semibold leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{walkin.course_name || 'Course pending'}</span> },
               { key: 'status', header: 'Status', width: '102px', className: 'flex items-center', render: (walkin) => <StatusBadge tone={statusTone(walkin)}>{statusLabel(walkin)}</StatusBadge> },
-              { key: 'followUpBy', header: 'Follow Up By', width: 'minmax(88px,0.75fr)', className: 'flex items-center', render: (walkin) => <span className="truncate text-slate-700">{isEnrollmentConversion(walkin) ? '-' : walkInByText(walkin)}</span> },
               { key: 'nextFollowUp', header: 'Next Follow Up', width: '84px', className: 'flex items-center', render: (walkin) => <span className="whitespace-nowrap text-slate-700">{isEnrollmentConversion(walkin) ? 'Not set' : formatDate(walkin.follow_up_date)}</span> },
               ...(canViewBranch ? [{
                 key: 'branch',
@@ -205,7 +190,6 @@ export default function WalkInsListPage() {
   const [otherWalkinsCount, setOtherWalkinsCount] = useState(0)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
-  const [staffUsers, setStaffUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
@@ -256,19 +240,6 @@ export default function WalkInsListPage() {
         console.error('Failed to fetch filter options:', error)
       })
   }, [canFilterByBranch])
-
-  useEffect(() => {
-    const params = canFilterByBranch && filters.branch ? { branch: filters.branch } : undefined
-    api.get('/walkins/staff-options/', { params })
-      .then(({ data }) => {
-        const rows = uniqueStaffUsers(data || [])
-        setStaffUsers(rows)
-        if (filters.assigned_to && !rows.some((staff) => String(staff.id) === String(filters.assigned_to))) {
-          setFilters((current) => ({ ...current, assigned_to: '' }))
-        }
-      })
-      .catch(() => setStaffUsers([]))
-  }, [canFilterByBranch, filters.branch, filters.assigned_to])
 
   useEffect(() => {
     const fetchWalkins = async () => {
@@ -418,13 +389,6 @@ export default function WalkInsListPage() {
               </select>
             </label>
           )}
-          <label className="block">
-            <span className="mb-2 block text-sm font-semibold text-slate-600">Walk-in By</span>
-            <select value={filters.assigned_to} onChange={(event) => updateFilter('assigned_to', event.target.value)} name="assigned_to" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
-              <option value="">All Users</option>
-              {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
-            </select>
-          </label>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Course</span>
             <select value={filters.course} onChange={(event) => updateFilter('course', event.target.value)} name="course" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">

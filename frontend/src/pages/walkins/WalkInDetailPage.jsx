@@ -57,6 +57,10 @@ function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
 }
 
+function counselingByLabel(walkin) {
+  return walkin.counseling_by_name || 'Unassigned'
+}
+
 const qualificationOptions = [
   { value: 'school_student', label: 'School Student' },
   { value: 'college_student', label: 'College Student' },
@@ -171,7 +175,8 @@ export default function WalkInDetailPage() {
   const [walkin, setWalkin] = useState(null)
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
-  const [staffUsers, setStaffUsers] = useState([])
+  const [walkInByUsers, setWalkInByUsers] = useState([])
+  const [counselingUsers, setCounselingUsers] = useState([])
   const [availableDiscounts, setAvailableDiscounts] = useState([])
   const [fieldErrors, setFieldErrors] = useState({})
   const [detailErrors, setDetailErrors] = useState({})
@@ -203,6 +208,7 @@ export default function WalkInDetailPage() {
     spot_conversion_discount_applied: false,
     start_date: '',
     assigned_to: '',
+    counseling_by: '',
     transfer_reason: '',
   })
   const [message, setMessage] = useState('')
@@ -251,6 +257,7 @@ export default function WalkInDetailPage() {
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
         assigned_to: data.assigned_to || '',
+        counseling_by: data.counseling_by || '',
         enrollment_date: todayInputValue(),
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
       }))
@@ -259,13 +266,19 @@ export default function WalkInDetailPage() {
   }, [id])
 
   useEffect(() => {
+    api.get('/walkins/walk-in-by-options/')
+      .then(({ data }) => setWalkInByUsers(uniqueStaffUsers(data || [])))
+      .catch(() => setWalkInByUsers([]))
+  }, [])
+
+  useEffect(() => {
     if (!form.branch) {
-      setStaffUsers([])
+      setCounselingUsers([])
       return
     }
     api.get('/walkins/staff-options/', { params: { branch: form.branch } })
-      .then(({ data }) => setStaffUsers(uniqueStaffUsers(data || [])))
-      .catch(() => setStaffUsers([]))
+      .then(({ data }) => setCounselingUsers(uniqueStaffUsers(data || [])))
+      .catch(() => setCounselingUsers([]))
   }, [form.branch])
 
   useEffect(() => {
@@ -440,9 +453,11 @@ export default function WalkInDetailPage() {
       degree: walkin.degree || '',
       year_of_passing: walkin.year_of_passing || '',
       college_company: walkin.college_company || '',
-      visit_date: walkin.visit_date || '',
-      actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
-    }))
+        visit_date: walkin.visit_date || '',
+        assigned_to: walkin.assigned_to || '',
+        counseling_by: walkin.counseling_by || '',
+        actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
+      }))
     setDetailErrors({})
     setPendingDetailChanges([])
     setEditingDetails(false)
@@ -498,6 +513,8 @@ export default function WalkInDetailPage() {
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
+        assigned_to: data.assigned_to || '',
+        counseling_by: data.counseling_by || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
       setMessage('Candidate details updated.')
@@ -521,6 +538,22 @@ export default function WalkInDetailPage() {
       setMessage('Walk-in by updated.')
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Failed to update walk-in by.')
+    }
+  }
+
+  const saveCounselingBy = async (event) => {
+    const counselingBy = event.target.value
+    setForm((current) => ({ ...current, counseling_by: counselingBy }))
+    try {
+      const { data } = await api.patch(`/walkins/${id}/`, {
+        counseling_by: counselingBy ? Number(counselingBy) : null,
+      })
+      setWalkin(data)
+      setForm((current) => ({ ...current, counseling_by: data.counseling_by || '' }))
+      setMessage('Counseling by updated.')
+    } catch (error) {
+      setForm((current) => ({ ...current, counseling_by: walkin.counseling_by || '' }))
+      setMessage(error.response?.data?.detail || 'Failed to update counseling by.')
     }
   }
 
@@ -694,7 +727,20 @@ export default function WalkInDetailPage() {
                 className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
               >
                 <option value="">{walkInByLabel(walkin)}</option>
-                {staffUsers.map((staff) => (
+                {walkInByUsers.map((staff) => (
+                  <option key={staff.id} value={staff.id}>{staff.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Counseling By</p>
+              <select
+                value={form.counseling_by || ''}
+                onChange={saveCounselingBy}
+                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+              >
+                <option value="">{counselingByLabel(walkin)}</option>
+                {counselingUsers.map((staff) => (
                   <option key={staff.id} value={staff.id}>{staff.name}</option>
                 ))}
               </select>

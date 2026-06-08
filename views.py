@@ -6517,7 +6517,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
             'qualification', 'degree', 'profession', 'year_of_passing',
             'college_company', 'preferred_timing', 'interested_global_certification',
             'walk_in_by', 'follow_up_date', 'converted_to_type',
-            'converted_record_id', 'converted_at', 'converted_by',
+            'converted_record_id', 'converted_at', 'converted_by', 'counseling_by',
         ])
         if missing_columns:
             qs = qs.defer(*missing_columns)
@@ -6626,7 +6626,6 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def staff_options(self, request):
         users = User.objects.filter(
             is_active=True,
-            role=User.Role.STAFF,
         ).select_related('branch').order_by('first_name', 'last_name', 'username')
         if request.user.is_super_admin:
             branch_id = request.query_params.get('branch')
@@ -6636,6 +6635,29 @@ class WalkInViewSet(viewsets.ModelViewSet):
             users = users.filter(branch=request.user.branch)
         seen = set()
         rows = []
+        for user in users:
+            if user.id in seen:
+                continue
+            seen.add(user.id)
+            rows.append({
+                'id': user.id,
+                'name': user.full_name or user.username,
+                'full_name': user.full_name,
+                'username': user.username,
+                'email': user.email,
+                'branch_id': user.branch_id,
+                'branch_name': user.branch.name if user.branch else '',
+                'identity_color': user.identity_color or '',
+            })
+        return Response(rows)
+
+    @action(detail=False, methods=['get'], url_path='walk-in-by-options')
+    def walk_in_by_options(self, request):
+        users = User.objects.filter(is_active=True).select_related('branch').order_by(
+            'first_name', 'last_name', 'username'
+        )
+        rows = []
+        seen = set()
         for user in users:
             if user.id in seen:
                 continue
@@ -6668,8 +6690,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
             if not new_branch:
                 return Response({'detail': 'Select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
             branch_changed = walkin.branch_id != new_branch.id
-            if branch_changed and walkin.assigned_to_id and walkin.assigned_to.branch_id != new_branch.id:
-                data['assigned_to'] = None
+            if branch_changed and walkin.counseling_by_id and walkin.counseling_by.branch_id != new_branch.id:
+                data['counseling_by'] = None
         data.pop('branch_change_reason', None)
 
         assigned_to = data.get('assigned_to')
@@ -6677,13 +6699,22 @@ class WalkInViewSet(viewsets.ModelViewSet):
             user_qs = User.objects.filter(
                 pk=assigned_to,
                 is_active=True,
-                role=User.Role.STAFF,
-                branch=new_branch or walkin.branch,
+            )
+            if not user_qs.exists():
+                return Response({'detail': 'Select a valid active user for Walk-in By.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        counseling_by = data.get('counseling_by')
+        if counseling_by not in (None, ''):
+            counseling_branch = new_branch or walkin.branch
+            user_qs = User.objects.filter(
+                pk=counseling_by,
+                is_active=True,
+                branch=counseling_branch,
             )
             if not request.user.is_super_admin:
                 user_qs = user_qs.filter(branch=request.user.branch)
             if not user_qs.exists():
-                return Response({'detail': 'Select a valid staff user for Walk-in By.'}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'detail': 'Select an active user from the candidate branch for Counseling By.'}, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = self.get_serializer(walkin, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -6734,9 +6765,9 @@ class WalkInViewSet(viewsets.ModelViewSet):
         )
         walkin.branch = new_branch
         update_fields = ['branch', 'updated_at']
-        if walkin.assigned_to_id and walkin.assigned_to.branch_id != new_branch.id:
-            walkin.assigned_to = None
-            update_fields.append('assigned_to')
+        if walkin.counseling_by_id and walkin.counseling_by.branch_id != new_branch.id:
+            walkin.counseling_by = None
+            update_fields.append('counseling_by')
         walkin.save(update_fields=update_fields)
         mark_public_walkin_notifications_read(walkin.id)
         return Response(WalkInDetailSerializer(walkin, context={'request': request}).data)

@@ -463,6 +463,13 @@ class PublicWalkInFormTests(APITestCase):
             branch=self.branch,
             role=User.Role.STAFF,
         )
+        self.other_staff = User.objects.create_user(
+            username='other-staff',
+            email='other-staff@example.com',
+            password='pass12345',
+            branch=self.other_branch,
+            role=User.Role.STAFF,
+        )
         self.admin = User.objects.create_superuser(
             username='admin',
             email='admin@example.com',
@@ -499,6 +506,49 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.year_of_passing, 2026)
         self.assertEqual(walkin.college_company, 'IIE College')
         self.assertTrue(walkin.interested_global_certification)
+
+    def test_walkin_by_and_counseling_by_have_separate_branch_rules(self):
+        self.client.force_authenticate(self.admin)
+        create_response = self.client.post('/api/public/walkin/', self.payload, format='json')
+        self.assertEqual(create_response.status_code, 201)
+        walkin = WalkIn.objects.get(phone='9876543210')
+
+        walkin_by_response = self.client.get('/api/walkins/walk-in-by-options/')
+        self.assertEqual(walkin_by_response.status_code, 200)
+        walkin_by_ids = {row['id'] for row in walkin_by_response.data}
+        self.assertIn(self.staff.id, walkin_by_ids)
+        self.assertIn(self.other_staff.id, walkin_by_ids)
+
+        counseling_options_response = self.client.get('/api/walkins/staff-options/', {'branch': self.branch.id})
+        self.assertEqual(counseling_options_response.status_code, 200)
+        counseling_ids = {row['id'] for row in counseling_options_response.data}
+        self.assertIn(self.staff.id, counseling_ids)
+        self.assertNotIn(self.other_staff.id, counseling_ids)
+
+        walkin_by_update = self.client.patch(
+            f'/api/walkins/{walkin.id}/',
+            {'assigned_to': self.other_staff.id},
+            format='json',
+        )
+        self.assertEqual(walkin_by_update.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.assigned_to, self.other_staff)
+
+        invalid_counseling_update = self.client.patch(
+            f'/api/walkins/{walkin.id}/',
+            {'counseling_by': self.other_staff.id},
+            format='json',
+        )
+        self.assertEqual(invalid_counseling_update.status_code, 400)
+
+        counseling_update = self.client.patch(
+            f'/api/walkins/{walkin.id}/',
+            {'counseling_by': self.staff.id},
+            format='json',
+        )
+        self.assertEqual(counseling_update.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.counseling_by, self.staff)
 
     def test_public_lead_form_uses_default_courses_without_course_records(self):
         Course.objects.all().delete()
