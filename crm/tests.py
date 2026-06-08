@@ -9,7 +9,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WhatsAppMessage
+from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
@@ -549,6 +549,68 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(counseling_update.status_code, 200)
         walkin.refresh_from_db()
         self.assertEqual(walkin.counseling_by, self.staff)
+
+    def test_walkin_assignment_fields_lock_and_change_by_admin_request(self):
+        self.client.force_authenticate(self.admin)
+        create_response = self.client.post('/api/public/walkin/', self.payload, format='json')
+        self.assertEqual(create_response.status_code, 201)
+        walkin = WalkIn.objects.get(phone='9876543210')
+
+        self.client.force_authenticate(self.staff)
+        initial_response = self.client.patch(
+            f'/api/walkins/{walkin.id}/',
+            {'assigned_to': self.staff.id, 'counseling_by': self.staff.id},
+            format='json',
+        )
+        self.assertEqual(initial_response.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.assigned_to, self.staff)
+        self.assertEqual(walkin.counseling_by, self.staff)
+
+        direct_change = self.client.patch(
+            f'/api/walkins/{walkin.id}/',
+            {'assigned_to': self.other_staff.id},
+            format='json',
+        )
+        self.assertEqual(direct_change.status_code, 403)
+
+        request_response = self.client.post(
+            f'/api/walkins/{walkin.id}/request-assignment-change/',
+            {
+                'field_type': WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY,
+                'requested_user': self.other_staff.id,
+                'reason': 'Original referrer was captured incorrectly.',
+            },
+            format='json',
+        )
+        self.assertEqual(request_response.status_code, 201)
+        change_request = WalkInAssignmentChangeRequest.objects.get(walkin=walkin)
+        self.assertEqual(change_request.previous_user, self.staff)
+        self.assertEqual(change_request.requested_user, self.other_staff)
+        self.assertEqual(change_request.requested_by, self.staff)
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING)
+        self.assertTrue(Notification.objects.filter(title='Walk-in Assignment Change Request').exists())
+
+        staff_approval = self.client.post(
+            f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
+            {},
+            format='json',
+        )
+        self.assertEqual(staff_approval.status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        admin_approval = self.client.post(
+            f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
+            {'admin_remarks': 'Approved after review.'},
+            format='json',
+        )
+        self.assertEqual(admin_approval.status_code, 200)
+        walkin.refresh_from_db()
+        change_request.refresh_from_db()
+        self.assertEqual(walkin.assigned_to, self.other_staff)
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.APPROVED)
+        self.assertEqual(change_request.reviewed_by, self.admin)
+        self.assertIsNotNone(change_request.reviewed_at)
 
     def test_public_lead_form_uses_default_courses_without_course_records(self):
         Course.objects.all().delete()

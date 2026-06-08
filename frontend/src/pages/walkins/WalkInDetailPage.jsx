@@ -185,6 +185,12 @@ export default function WalkInDetailPage() {
   const [savingDetails, setSavingDetails] = useState(false)
   const [branchCorrectionOpen, setBranchCorrectionOpen] = useState(false)
   const [branchCorrection, setBranchCorrection] = useState({ branch: '', reason: '' })
+  const [assignmentRequest, setAssignmentRequest] = useState({
+    assigned_to_user: '',
+    assigned_to_reason: '',
+    counseling_by_user: '',
+    counseling_by_reason: '',
+  })
   const [pendingCourseChangePayload, setPendingCourseChangePayload] = useState(null)
   const [form, setForm] = useState({
     branch: '',
@@ -557,6 +563,69 @@ export default function WalkInDetailPage() {
     }
   }
 
+  const requestAssignmentChange = async (fieldType) => {
+    const userKey = fieldType === 'assigned_to' ? 'assigned_to_user' : 'counseling_by_user'
+    const reasonKey = fieldType === 'assigned_to' ? 'assigned_to_reason' : 'counseling_by_reason'
+    const requestedUser = assignmentRequest[userKey]
+    const reason = assignmentRequest[reasonKey].trim()
+    if (!requestedUser) {
+      setMessage('Select the requested user.')
+      return
+    }
+    if (!reason) {
+      setMessage('Enter a reason for the change request.')
+      return
+    }
+    try {
+      await api.post(`/walkins/${id}/request-assignment-change/`, {
+        field_type: fieldType,
+        requested_user: Number(requestedUser),
+        reason,
+      })
+      setAssignmentRequest((current) => ({
+        ...current,
+        [userKey]: '',
+        [reasonKey]: '',
+      }))
+      setMessage('Assignment change request sent for admin approval.')
+    } catch (error) {
+      setMessage(error.response?.data?.detail || 'Failed to submit assignment change request.')
+    }
+  }
+
+  const assignmentRequestField = (fieldType, users) => {
+    const userKey = fieldType === 'assigned_to' ? 'assigned_to_user' : 'counseling_by_user'
+    const reasonKey = fieldType === 'assigned_to' ? 'assigned_to_reason' : 'counseling_by_reason'
+    return (
+      <div className="mt-3 space-y-3">
+        <select
+          value={assignmentRequest[userKey]}
+          onChange={(event) => setAssignmentRequest((current) => ({ ...current, [userKey]: event.target.value }))}
+          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+        >
+          <option value="">Request change to</option>
+          {users.map((staff) => (
+            <option key={staff.id} value={staff.id}>{staff.name}</option>
+          ))}
+        </select>
+        <textarea
+          value={assignmentRequest[reasonKey]}
+          onChange={(event) => setAssignmentRequest((current) => ({ ...current, [reasonKey]: event.target.value }))}
+          rows={2}
+          placeholder="Reason for change"
+          className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+        />
+        <button
+          type="button"
+          onClick={() => requestAssignmentChange(fieldType)}
+          className="w-full rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+        >
+          Request Change
+        </button>
+      </div>
+    )
+  }
+
   const changeBranch = async () => {
     if (!branchCorrection.branch) {
       setMessage('Please select a branch.')
@@ -721,29 +790,45 @@ export default function WalkInDetailPage() {
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
-              <select
-                value={form.assigned_to || ''}
-                onChange={saveWalkInBy}
-                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
-              >
-                <option value="">{walkInByLabel(walkin)}</option>
-                {walkInByUsers.map((staff) => (
-                  <option key={staff.id} value={staff.id}>{staff.name}</option>
-                ))}
-              </select>
+              {isSuperAdmin || !walkin.assigned_to ? (
+                <select
+                  value={form.assigned_to || ''}
+                  onChange={saveWalkInBy}
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+                >
+                  <option value="">{walkInByLabel(walkin)}</option>
+                  {walkInByUsers.map((staff) => (
+                    <option key={staff.id} value={staff.id}>{staff.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <p className="mt-2 font-semibold text-slate-900">{walkInByLabel(walkin)}</p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
+                  {assignmentRequestField('assigned_to', walkInByUsers)}
+                </>
+              )}
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Counseling By</p>
-              <select
-                value={form.counseling_by || ''}
-                onChange={saveCounselingBy}
-                className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
-              >
-                <option value="">{counselingByLabel(walkin)}</option>
-                {counselingUsers.map((staff) => (
-                  <option key={staff.id} value={staff.id}>{staff.name}</option>
-                ))}
-              </select>
+              {isSuperAdmin || !walkin.counseling_by ? (
+                <select
+                  value={form.counseling_by || ''}
+                  onChange={saveCounselingBy}
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
+                >
+                  <option value="">{counselingByLabel(walkin)}</option>
+                  {counselingUsers.map((staff) => (
+                    <option key={staff.id} value={staff.id}>{staff.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <p className="mt-2 font-semibold text-slate-900">{counselingByLabel(walkin)}</p>
+                  <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
+                  {assignmentRequestField('counseling_by', counselingUsers)}
+                </>
+              )}
             </div>
             <DetailField label="Pincode" value={walkin.pincode} editing={editingDetails}>
               <input value={form.pincode} onChange={(event) => updateDetail('pincode', event.target.value)} placeholder="Enter Pincode" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />

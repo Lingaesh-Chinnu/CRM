@@ -58,6 +58,7 @@ import WhatsAppTemplatesPage from './pages/admin/WhatsAppTemplatesPage'
 import DataImportPage from './pages/admin/DataImportPage'
 import DeleteCandidatesPage from './pages/admin/DeleteCandidatesPage'
 import CourseChangeRequestsPage from './pages/admin/CourseChangeRequestsPage'
+import WalkInAssignmentRequestsPage from './pages/admin/WalkInAssignmentRequestsPage'
 
 // Public
 import PublicWalkInForm from './pages/public/PublicWalkInForm'
@@ -163,6 +164,7 @@ export default function App() {
           <Route path="admin/delete-candidates" element={<DeleteCandidatesPage />} />
           <Route path="admin/whatsapp-templates" element={<WhatsAppTemplatesPage />} />
           <Route path="admin/course-change-requests" element={<CourseChangeRequestsPage />} />
+          <Route path="admin/walkin-assignment-requests" element={<WalkInAssignmentRequestsPage />} />
         </Route>
       </Route>
     </Routes>

@@ -16,7 +16,8 @@ from views import (
     LoginView, LogoutView, MeView, ChangePasswordView,
     BranchViewSet, UserViewSet, UserTargetViewSet, BranchTargetViewSet,
     HistoricalAnalyticsEntryViewSet,
-    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet, CourseChangeRequestViewSet, CounselorChangeRequestViewSet,
+    CourseViewSet, LeadViewSet, WalkInViewSet, EnrollmentViewSet, CourseChangeRequestViewSet,
+    CounselorChangeRequestViewSet, WalkInAssignmentChangeRequestViewSet,
     PaymentViewSet, PaymentInstallmentViewSet, PaymentReasonRequestViewSet, DiscountViewSet,
     AdminReceiptViewSet, LeadImportView, LeadImportTemplateView, LeadImportHistoryViewSet,
     AdminDataImportView, AdminDataImportTemplateView, AdminDataExportView,
@@ -50,6 +51,7 @@ router.register(r'walkins', WalkInViewSet, basename='walkin')
 router.register(r'enrollments', EnrollmentViewSet, basename='enrollment')
 router.register(r'course-change-requests', CourseChangeRequestViewSet, basename='course-change-request')
 router.register(r'counselor-change-requests', CounselorChangeRequestViewSet, basename='counselor-change-request')
+router.register(r'walkin-assignment-change-requests', WalkInAssignmentChangeRequestViewSet, basename='walkin-assignment-change-request')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'installments', PaymentInstallmentViewSet, basename='installment')
 router.register(r'payment-reason-requests', PaymentReasonRequestViewSet, basename='payment-reason-request')
@@ -108,7 +110,7 @@ urlpatterns = [
     path('public/rules-review-pdf/<uuid:token>/', PublicRulesReviewPdfView.as_view(), name='public_rules_review_pdf'),
     path('public/rules-signed-pdf/<uuid:token>/', PublicRulesSignedPdfView.as_view(), name='public_rules_signed_pdf'),
     path('public/bills/<int:installment_id>/<str:document_number>/', PublicBillView.as_view(), name='public_bill'),
-    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|consolidated-report|receipts|user-monitoring|lead-import-history|data-import|course-change-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
+    re_path(r'^admin/(users|courses|discounts|targets|historical-analytics|lead-inbox|whatsapp-templates|branches|reports|consolidated-report|receipts|user-monitoring|lead-import-history|data-import|course-change-requests|walkin-assignment-requests)(/.*)?$', TemplateView.as_view(template_name='index.html'), name='spa-admin'),
     path('admin/', admin.site.urls),
     path('api/', include(api_urlpatterns)),
 ]

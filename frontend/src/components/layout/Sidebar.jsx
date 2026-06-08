@@ -26,6 +26,7 @@ const adminNavigation = [
   { name: 'Historical Analytics', href: '/admin/historical-analytics', short: 'HA' },
   { name: 'Lead Inbox', href: '/admin/lead-inbox', short: 'IN' },
   { name: 'Course Change Requests', href: '/admin/course-change-requests', short: 'CR' },
+  { name: 'Walk-in Assignment Requests', href: '/admin/walkin-assignment-requests', short: 'WA' },
   { name: 'Delete Candidates', href: '/admin/delete-candidates', short: 'DC' },
   { name: 'WhatsApp Templates', href: '/admin/whatsapp-templates', short: 'WT' },
   { name: 'Branches', href: '/admin/branches', short: 'BR' },

@@ -81,7 +81,7 @@ from crm.models import (
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory,
-    CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory,
+    CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory, WalkInAssignmentChangeRequest,
     get_default_installment_schedule, get_enrollment_installment_schedule, get_saved_enrollment_installment_schedule,
     normalize_installment_schedule,
     enrollment_payable_fee, PAYMENT_SPLIT_THRESHOLD,
@@ -94,7 +94,7 @@ from serializers import (
     WhatsAppTemplateSerializer, NotificationSerializer, AdminReceiptSerializer,
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
-    CounselorChangeRequestSerializer, payment_installment_summary,
+    CounselorChangeRequestSerializer, WalkInAssignmentChangeRequestSerializer, payment_installment_summary,
     user_identity_payload,
 )
 
@@ -1024,6 +1024,90 @@ def apply_counselor_change(change_request, admin_user, force=False):
     change_request.admin_decision_at = timezone.now()
     change_request.force_transfer = force
     return record
+
+
+def walkin_assignment_user_field(field_type):
+    if field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY:
+        return 'assigned_to'
+    if field_type == WalkInAssignmentChangeRequest.FieldType.COUNSELING_BY:
+        return 'counseling_by'
+    raise ValueError('Select a valid assignment field.')
+
+
+def validate_walkin_assignment_user(walkin, field_type, user):
+    if not user or not user.is_active:
+        raise ValueError('Select a valid active user.')
+    if field_type == WalkInAssignmentChangeRequest.FieldType.COUNSELING_BY:
+        if not walkin.branch_id:
+            raise ValueError('Candidate branch is required before assigning Counseling By.')
+        if user.branch_id != walkin.branch_id:
+            raise ValueError('Select an active user from the candidate branch for Counseling By.')
+    return user
+
+
+def create_walkin_assignment_change_request(walkin, field_type, requested_user, requested_by, reason):
+    field_name = walkin_assignment_user_field(field_type)
+    previous_user = getattr(walkin, field_name)
+    validate_walkin_assignment_user(walkin, field_type, requested_user)
+    if previous_user and previous_user.id == requested_user.id:
+        raise ValueError('This user is already assigned.')
+    if not previous_user:
+        raise ValueError('This field is empty. Assign it directly before using change requests.')
+    if not str(reason or '').strip():
+        raise ValueError('Reason for change is required.')
+    if WalkInAssignmentChangeRequest.objects.filter(
+        walkin=walkin,
+        field_type=field_type,
+        status=WalkInAssignmentChangeRequest.Status.PENDING,
+    ).exists():
+        raise ValueError('This walk-in already has a pending assignment change request for this field.')
+
+    change_request = WalkInAssignmentChangeRequest.objects.create(
+        walkin=walkin,
+        field_type=field_type,
+        branch=walkin.branch,
+        candidate_name=walkin.name,
+        candidate_phone=walkin.phone or '',
+        previous_user=previous_user,
+        requested_user=requested_user,
+        requested_by=requested_by,
+        reason=str(reason or '').strip(),
+    )
+    title = 'Walk-in Assignment Change Request'
+    field_label = change_request.get_field_type_display()
+    message = (
+        f'{walkin.name} {field_label} change requested: '
+        f'{previous_user.full_name if previous_user else "Unassigned"} to {requested_user.full_name or requested_user.username}.'
+    )
+    notify_admin_users(
+        title,
+        message,
+        Notification.NType.WARNING,
+        f'/admin/walkin-assignment-requests?request={change_request.id}',
+        category=Notification.Category.APPROVAL,
+    )
+    return change_request
+
+
+def apply_walkin_assignment_change(change_request, admin_user, remarks=''):
+    field_name = walkin_assignment_user_field(change_request.field_type)
+    walkin = WalkIn.objects.select_for_update().get(pk=change_request.walkin_id)
+    validate_walkin_assignment_user(walkin, change_request.field_type, change_request.requested_user)
+    setattr(walkin, field_name, change_request.requested_user)
+    walkin.save(update_fields=[field_name, 'updated_at'])
+    change_request.status = WalkInAssignmentChangeRequest.Status.APPROVED
+    change_request.reviewed_by = admin_user
+    change_request.reviewed_at = timezone.now()
+    change_request.admin_remarks = remarks or ''
+    change_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'admin_remarks', 'updated_at'])
+    create_user_notification(
+        change_request.requested_by,
+        'Walk-in Assignment Change Approved',
+        f'{change_request.get_field_type_display()} change for {change_request.candidate_name} was approved.',
+        Notification.NType.SUCCESS,
+        f'/walkins/{walkin.id}',
+    )
+    return walkin
 
 
 def resolve_notifications(queryset):
@@ -6695,6 +6779,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data.pop('branch_change_reason', None)
 
         assigned_to = data.get('assigned_to')
+        if assigned_to in ('', None) and 'assigned_to' in data:
+            assigned_to = None
         if assigned_to not in (None, ''):
             user_qs = User.objects.filter(
                 pk=assigned_to,
@@ -6702,8 +6788,18 @@ class WalkInViewSet(viewsets.ModelViewSet):
             )
             if not user_qs.exists():
                 return Response({'detail': 'Select a valid active user for Walk-in By.'}, status=status.HTTP_400_BAD_REQUEST)
+            if (
+                not request.user.is_super_admin
+                and walkin.assigned_to_id
+                and int(assigned_to) != walkin.assigned_to_id
+            ):
+                return Response({'detail': 'Walk-in By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
+        elif 'assigned_to' in data and not request.user.is_super_admin and walkin.assigned_to_id:
+            return Response({'detail': 'Walk-in By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
 
         counseling_by = data.get('counseling_by')
+        if counseling_by in ('', None) and 'counseling_by' in data:
+            counseling_by = None
         if counseling_by not in (None, ''):
             counseling_branch = new_branch or walkin.branch
             user_qs = User.objects.filter(
@@ -6715,6 +6811,14 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 user_qs = user_qs.filter(branch=request.user.branch)
             if not user_qs.exists():
                 return Response({'detail': 'Select an active user from the candidate branch for Counseling By.'}, status=status.HTTP_400_BAD_REQUEST)
+            if (
+                not request.user.is_super_admin
+                and walkin.counseling_by_id
+                and int(counseling_by) != walkin.counseling_by_id
+            ):
+                return Response({'detail': 'Counseling By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
+        elif 'counseling_by' in data and not request.user.is_super_admin and walkin.counseling_by_id:
+            return Response({'detail': 'Counseling By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = self.get_serializer(walkin, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -6735,6 +6839,32 @@ class WalkInViewSet(viewsets.ModelViewSet):
         ):
             clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'], url_path='request-assignment-change')
+    def request_assignment_change(self, request, pk=None):
+        walkin = self.get_object()
+        field_type = request.data.get('field_type')
+        requested_user_id = request.data.get('requested_user')
+        reason = request.data.get('reason', '')
+        if not requested_user_id:
+            return Response({'detail': 'Select the requested user.'}, status=status.HTTP_400_BAD_REQUEST)
+        requested_user = User.objects.filter(pk=requested_user_id, is_active=True).first()
+        if not requested_user:
+            return Response({'detail': 'Select a valid active user.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            change_request = create_walkin_assignment_change_request(
+                walkin,
+                field_type,
+                requested_user,
+                request.user,
+                reason,
+            )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            WalkInAssignmentChangeRequestSerializer(change_request, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=['post'], url_path='change-branch')
     def change_branch(self, request, pk=None):
@@ -6886,6 +7016,77 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
 
 from serializers import BranchTransferRequestSerializer
+
+
+class WalkInAssignmentChangeRequestFilter(django_filters.FilterSet):
+    date = django_filters.DateFilter(field_name='created_at', lookup_expr='date')
+
+    class Meta:
+        model = WalkInAssignmentChangeRequest
+        fields = ['status', 'field_type', 'branch', 'requested_by']
+
+
+class WalkInAssignmentChangeRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = WalkInAssignmentChangeRequestSerializer
+    permission_classes = [IsStaffOrAdmin]
+    pagination_class = None
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = WalkInAssignmentChangeRequestFilter
+    search_fields = [
+        'candidate_name', 'candidate_phone',
+        'previous_user__first_name', 'previous_user__last_name', 'previous_user__username',
+        'requested_user__first_name', 'requested_user__last_name', 'requested_user__username',
+    ]
+    ordering_fields = ['created_at', 'reviewed_at', 'status']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        queryset = WalkInAssignmentChangeRequest.objects.select_related(
+            'walkin', 'branch', 'previous_user', 'requested_user', 'requested_by', 'reviewed_by',
+        )
+        if self.request.user.is_super_admin:
+            return queryset
+        return queryset.filter(Q(requested_by=self.request.user) | Q(walkin__branch=self.request.user.branch))
+
+    @action(detail=True, methods=['post'], url_path='approve')
+    def approve(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can approve assignment change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status != WalkInAssignmentChangeRequest.Status.PENDING:
+            return Response({'detail': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+        remarks = request.data.get('admin_remarks') or request.data.get('remarks') or ''
+        try:
+            with transaction.atomic():
+                change_request = WalkInAssignmentChangeRequest.objects.select_for_update().get(pk=change_request.pk)
+                if change_request.status != WalkInAssignmentChangeRequest.Status.PENDING:
+                    return Response({'detail': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+                apply_walkin_assignment_change(change_request, request.user, remarks)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.refresh_from_db()
+        return Response(self.get_serializer(change_request).data)
+
+    @action(detail=True, methods=['post'], url_path='reject')
+    def reject(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can reject assignment change requests.'}, status=status.HTTP_403_FORBIDDEN)
+        change_request = self.get_object()
+        if change_request.status != WalkInAssignmentChangeRequest.Status.PENDING:
+            return Response({'detail': 'Only pending requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+        change_request.status = WalkInAssignmentChangeRequest.Status.REJECTED
+        change_request.reviewed_by = request.user
+        change_request.reviewed_at = timezone.now()
+        change_request.admin_remarks = request.data.get('admin_remarks') or request.data.get('remarks') or ''
+        change_request.save(update_fields=['status', 'reviewed_by', 'reviewed_at', 'admin_remarks', 'updated_at'])
+        create_user_notification(
+            change_request.requested_by,
+            'Walk-in Assignment Change Rejected',
+            f'{change_request.get_field_type_display()} change for {change_request.candidate_name} was rejected.',
+            Notification.NType.ERROR,
+            f'/walkins/{change_request.walkin_id}',
+        )
+        return Response(self.get_serializer(change_request).data)
 
 
 class BranchTransferRequestViewSet(viewsets.ModelViewSet):

@@ -670,6 +670,50 @@ class WalkInBranchChangeHistory(models.Model):
         return f'{self.walkin_id}: {self.old_branch} -> {self.new_branch}'
 
 
+class WalkInAssignmentChangeRequest(models.Model):
+    """Approval workflow for locked Walk-in By and Counseling By changes."""
+
+    class FieldType(models.TextChoices):
+        WALK_IN_BY = 'assigned_to', 'Walk-in By'
+        COUNSELING_BY = 'counseling_by', 'Counseling By'
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    walkin = models.ForeignKey(WalkIn, on_delete=models.CASCADE, related_name='assignment_change_requests')
+    field_type = models.CharField(max_length=30, choices=FieldType.choices, db_index=True)
+    branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
+                               related_name='walkin_assignment_change_requests')
+    candidate_name = models.CharField(max_length=200)
+    candidate_phone = models.CharField(max_length=20, blank=True)
+    previous_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                      related_name='walkin_assignment_previous_requests')
+    requested_user = models.ForeignKey(User, on_delete=models.CASCADE,
+                                       related_name='walkin_assignment_requested_requests')
+    requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                     related_name='walkin_assignment_change_requests')
+    reason = models.TextField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    reviewed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                    related_name='walkin_assignment_reviewed_requests')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_remarks = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'walkin_assignment_change_requests'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['walkin', 'field_type', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.walkin_id} {self.field_type}: {self.status}'
+
+
 class PhoneNumberChangeHistory(models.Model):
     """Audit trail for phone number changes on CRM records."""
 

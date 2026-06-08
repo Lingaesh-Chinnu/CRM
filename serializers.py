@@ -905,7 +905,7 @@ class DataImportHistorySerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/walkins/serializers.py
 # ============================================================
-from crm.models import WalkIn, WalkInBranchChangeHistory
+from crm.models import WalkIn, WalkInAssignmentChangeRequest, WalkInBranchChangeHistory
 
 
 class WalkInListSerializer(serializers.ModelSerializer):
@@ -1171,6 +1171,26 @@ class WalkInBranchChangeHistorySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'old_branch', 'old_branch_name', 'new_branch', 'new_branch_name',
             'changed_by', 'changed_by_name', 'changed_at', 'reason',
+        ]
+
+
+class WalkInAssignmentChangeRequestSerializer(serializers.ModelSerializer):
+    field_type_display = serializers.CharField(source='get_field_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True)
+    previous_user_name = serializers.CharField(source='previous_user.full_name', read_only=True)
+    requested_user_name = serializers.CharField(source='requested_user.full_name', read_only=True)
+    requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True)
+
+    class Meta:
+        model = WalkInAssignmentChangeRequest
+        fields = [
+            'id', 'walkin', 'field_type', 'field_type_display', 'branch', 'branch_name',
+            'candidate_name', 'candidate_phone', 'previous_user', 'previous_user_name',
+            'requested_user', 'requested_user_name', 'requested_by', 'requested_by_name',
+            'reason', 'status', 'status_display', 'reviewed_by', 'reviewed_by_name',
+            'reviewed_at', 'admin_remarks', 'created_at', 'updated_at',
         ]
 
 
