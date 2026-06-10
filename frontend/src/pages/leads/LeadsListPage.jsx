@@ -7,7 +7,7 @@ import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
-import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
+import { CandidateInfo, ImportantFilter, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 function statusLabel(status) {
@@ -683,14 +683,14 @@ export default function LeadsListPage() {
                   width: 'minmax(130px,1.1fr)',
                   className: 'flex items-center',
                   render: (lead) => (
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <ImportantToggle active={!!lead.is_important} onToggle={(nextValue) => toggleLeadImportant(lead, nextValue)} />
-                        <OwnerDot user={lead.assigned_user} />
-                        <Link to={withReturnTo(`/leads/${lead.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>
-                      </div>
-                      <p className="mt-1 overflow-hidden break-words text-xs leading-4 text-slate-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{lead.course_name || 'Course not selected'}</p>
-                    </div>
+                    <CandidateInfo
+                      important={!!lead.is_important}
+                      onImportantToggle={(nextValue) => toggleLeadImportant(lead, nextValue)}
+                      owner={lead.assigned_user}
+                      primary={<Link to={withReturnTo(`/leads/${lead.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="block truncate font-bold text-slate-950 hover:text-cyan-700">{lead.name}</Link>}
+                      secondary={lead.course_name || 'Course not selected'}
+                      secondaryClassName="overflow-hidden break-words text-xs leading-4 text-slate-500 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+                    />
                   ),
                 },
                 {

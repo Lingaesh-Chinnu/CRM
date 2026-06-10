@@ -6,7 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
-import { ImportantFilter, ImportantToggle, OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
+import { CandidateInfo, ImportantFilter, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
@@ -153,14 +153,14 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                 width: 'minmax(135px,1.1fr)',
                 className: 'flex items-center',
                 render: (walkin) => (
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <OwnerDot user={walkin.counseling_user} />
-                      <ImportantToggle active={!!walkin.is_important} onToggle={(nextValue) => onImportantToggle(walkin, nextValue)} />
-                      <Link to={withReturnTo(`/walkins/${walkin.id}`, returnTo)} state={{ returnTo, listFilters }} className="truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>
-                    </div>
-                    <p className="mt-1 truncate text-sm font-semibold text-slate-800">{walkin.phone || 'Phone not set'}</p>
-                  </div>
+                  <CandidateInfo
+                    important={!!walkin.is_important}
+                    onImportantToggle={(nextValue) => onImportantToggle(walkin, nextValue)}
+                    owner={walkin.counseling_user}
+                    primary={<Link to={withReturnTo(`/walkins/${walkin.id}`, returnTo)} state={{ returnTo, listFilters }} className="block truncate font-bold text-slate-950 hover:text-cyan-700">{walkin.name}</Link>}
+                    secondary={walkin.phone || 'Phone not set'}
+                    secondaryClassName="truncate text-sm font-semibold text-slate-800"
+                  />
                 ),
               },
               { key: 'course', header: 'Course', width: 'minmax(105px,0.9fr)', className: 'flex items-center', render: (walkin) => <span className="overflow-hidden break-words text-sm font-semibold leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{walkin.course_name || 'Course pending'}</span> },

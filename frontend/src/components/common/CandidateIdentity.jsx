@@ -124,6 +124,28 @@ export function ImportantToggle({ active, onToggle, disabled = false }) {
   )
 }
 
+export function CandidateInfo({
+  important,
+  onImportantToggle,
+  owner,
+  primary,
+  secondary,
+  secondaryClassName = '',
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2">
+      <div className="flex shrink-0 items-center gap-2">
+        <ImportantToggle active={important} onToggle={onImportantToggle} />
+        <OwnerDot user={owner} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="min-w-0">{primary}</div>
+        <p className={`mt-1 ${secondaryClassName}`}>{secondary}</p>
+      </div>
+    </div>
+  )
+}
+
 export function ImportantFilter({ checked, onChange }) {
   return (
     <label className="inline-flex min-h-[44px] items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-700">
