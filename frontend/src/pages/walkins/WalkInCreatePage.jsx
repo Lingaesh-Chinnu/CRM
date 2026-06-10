@@ -4,6 +4,8 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
+const DIRECT_WALK_IN_BY = 'Direct'
+
 const initialForm = {
   branch: '',
   name: '',
@@ -53,6 +55,7 @@ export default function WalkInCreatePage() {
   const isSuperAdmin = user?.role === 'super_admin'
   const [courses, setCourses] = useState([])
   const [branches, setBranches] = useState([])
+  const [walkInByOptions, setWalkInByOptions] = useState([])
   const [form, setForm] = useState(initialForm)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -63,9 +66,10 @@ export default function WalkInCreatePage() {
   const existingLead = duplicateRecords.find((record) => record.type === 'Lead')
 
   useEffect(() => {
-    Promise.all([api.get('/courses/'), api.get('/branches/')]).then(([coursesRes, branchesRes]) => {
+    Promise.all([api.get('/courses/'), api.get('/branches/'), api.get('/walkins/walk-in-by-options/')]).then(([coursesRes, branchesRes, walkInByRes]) => {
       setCourses(coursesRes.data.results || coursesRes.data)
       setBranches(branchesRes.data.results || branchesRes.data)
+      setWalkInByOptions(walkInByRes.data.results || walkInByRes.data)
     })
   }, [])
 
@@ -144,7 +148,8 @@ export default function WalkInCreatePage() {
         ...form,
         branch: form.branch ? Number(form.branch) : null,
         course: form.course ? Number(form.course) : null,
-        assigned_to: form.assigned_to ? Number(form.assigned_to) : null,
+        assigned_to: form.assigned_to && form.assigned_to !== DIRECT_WALK_IN_BY ? Number(form.assigned_to) : null,
+        walk_in_by: form.assigned_to === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : '',
         dob: form.dob || null,
         visit_date: form.visit_date,
         follow_up_date: form.follow_up_date || null,
@@ -312,6 +317,13 @@ export default function WalkInCreatePage() {
               aria-label="Next Follow-up Date"
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel>Walk-in By</FieldLabel>
+            <select value={form.assigned_to} onChange={(event) => updateForm('assigned_to', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
+              <option value="">Select Walk-in By</option>
+              {walkInByOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+            </select>
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Source</FieldLabel>

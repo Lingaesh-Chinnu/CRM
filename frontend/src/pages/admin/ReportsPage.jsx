@@ -27,7 +27,7 @@ const metricColors = {
   conversion: { light: '#cbd5e1', dark: '#334155', soft: 'bg-slate-100', text: 'text-slate-800' },
 }
 
-function AnalyticsCard({ label, value, change, tone = 'conversion' }) {
+function AnalyticsCard({ label, value, change, tone = 'conversion', detail = '' }) {
   const colors = metricColors[tone] || metricColors.conversion
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
@@ -39,6 +39,7 @@ function AnalyticsCard({ label, value, change, tone = 'conversion' }) {
       <p className={`mt-2 text-xs font-bold ${Number(change || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
         {Number(change || 0) >= 0 ? '+' : ''}{Number(change || 0).toFixed(0)}% from last month
       </p>
+      {detail && <p className="mt-2 text-xs font-semibold text-slate-500">{detail}</p>}
     </div>
   )
 }
@@ -239,7 +240,13 @@ export default function ReportsPage() {
         <>
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <AnalyticsCard label="Leads" value={analytics.metrics.leads} change={analytics.changes.leads} tone="leads" />
-            <AnalyticsCard label="Walk-ins" value={analytics.metrics.walkins} change={analytics.changes.walkins} tone="walkins" />
+            <AnalyticsCard
+              label="Walk-ins"
+              value={analytics.metrics.walkins}
+              change={analytics.changes.walkins}
+              tone="walkins"
+              detail={`Direct ${analytics.metrics.direct_walkins || 0} | Staff-generated ${analytics.metrics.staff_generated_walkins || 0}`}
+            />
             <AnalyticsCard label="Enrollments" value={analytics.metrics.enrollments} change={analytics.changes.enrollments} tone="enrollments" />
             <AnalyticsCard label="Revenue" value={currency(analytics.metrics.revenue)} change={analytics.changes.revenue} tone="revenue" />
           </section>

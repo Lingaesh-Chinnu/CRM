@@ -1056,7 +1056,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
         model  = WalkIn
         fields = '__all__'
         read_only_fields = [
-            'candidate_number', 'created_by', 'walk_in_by',
+            'candidate_number', 'created_by',
             'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by',
         ]
 
@@ -1143,6 +1143,14 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        initial_data = getattr(self, 'initial_data', {})
+        direct_selected = initial_data.get('walk_in_by') == WalkIn.WalkInBy.DIRECT
+        assigned_to = attrs.get('assigned_to', getattr(self.instance, 'assigned_to', None))
+        if direct_selected:
+            attrs['walk_in_by'] = WalkIn.WalkInBy.DIRECT
+            attrs['assigned_to'] = None
+        elif 'assigned_to' in attrs and attrs.get('assigned_to'):
+            attrs['walk_in_by'] = ''
         if self.instance is None:
             data = {**getattr(self, 'initial_data', {}), **attrs}
             required_fields = [
@@ -1158,6 +1166,8 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     field: 'This field is required.' for field in missing
                 })
+            if not direct_selected and not assigned_to:
+                raise serializers.ValidationError({'walk_in_by': 'Select Walk-in By.'})
         return attrs
 
 
@@ -1180,6 +1190,8 @@ class WalkInAssignmentChangeRequestSerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source='branch.name', read_only=True)
     previous_user_name = serializers.CharField(source='previous_user.full_name', read_only=True)
     requested_user_name = serializers.CharField(source='requested_user.full_name', read_only=True)
+    previous_assignment_name = serializers.SerializerMethodField()
+    requested_assignment_name = serializers.SerializerMethodField()
     requested_by_name = serializers.CharField(source='requested_by.full_name', read_only=True)
     counselor_reviewed_by_name = serializers.CharField(source='counselor_reviewed_by.full_name', read_only=True)
     reviewed_by_name = serializers.CharField(source='reviewed_by.full_name', read_only=True)
@@ -1190,12 +1202,24 @@ class WalkInAssignmentChangeRequestSerializer(serializers.ModelSerializer):
             'id', 'walkin', 'field_type', 'field_type_display', 'branch', 'branch_name',
             'candidate_name', 'candidate_phone', 'previous_user', 'previous_user_name',
             'requested_user', 'requested_user_name', 'requested_by', 'requested_by_name',
+            'previous_walk_in_by', 'requested_walk_in_by',
+            'previous_assignment_name', 'requested_assignment_name',
             'reason', 'status', 'status_display',
             'counselor_reviewed_by', 'counselor_reviewed_by_name',
             'counselor_reviewed_at', 'counselor_remarks',
             'reviewed_by', 'reviewed_by_name',
             'reviewed_at', 'admin_remarks', 'created_at', 'updated_at',
         ]
+
+    def get_previous_assignment_name(self, obj):
+        return obj.previous_walk_in_by or (
+            obj.previous_user.full_name if obj.previous_user_id and obj.previous_user else 'Unassigned'
+        )
+
+    def get_requested_assignment_name(self, obj):
+        return obj.requested_walk_in_by or (
+            obj.requested_user.full_name if obj.requested_user_id and obj.requested_user else 'Unassigned'
+        )
 
 
 class PublicWalkInCreateSerializer(serializers.ModelSerializer):

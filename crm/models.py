@@ -570,6 +570,7 @@ class WalkIn(TimeStampedModel):
         LEAD_CONVERSION   = 'lead_conversion',   'Lead Conversion'
 
     class WalkInBy(models.TextChoices):
+        DIRECT       = 'Direct',       'Direct'
         LINCY_SCANIA = 'lincy_scania', 'Mrs. Lincy Scania'
         RANGANAYAGI  = 'ranganayagi',  'Mrs. Ranganayagi'
         PAVITHRA     = 'pavithra',     'Ms. Pavithra'
@@ -693,7 +694,9 @@ class WalkInAssignmentChangeRequest(models.Model):
     candidate_phone = models.CharField(max_length=20, blank=True)
     previous_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                       related_name='walkin_assignment_previous_requests')
-    requested_user = models.ForeignKey(User, on_delete=models.CASCADE,
+    previous_walk_in_by = models.CharField(max_length=30, blank=True)
+    requested_walk_in_by = models.CharField(max_length=30, blank=True)
+    requested_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.CASCADE,
                                        related_name='walkin_assignment_requested_requests')
     requested_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                      related_name='walkin_assignment_change_requests')

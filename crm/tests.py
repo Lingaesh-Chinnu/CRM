@@ -515,6 +515,7 @@ class PublicWalkInFormTests(APITestCase):
 
         walkin_by_response = self.client.get('/api/walkins/walk-in-by-options/')
         self.assertEqual(walkin_by_response.status_code, 200)
+        self.assertEqual(walkin_by_response.data[0]['id'], WalkIn.WalkInBy.DIRECT)
         walkin_by_ids = {row['id'] for row in walkin_by_response.data}
         self.assertIn(self.staff.id, walkin_by_ids)
         self.assertIn(self.other_staff.id, walkin_by_ids)
@@ -551,6 +552,74 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(counseling_update.status_code, 200)
         walkin.refresh_from_db()
         self.assertEqual(walkin.counseling_by, self.staff)
+
+    def test_direct_walkin_by_is_stored_without_user_credit(self):
+        self.client.force_authenticate(self.staff)
+        direct_payload = {
+            **self.payload,
+            'walk_in_by': WalkIn.WalkInBy.DIRECT,
+            'assigned_to': None,
+        }
+        direct_response = self.client.post('/api/walkins/', direct_payload, format='json')
+        self.assertEqual(direct_response.status_code, 201)
+
+        direct_walkin = WalkIn.objects.get(pk=direct_response.data['id'])
+        self.assertEqual(direct_walkin.walk_in_by, WalkIn.WalkInBy.DIRECT)
+        self.assertIsNone(direct_walkin.assigned_to)
+
+        staff_payload = {
+            **self.payload,
+            'phone': '9876543211',
+            'assigned_to': self.staff.id,
+            'walk_in_by': '',
+        }
+        staff_response = self.client.post('/api/walkins/', staff_payload, format='json')
+        self.assertEqual(staff_response.status_code, 201)
+
+        self.client.force_authenticate(self.admin)
+        report_response = self.client.get('/api/reports/user-performance/', {'month': '2026-05'})
+        self.assertEqual(report_response.status_code, 200)
+        staff_row = next(row for row in report_response.data if row['user_id'] == self.staff.id)
+        self.assertEqual(staff_row['walkins'], 1)
+
+    def test_assigned_walkin_can_change_to_direct_through_admin_approval(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            created_by=self.staff,
+            assigned_to=self.staff,
+            name='Direct Change Candidate',
+            phone='9876543212',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.DIRECT,
+            visit_date='2026-05-11',
+        )
+        self.client.force_authenticate(self.staff)
+        request_response = self.client.post(
+            f'/api/walkins/{walkin.id}/request-assignment-change/',
+            {
+                'field_type': WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY,
+                'requested_walk_in_by': WalkIn.WalkInBy.DIRECT,
+                'reason': 'Candidate came without a staff referral.',
+            },
+            format='json',
+        )
+        self.assertEqual(request_response.status_code, 201)
+        change_request = WalkInAssignmentChangeRequest.objects.get(walkin=walkin)
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING_ADMIN)
+        self.assertIsNone(change_request.requested_user)
+        self.assertEqual(change_request.requested_walk_in_by, WalkIn.WalkInBy.DIRECT)
+
+        self.client.force_authenticate(self.admin)
+        approve_response = self.client.post(
+            f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
+            {'admin_remarks': 'Confirmed direct walk-in.'},
+            format='json',
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertIsNone(walkin.assigned_to)
+        self.assertEqual(walkin.walk_in_by, WalkIn.WalkInBy.DIRECT)
 
     def test_walkin_assignment_fields_lock_and_change_by_admin_request(self):
         self.client.force_authenticate(self.admin)

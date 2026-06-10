@@ -8,6 +8,8 @@ import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { FOLLOW_UP_SUCCESS_MESSAGE, resolveReturnTo } from '../../utils/returnNavigation'
 
+const DIRECT_WALK_IN_BY = 'Direct'
+
 function prettyValue(value, fallback = '') {
   return value || fallback
 }
@@ -263,7 +265,7 @@ export default function WalkInDetailPage() {
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
-        assigned_to: data.assigned_to || '',
+        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
         enrollment_date: todayInputValue(),
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
@@ -461,7 +463,7 @@ export default function WalkInDetailPage() {
       year_of_passing: walkin.year_of_passing || '',
       college_company: walkin.college_company || '',
         visit_date: walkin.visit_date || '',
-        assigned_to: walkin.assigned_to || '',
+        assigned_to: walkin.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : walkin.assigned_to || '',
         counseling_by: walkin.counseling_by || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
@@ -520,7 +522,7 @@ export default function WalkInDetailPage() {
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
-        assigned_to: data.assigned_to || '',
+        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
@@ -536,7 +538,10 @@ export default function WalkInDetailPage() {
 
   const saveAssignments = async () => {
     const payload = {}
-    if (!walkin.assigned_to && form.assigned_to) payload.assigned_to = Number(form.assigned_to)
+    if (!walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY && form.assigned_to) {
+      if (form.assigned_to === DIRECT_WALK_IN_BY) payload.walk_in_by = DIRECT_WALK_IN_BY
+      else payload.assigned_to = Number(form.assigned_to)
+    }
     if (!walkin.counseling_by && form.counseling_by) payload.counseling_by = Number(form.counseling_by)
     if (Object.keys(payload).length === 0) {
       setMessage('No assignment changes to save.')
@@ -548,7 +553,7 @@ export default function WalkInDetailPage() {
       setWalkin(data)
       setForm((current) => ({
         ...current,
-        assigned_to: data.assigned_to || '',
+        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
       }))
       setAssignmentEditing(false)
@@ -563,7 +568,7 @@ export default function WalkInDetailPage() {
   const cancelAssignmentEdit = () => {
     setForm((current) => ({
       ...current,
-      assigned_to: walkin.assigned_to || '',
+      assigned_to: walkin.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : walkin.assigned_to || '',
       counseling_by: walkin.counseling_by || '',
     }))
     setAssignmentEditing(false)
@@ -589,7 +594,8 @@ export default function WalkInDetailPage() {
     try {
       await api.post(`/walkins/${id}/request-assignment-change/`, {
         field_type: fieldType,
-        requested_user: Number(requestedUser),
+        requested_user: requestedUser === DIRECT_WALK_IN_BY ? null : Number(requestedUser),
+        requested_walk_in_by: requestedUser === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : '',
         reason,
       })
       setAssignmentRequest({ requested_user: '', reason: '' })
@@ -634,7 +640,7 @@ export default function WalkInDetailPage() {
   const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id || walkin.status === 'converted')
   const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
   const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
-  const canAssignEmptyOwnership = !walkin.assigned_to || !walkin.counseling_by
+  const canAssignEmptyOwnership = (!walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY) || !walkin.counseling_by
 
   return (
     <div className="space-y-6">
@@ -781,7 +787,7 @@ export default function WalkInDetailPage() {
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
-              {assignmentEditing && !walkin.assigned_to ? (
+              {assignmentEditing && !walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY ? (
                 <select
                   value={form.assigned_to || ''}
                   onChange={(event) => setForm((current) => ({ ...current, assigned_to: event.target.value }))}
@@ -795,7 +801,7 @@ export default function WalkInDetailPage() {
               ) : (
                 <>
                   <p className="mt-2 font-semibold text-slate-900">{walkInByLabel(walkin)}</p>
-                  {walkin.assigned_to ? (
+                  {walkin.assigned_to || walkin.walk_in_by === DIRECT_WALK_IN_BY ? (
                     <>
                       <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
                       <button type="button" onClick={() => openAssignmentChangeRequest('assigned_to')} className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
@@ -1080,11 +1086,11 @@ export default function WalkInDetailPage() {
             <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Change Request</h3>
             <div className="mt-5 space-y-4">
               <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current Counselor</span>
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current Assignment</span>
                 <input value={currentAssignmentLabel(changeRequestModal.fieldType)} readOnly className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700" />
               </label>
               <label className="block">
-                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Requested Counselor</span>
+                <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Requested Assignment</span>
                 <select
                   value={assignmentRequest.requested_user}
                   onChange={(event) => setAssignmentRequest((current) => ({ ...current, requested_user: event.target.value }))}

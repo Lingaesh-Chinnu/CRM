@@ -156,7 +156,7 @@ export default function WalkInAssignmentRequestsPage() {
                       {row.candidate_phone || '-'} | {row.branch_name || '-'} | Requested {formatDateTime(row.created_at)}
                     </p>
                     <p className="mt-3 text-sm font-semibold text-slate-800">
-                      {row.previous_user_name || 'Unassigned'} to {row.requested_user_name || '-'}
+                      {row.previous_assignment_name || 'Unassigned'} to {row.requested_assignment_name || '-'}
                     </p>
                     <p className="mt-2 text-sm text-slate-600">Requested by {row.requested_by_name || '-'}</p>
                     <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{row.reason}</p>
