@@ -636,9 +636,9 @@ export default function PaymentDetailPage() {
           )}
           <div className="mt-5 space-y-4">
             <input
-              type="number"
-              min="1"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
+              pattern="[0-9]+([.][0-9]{0,2})?"
               placeholder="Amount"
               value={form.amount}
               onChange={(event) => setForm({ ...form, amount: event.target.value })}

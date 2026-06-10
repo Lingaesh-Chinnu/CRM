@@ -1340,13 +1340,22 @@ class Payment(TimeStampedModel):
         previous_next_payment_date = self.next_payment_date
         self.paid_amount = Decimal(str(actual_paid or 0))
         self.update_status()
+        if self.paid_amount < self.total_fees:
+            self.next_payment_date = next(
+                (
+                    item.get('due_date')
+                    for item in build_payment_installment_summary_from_records(self)
+                    if item['status'] != 'paid'
+                ),
+                None,
+            )
         changed = (
             previous_paid_amount != Decimal(str(self.paid_amount or 0))
             or previous_status != self.status
             or previous_next_payment_date != self.next_payment_date
         )
         if save and self.pk and changed:
-            self.save(update_fields=['paid_amount', 'status', 'next_payment_date', 'updated_at'])
+            super().save(update_fields=['paid_amount', 'status', 'next_payment_date', 'updated_at'])
         return self
 
     def save(self, *args, **kwargs):
@@ -1410,14 +1419,37 @@ class PaymentInstallment(models.Model):
 
 def build_payment_installment_summary_from_records(payment):
     schedule = get_payment_installment_schedule(payment)
-    actual_paid = payment.installments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
-    remaining_paid = Decimal(str(actual_paid or 0))
-
     summary = []
     for index, item in enumerate(schedule, start=1):
         required_amount = Decimal(str(item.get('amount') or 0))
-        paid_amount = min(remaining_paid, required_amount)
-        remaining_paid = max(remaining_paid - paid_amount, Decimal('0'))
+        summary.append({
+            'index': index,
+            'label': item.get('label') or f'{index} Installment',
+            'required_amount': required_amount,
+            'paid_amount': Decimal('0'),
+            'pending_amount': required_amount,
+            'status': 'pending',
+            'due_date': item.get('due_date').isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
+        })
+
+    # A surviving payment record must only satisfy its recorded installment and
+    # later rows. This prevents a later payment from keeping a deleted earlier
+    # installment marked as paid.
+    installments = payment.installments.order_by('payment_date', 'created_at', 'pk')
+    for installment in installments:
+        remaining_paid = Decimal(str(installment.amount or 0))
+        start_index = max(int(installment.installment_index or 1) - 1, 0)
+        for item in summary[start_index:]:
+            if remaining_paid <= 0:
+                break
+            pending_amount = max(item['required_amount'] - item['paid_amount'], Decimal('0'))
+            paid_amount = min(remaining_paid, pending_amount)
+            item['paid_amount'] += paid_amount
+            remaining_paid -= paid_amount
+
+    for item in summary:
+        required_amount = item['required_amount']
+        paid_amount = item['paid_amount']
         pending_amount = max(required_amount - paid_amount, Decimal('0'))
         if paid_amount >= required_amount and required_amount > 0:
             status = 'paid'
@@ -1425,16 +1457,8 @@ def build_payment_installment_summary_from_records(payment):
             status = 'partial'
         else:
             status = 'pending'
-        due_date = item.get('due_date')
-        summary.append({
-            'index': index,
-            'label': item.get('label') or f'{index} Installment',
-            'required_amount': required_amount,
-            'paid_amount': paid_amount,
-            'pending_amount': pending_amount,
-            'status': status,
-            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
-        })
+        item['pending_amount'] = pending_amount
+        item['status'] = status
     return summary
 
 
