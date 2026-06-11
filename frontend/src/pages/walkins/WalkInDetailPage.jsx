@@ -9,6 +9,12 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import { FOLLOW_UP_SUCCESS_MESSAGE, resolveReturnTo } from '../../utils/returnNavigation'
 
 const DIRECT_WALK_IN_BY = 'Direct'
+const FRIENDS_REFERENCE_WALK_IN_BY = 'Friends Reference'
+const FIXED_WALK_IN_BY_VALUES = [DIRECT_WALK_IN_BY, FRIENDS_REFERENCE_WALK_IN_BY]
+
+function isFixedWalkInBy(value) {
+  return FIXED_WALK_IN_BY_VALUES.includes(value)
+}
 
 function prettyValue(value, fallback = '') {
   return value || fallback
@@ -265,7 +271,7 @@ export default function WalkInDetailPage() {
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
-        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
+        assigned_to: isFixedWalkInBy(data.walk_in_by) ? data.walk_in_by : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
         enrollment_date: todayInputValue(),
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
@@ -463,7 +469,7 @@ export default function WalkInDetailPage() {
       year_of_passing: walkin.year_of_passing || '',
       college_company: walkin.college_company || '',
         visit_date: walkin.visit_date || '',
-        assigned_to: walkin.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : walkin.assigned_to || '',
+        assigned_to: isFixedWalkInBy(walkin.walk_in_by) ? walkin.walk_in_by : walkin.assigned_to || '',
         counseling_by: walkin.counseling_by || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
@@ -522,7 +528,7 @@ export default function WalkInDetailPage() {
         year_of_passing: data.year_of_passing || '',
         college_company: data.college_company || '',
         visit_date: data.visit_date || '',
-        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
+        assigned_to: isFixedWalkInBy(data.walk_in_by) ? data.walk_in_by : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
@@ -538,8 +544,8 @@ export default function WalkInDetailPage() {
 
   const saveAssignments = async () => {
     const payload = {}
-    if (!walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY && form.assigned_to) {
-      if (form.assigned_to === DIRECT_WALK_IN_BY) payload.walk_in_by = DIRECT_WALK_IN_BY
+    if (!walkin.assigned_to && !isFixedWalkInBy(walkin.walk_in_by) && form.assigned_to) {
+      if (isFixedWalkInBy(form.assigned_to)) payload.walk_in_by = form.assigned_to
       else payload.assigned_to = Number(form.assigned_to)
     }
     if (!walkin.counseling_by && form.counseling_by) payload.counseling_by = Number(form.counseling_by)
@@ -553,7 +559,7 @@ export default function WalkInDetailPage() {
       setWalkin(data)
       setForm((current) => ({
         ...current,
-        assigned_to: data.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : data.assigned_to || '',
+        assigned_to: isFixedWalkInBy(data.walk_in_by) ? data.walk_in_by : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
       }))
       setAssignmentEditing(false)
@@ -568,7 +574,7 @@ export default function WalkInDetailPage() {
   const cancelAssignmentEdit = () => {
     setForm((current) => ({
       ...current,
-      assigned_to: walkin.walk_in_by === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : walkin.assigned_to || '',
+      assigned_to: isFixedWalkInBy(walkin.walk_in_by) ? walkin.walk_in_by : walkin.assigned_to || '',
       counseling_by: walkin.counseling_by || '',
     }))
     setAssignmentEditing(false)
@@ -594,8 +600,8 @@ export default function WalkInDetailPage() {
     try {
       await api.post(`/walkins/${id}/request-assignment-change/`, {
         field_type: fieldType,
-        requested_user: requestedUser === DIRECT_WALK_IN_BY ? null : Number(requestedUser),
-        requested_walk_in_by: requestedUser === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : '',
+        requested_user: isFixedWalkInBy(requestedUser) ? null : Number(requestedUser),
+        requested_walk_in_by: isFixedWalkInBy(requestedUser) ? requestedUser : '',
         reason,
       })
       setAssignmentRequest({ requested_user: '', reason: '' })
@@ -640,7 +646,7 @@ export default function WalkInDetailPage() {
   const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id || walkin.status === 'converted')
   const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
   const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
-  const canAssignEmptyOwnership = (!walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY) || !walkin.counseling_by
+  const canAssignEmptyOwnership = (!walkin.assigned_to && !isFixedWalkInBy(walkin.walk_in_by)) || !walkin.counseling_by
 
   return (
     <div className="space-y-6">
@@ -787,21 +793,22 @@ export default function WalkInDetailPage() {
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
-              {assignmentEditing && !walkin.assigned_to && walkin.walk_in_by !== DIRECT_WALK_IN_BY ? (
+              {assignmentEditing && !walkin.assigned_to && !isFixedWalkInBy(walkin.walk_in_by) ? (
                 <select
                   value={form.assigned_to || ''}
                   onChange={(event) => setForm((current) => ({ ...current, assigned_to: event.target.value }))}
                   className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
                 >
                   <option value="">Select Walk-in By</option>
-                  {walkInByUsers.map((staff) => (
-                    <option key={staff.id} value={staff.id}>{staff.name}</option>
-                  ))}
+                  {walkInByUsers.map((staff, index) => [
+                    index === 2 ? <option key="walk-in-by-separator" disabled>-----------------</option> : null,
+                    <option key={staff.id} value={staff.id}>{staff.name}</option>,
+                  ])}
                 </select>
               ) : (
                 <>
                   <p className="mt-2 font-semibold text-slate-900">{walkInByLabel(walkin)}</p>
-                  {walkin.assigned_to || walkin.walk_in_by === DIRECT_WALK_IN_BY ? (
+                  {walkin.assigned_to || isFixedWalkInBy(walkin.walk_in_by) ? (
                     <>
                       <p className="mt-1 text-xs font-medium text-slate-500">Locked after assignment</p>
                       <button type="button" onClick={() => openAssignmentChangeRequest('assigned_to')} className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 hover:bg-amber-100">
@@ -1097,9 +1104,12 @@ export default function WalkInDetailPage() {
                   className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900"
                 >
                   <option value="">Select user</option>
-                  {requestUsersFor(changeRequestModal.fieldType).map((staff) => (
-                    <option key={staff.id} value={staff.id}>{staff.name}</option>
-                  ))}
+                  {requestUsersFor(changeRequestModal.fieldType).map((staff, index) => [
+                    changeRequestModal.fieldType === 'assigned_to' && index === 2
+                      ? <option key="walk-in-by-request-separator" disabled>-----------------</option>
+                      : null,
+                    <option key={staff.id} value={staff.id}>{staff.name}</option>,
+                  ])}
                 </select>
               </label>
               <label className="block">

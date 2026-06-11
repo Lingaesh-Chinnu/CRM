@@ -5,6 +5,8 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 
 const DIRECT_WALK_IN_BY = 'Direct'
+const FRIENDS_REFERENCE_WALK_IN_BY = 'Friends Reference'
+const FIXED_WALK_IN_BY_VALUES = [DIRECT_WALK_IN_BY, FRIENDS_REFERENCE_WALK_IN_BY]
 
 const initialForm = {
   branch: '',
@@ -148,8 +150,8 @@ export default function WalkInCreatePage() {
         ...form,
         branch: form.branch ? Number(form.branch) : null,
         course: form.course ? Number(form.course) : null,
-        assigned_to: form.assigned_to && form.assigned_to !== DIRECT_WALK_IN_BY ? Number(form.assigned_to) : null,
-        walk_in_by: form.assigned_to === DIRECT_WALK_IN_BY ? DIRECT_WALK_IN_BY : '',
+        assigned_to: form.assigned_to && !FIXED_WALK_IN_BY_VALUES.includes(form.assigned_to) ? Number(form.assigned_to) : null,
+        walk_in_by: FIXED_WALK_IN_BY_VALUES.includes(form.assigned_to) ? form.assigned_to : '',
         dob: form.dob || null,
         visit_date: form.visit_date,
         follow_up_date: form.follow_up_date || null,
@@ -322,7 +324,10 @@ export default function WalkInCreatePage() {
             <FieldLabel>Walk-in By</FieldLabel>
             <select value={form.assigned_to} onChange={(event) => updateForm('assigned_to', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" required>
               <option value="">Select Walk-in By</option>
-              {walkInByOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+              {walkInByOptions.map((option, index) => [
+                index === 2 ? <option key="walk-in-by-separator" disabled>-----------------</option> : null,
+                <option key={option.id} value={option.id}>{option.name}</option>,
+              ])}
             </select>
           </div>
           <div className="md:col-span-2">

@@ -470,6 +470,21 @@ class PublicWalkInFormTests(APITestCase):
             branch=self.other_branch,
             role=User.Role.STAFF,
         )
+        self.disabled_staff = User.objects.create_user(
+            username='disabled-staff',
+            email='disabled-staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+            is_active=False,
+        )
+        self.branch_admin = User.objects.create_user(
+            username='branch-admin',
+            email='branch-admin@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.SUPER_ADMIN,
+        )
         self.admin = User.objects.create_superuser(
             username='admin',
             email='admin@example.com',
@@ -516,10 +531,13 @@ class PublicWalkInFormTests(APITestCase):
         walkin_by_response = self.client.get('/api/walkins/walk-in-by-options/')
         self.assertEqual(walkin_by_response.status_code, 200)
         self.assertEqual(walkin_by_response.data[0]['id'], WalkIn.WalkInBy.DIRECT)
+        self.assertEqual(walkin_by_response.data[1]['id'], WalkIn.WalkInBy.FRIENDS_REFERENCE)
         walkin_by_ids = {row['id'] for row in walkin_by_response.data}
         self.assertIn(self.staff.id, walkin_by_ids)
         self.assertIn(self.other_staff.id, walkin_by_ids)
         self.assertNotIn(self.admin.id, walkin_by_ids)
+        self.assertNotIn(self.branch_admin.id, walkin_by_ids)
+        self.assertNotIn(self.disabled_staff.id, walkin_by_ids)
 
         counseling_options_response = self.client.get('/api/walkins/staff-options/', {'branch': self.branch.id})
         self.assertEqual(counseling_options_response.status_code, 200)
@@ -581,6 +599,77 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(report_response.status_code, 200)
         staff_row = next(row for row in report_response.data if row['user_id'] == self.staff.id)
         self.assertEqual(staff_row['walkins'], 1)
+
+    def test_friends_reference_is_stored_and_reported_separately(self):
+        self.client.force_authenticate(self.staff)
+        friends_response = self.client.post('/api/walkins/', {
+            **self.payload,
+            'walk_in_by': WalkIn.WalkInBy.FRIENDS_REFERENCE,
+            'assigned_to': None,
+        }, format='json')
+        self.assertEqual(friends_response.status_code, 201)
+
+        WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            created_by=self.staff,
+            assigned_to=self.staff,
+            name='Staff Referral Candidate',
+            phone='9876543213',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.DIRECT,
+            visit_date='2026-05-11',
+        )
+        friends_walkin = WalkIn.objects.get(pk=friends_response.data['id'])
+        self.assertEqual(friends_walkin.walk_in_by, WalkIn.WalkInBy.FRIENDS_REFERENCE)
+        self.assertIsNone(friends_walkin.assigned_to)
+
+        self.client.force_authenticate(self.admin)
+        analytics_response = self.client.get('/api/reports/analytics-dashboard/', {
+            'date_from': '2026-05-01',
+            'date_to': '2026-05-31',
+        })
+        self.assertEqual(analytics_response.status_code, 200)
+        self.assertEqual(analytics_response.data['metrics']['direct_walkins'], 0)
+        self.assertEqual(analytics_response.data['metrics']['friends_reference_walkins'], 1)
+        self.assertEqual(analytics_response.data['metrics']['staff_referrals'], 1)
+
+    def test_assigned_walkin_can_change_to_friends_reference_through_admin_approval(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            created_by=self.staff,
+            assigned_to=self.staff,
+            name='Friends Reference Change Candidate',
+            phone='9876543214',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.FRIENDS_REFERENCE,
+            visit_date='2026-05-11',
+        )
+        self.client.force_authenticate(self.staff)
+        request_response = self.client.post(
+            f'/api/walkins/{walkin.id}/request-assignment-change/',
+            {
+                'field_type': WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY,
+                'requested_walk_in_by': WalkIn.WalkInBy.FRIENDS_REFERENCE,
+                'reason': 'Candidate confirmed a friend recommendation.',
+            },
+            format='json',
+        )
+        self.assertEqual(request_response.status_code, 201)
+        change_request = WalkInAssignmentChangeRequest.objects.get(walkin=walkin)
+        self.assertEqual(change_request.status, WalkInAssignmentChangeRequest.Status.PENDING_ADMIN)
+
+        self.client.force_authenticate(self.admin)
+        approve_response = self.client.post(
+            f'/api/walkin-assignment-change-requests/{change_request.id}/approve/',
+            {'admin_remarks': 'Confirmed friend referral.'},
+            format='json',
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertIsNone(walkin.assigned_to)
+        self.assertEqual(walkin.walk_in_by, WalkIn.WalkInBy.FRIENDS_REFERENCE)
 
     def test_assigned_walkin_can_change_to_direct_through_admin_approval(self):
         walkin = WalkIn.objects.create(

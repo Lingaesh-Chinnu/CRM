@@ -1144,10 +1144,14 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         attrs = super().validate(attrs)
         initial_data = getattr(self, 'initial_data', {})
-        direct_selected = initial_data.get('walk_in_by') == WalkIn.WalkInBy.DIRECT
+        fixed_walk_in_by = initial_data.get('walk_in_by')
+        fixed_selected = fixed_walk_in_by in (
+            WalkIn.WalkInBy.DIRECT,
+            WalkIn.WalkInBy.FRIENDS_REFERENCE,
+        )
         assigned_to = attrs.get('assigned_to', getattr(self.instance, 'assigned_to', None))
-        if direct_selected:
-            attrs['walk_in_by'] = WalkIn.WalkInBy.DIRECT
+        if fixed_selected:
+            attrs['walk_in_by'] = fixed_walk_in_by
             attrs['assigned_to'] = None
         elif 'assigned_to' in attrs and attrs.get('assigned_to'):
             attrs['walk_in_by'] = ''
@@ -1166,7 +1170,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     field: 'This field is required.' for field in missing
                 })
-            if not direct_selected and not assigned_to:
+            if not fixed_selected and not assigned_to:
                 raise serializers.ValidationError({'walk_in_by': 'Select Walk-in By.'})
         return attrs
 

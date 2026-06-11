@@ -570,7 +570,8 @@ class WalkIn(TimeStampedModel):
         LEAD_CONVERSION   = 'lead_conversion',   'Lead Conversion'
 
     class WalkInBy(models.TextChoices):
-        DIRECT       = 'Direct',       'Direct'
+        DIRECT            = 'Direct',            'Direct'
+        FRIENDS_REFERENCE = 'Friends Reference', 'Friends Reference'
         LINCY_SCANIA = 'lincy_scania', 'Mrs. Lincy Scania'
         RANGANAYAGI  = 'ranganayagi',  'Mrs. Ranganayagi'
         PAVITHRA     = 'pavithra',     'Ms. Pavithra'

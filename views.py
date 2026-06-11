@@ -1048,23 +1048,24 @@ def validate_walkin_assignment_user(walkin, field_type, user):
 def create_walkin_assignment_change_request(walkin, field_type, requested_user, requested_by, reason, requested_walk_in_by=''):
     field_name = walkin_assignment_user_field(field_type)
     previous_user = getattr(walkin, field_name)
-    requested_direct = (
+    fixed_walk_in_by_values = (WalkIn.WalkInBy.DIRECT, WalkIn.WalkInBy.FRIENDS_REFERENCE)
+    requested_fixed_walk_in_by = (
         field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY
-        and requested_walk_in_by == WalkIn.WalkInBy.DIRECT
+        and requested_walk_in_by in fixed_walk_in_by_values
     )
-    current_direct = (
+    current_fixed_walk_in_by = (
         field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY
-        and walkin.walk_in_by == WalkIn.WalkInBy.DIRECT
+        and walkin.walk_in_by in fixed_walk_in_by_values
     )
-    if requested_direct:
+    if requested_fixed_walk_in_by:
         requested_user = None
     else:
         validate_walkin_assignment_user(walkin, field_type, requested_user)
     if previous_user and requested_user and previous_user.id == requested_user.id:
         raise ValueError('This user is already assigned.')
-    if requested_direct and current_direct:
-        raise ValueError('Walk-in By is already Direct.')
-    if not previous_user and not current_direct:
+    if requested_fixed_walk_in_by and walkin.walk_in_by == requested_walk_in_by:
+        raise ValueError(f'Walk-in By is already {requested_walk_in_by}.')
+    if not previous_user and not current_fixed_walk_in_by:
         raise ValueError('This field is empty. Assign it directly before using change requests.')
     if not str(reason or '').strip():
         raise ValueError('Reason for change is required.')
@@ -1087,12 +1088,12 @@ def create_walkin_assignment_change_request(walkin, field_type, requested_user, 
         previous_user=previous_user,
         previous_walk_in_by=walkin.walk_in_by if field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY else '',
         requested_user=requested_user,
-        requested_walk_in_by=WalkIn.WalkInBy.DIRECT if requested_direct else '',
+        requested_walk_in_by=requested_walk_in_by if requested_fixed_walk_in_by else '',
         requested_by=requested_by,
         reason=str(reason or '').strip(),
         status=(
             WalkInAssignmentChangeRequest.Status.PENDING_ADMIN
-            if requested_direct
+            if requested_fixed_walk_in_by
             else WalkInAssignmentChangeRequest.Status.PENDING_COUNSELOR
         ),
     )
@@ -1100,8 +1101,8 @@ def create_walkin_assignment_change_request(walkin, field_type, requested_user, 
     field_label = change_request.get_field_type_display()
     message = (
         f'{walkin.name} {field_label} change requested: '
-        f'{WalkIn.WalkInBy.DIRECT if current_direct else (previous_user.full_name if previous_user else "Unassigned")} to '
-        f'{WalkIn.WalkInBy.DIRECT if requested_direct else (requested_user.full_name or requested_user.username)}.'
+        f'{walkin.walk_in_by if current_fixed_walk_in_by else (previous_user.full_name if previous_user else "Unassigned")} to '
+        f'{requested_walk_in_by if requested_fixed_walk_in_by else (requested_user.full_name or requested_user.username)}.'
     )
     if requested_user:
         create_user_notification(
@@ -1149,13 +1150,16 @@ def approve_walkin_assignment_by_counselor(change_request, counselor_user, remar
 def apply_walkin_assignment_change(change_request, admin_user, remarks=''):
     field_name = walkin_assignment_user_field(change_request.field_type)
     walkin = WalkIn.objects.select_for_update().get(pk=change_request.walkin_id)
-    requested_direct = (
+    requested_fixed_walk_in_by = (
         change_request.field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY
-        and change_request.requested_walk_in_by == WalkIn.WalkInBy.DIRECT
+        and change_request.requested_walk_in_by in (
+            WalkIn.WalkInBy.DIRECT,
+            WalkIn.WalkInBy.FRIENDS_REFERENCE,
+        )
     )
-    if requested_direct:
+    if requested_fixed_walk_in_by:
         walkin.assigned_to = None
-        walkin.walk_in_by = WalkIn.WalkInBy.DIRECT
+        walkin.walk_in_by = change_request.requested_walk_in_by
         walkin.save(update_fields=['assigned_to', 'walk_in_by', 'updated_at'])
     else:
         validate_walkin_assignment_user(walkin, change_request.field_type, change_request.requested_user)
@@ -2307,7 +2311,11 @@ def performance_metrics(scope, start_date, end_date):
     leads_count = leads.count()
     walkins_count = walkins.count()
     direct_walkins_count = walkins.filter(walk_in_by=WalkIn.WalkInBy.DIRECT, assigned_to__isnull=True).count()
-    staff_generated_walkins_count = walkins.filter(assigned_to__isnull=False).count()
+    friends_reference_walkins_count = walkins.filter(
+        walk_in_by=WalkIn.WalkInBy.FRIENDS_REFERENCE,
+        assigned_to__isnull=True,
+    ).count()
+    staff_referrals_count = walkins.filter(assigned_to__isnull=False).count()
     enrollments_count = enrollments.count()
     converted_walkins = walkins.filter(status=WalkIn.Status.CONVERTED).count()
     revenue = enrollment_value(enrollments)
@@ -2315,7 +2323,9 @@ def performance_metrics(scope, start_date, end_date):
         'leads': leads_count,
         'walkins': walkins_count,
         'direct_walkins': direct_walkins_count,
-        'staff_generated_walkins': staff_generated_walkins_count,
+        'friends_reference_walkins': friends_reference_walkins_count,
+        'staff_referrals': staff_referrals_count,
+        'staff_generated_walkins': staff_referrals_count,
         'walkins_converted': converted_walkins,
         'enrollments': enrollments_count,
         'conversion_ratio': ratio(enrollments_count, leads_count),
@@ -2612,6 +2622,9 @@ class PerformanceHubView(APIView):
         comparison = performance_comparison_rows(current, previous, [
             ('leads', 'Total Leads'),
             ('walkins', 'Total Walk-ins'),
+            ('direct_walkins', 'Direct Walk-ins'),
+            ('friends_reference_walkins', 'Friends Reference'),
+            ('staff_referrals', 'Staff Referrals'),
             ('enrollments', 'Total Enrollments'),
             ('conversion_ratio', 'Conversion %'),
             ('revenue', 'Revenue Generated'),
@@ -2756,6 +2769,9 @@ class PerformanceHubView(APIView):
             ('revenue', 'Branch Revenue'),
             ('leads', 'Branch Leads'),
             ('walkins', 'Branch Walk-ins'),
+            ('direct_walkins', 'Branch Direct Walk-ins'),
+            ('friends_reference_walkins', 'Branch Friends Reference'),
+            ('staff_referrals', 'Branch Staff Referrals'),
             ('enrollments', 'Branch Enrollments'),
             ('conversion_ratio', 'Branch Conversion %'),
         ])
@@ -6767,8 +6783,11 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         branch = self.request.user.branch if not self.request.user.is_super_admin else None
         assigned_to = serializer.validated_data.get('assigned_to')
-        direct_selected = serializer.validated_data.get('walk_in_by') == WalkIn.WalkInBy.DIRECT
-        if not assigned_to and not direct_selected and not self.request.user.is_super_admin:
+        fixed_walk_in_by_selected = serializer.validated_data.get('walk_in_by') in (
+            WalkIn.WalkInBy.DIRECT,
+            WalkIn.WalkInBy.FRIENDS_REFERENCE,
+        )
+        if not assigned_to and not fixed_walk_in_by_selected and not self.request.user.is_super_admin:
             assigned_to = self.request.user
         serializer.save(
             created_by=self.request.user,
@@ -6824,7 +6843,11 @@ class WalkInViewSet(viewsets.ModelViewSet):
         rows = [{
             'id': WalkIn.WalkInBy.DIRECT,
             'name': 'Direct',
-            'is_direct': True,
+            'is_fixed': True,
+        }, {
+            'id': WalkIn.WalkInBy.FRIENDS_REFERENCE,
+            'name': 'Friends Reference',
+            'is_fixed': True,
         }]
         seen = set()
         for user in users:
@@ -6863,12 +6886,21 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 data['counseling_by'] = None
         data.pop('branch_change_reason', None)
 
-        requested_direct = data.get('walk_in_by') == WalkIn.WalkInBy.DIRECT
+        requested_fixed_walk_in_by = data.get('walk_in_by') in (
+            WalkIn.WalkInBy.DIRECT,
+            WalkIn.WalkInBy.FRIENDS_REFERENCE,
+        )
         assigned_to = data.get('assigned_to')
         if assigned_to in ('', None) and 'assigned_to' in data:
             assigned_to = None
-        if requested_direct:
-            if walkin.assigned_to_id:
+        if requested_fixed_walk_in_by:
+            if walkin.assigned_to_id or (
+                walkin.walk_in_by in (
+                    WalkIn.WalkInBy.DIRECT,
+                    WalkIn.WalkInBy.FRIENDS_REFERENCE,
+                )
+                and walkin.walk_in_by != data.get('walk_in_by')
+            ):
                 return Response({'detail': 'Walk-in By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
             data['assigned_to'] = None
             assigned_to = None
@@ -6882,12 +6914,15 @@ class WalkInViewSet(viewsets.ModelViewSet):
             if not user_qs.exists():
                 return Response({'detail': 'Select a valid active staff user for Walk-in By.'}, status=status.HTTP_400_BAD_REQUEST)
             if (
-                (walkin.assigned_to_id or walkin.walk_in_by == WalkIn.WalkInBy.DIRECT)
+                (walkin.assigned_to_id or walkin.walk_in_by in (
+                    WalkIn.WalkInBy.DIRECT,
+                    WalkIn.WalkInBy.FRIENDS_REFERENCE,
+                ))
                 and int(assigned_to) != walkin.assigned_to_id
             ):
                 return Response({'detail': 'Walk-in By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
             data['walk_in_by'] = ''
-        elif 'assigned_to' in data and walkin.assigned_to_id and not requested_direct:
+        elif 'assigned_to' in data and walkin.assigned_to_id and not requested_fixed_walk_in_by:
             return Response({'detail': 'Walk-in By is locked. Submit a change request.'}, status=status.HTTP_403_FORBIDDEN)
 
         counseling_by = data.get('counseling_by')
@@ -6939,14 +6974,17 @@ class WalkInViewSet(viewsets.ModelViewSet):
         requested_user_id = request.data.get('requested_user')
         requested_walk_in_by = request.data.get('requested_walk_in_by', '')
         reason = request.data.get('reason', '')
-        requested_direct = (
+        requested_fixed_walk_in_by = (
             field_type == WalkInAssignmentChangeRequest.FieldType.WALK_IN_BY
-            and requested_walk_in_by == WalkIn.WalkInBy.DIRECT
+            and requested_walk_in_by in (
+                WalkIn.WalkInBy.DIRECT,
+                WalkIn.WalkInBy.FRIENDS_REFERENCE,
+            )
         )
-        if not requested_user_id and not requested_direct:
+        if not requested_user_id and not requested_fixed_walk_in_by:
             return Response({'detail': 'Select the requested user.'}, status=status.HTTP_400_BAD_REQUEST)
         requested_user = User.objects.filter(pk=requested_user_id, is_active=True).first() if requested_user_id else None
-        if not requested_user and not requested_direct:
+        if not requested_user and not requested_fixed_walk_in_by:
             return Response({'detail': 'Select a valid active user.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
             change_request = create_walkin_assignment_change_request(

@@ -245,7 +245,7 @@ export default function ReportsPage() {
               value={analytics.metrics.walkins}
               change={analytics.changes.walkins}
               tone="walkins"
-              detail={`Direct ${analytics.metrics.direct_walkins || 0} | Staff-generated ${analytics.metrics.staff_generated_walkins || 0}`}
+              detail={`Direct ${analytics.metrics.direct_walkins || 0} | Friends Reference ${analytics.metrics.friends_reference_walkins || 0} | Staff Referrals ${analytics.metrics.staff_referrals || 0}`}
             />
             <AnalyticsCard label="Enrollments" value={analytics.metrics.enrollments} change={analytics.changes.enrollments} tone="enrollments" />
             <AnalyticsCard label="Revenue" value={currency(analytics.metrics.revenue)} change={analytics.changes.revenue} tone="revenue" />
