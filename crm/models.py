@@ -890,8 +890,8 @@ def enrollment_payable_fee(enrollment):
     return enrollment.net_payable_fee if enrollment.net_payable_fee is not None else enrollment.final_fees
 
 
-PAYMENT_SPLIT_THRESHOLD = 7000
 ENROLLMENT_PAYMENT_AMOUNT = 5000
+MIN_INSTALLMENT_AMOUNT = 5000
 
 
 def _split_integer_amount(total_amount, parts):
@@ -936,16 +936,17 @@ def get_default_installment_schedule(enrollment, split_count=2):
     enrollment_date = enrollment.enrollment_date
     first_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
 
-    if final_fees <= PAYMENT_SPLIT_THRESHOLD:
-        return [{
-            'label': 'Full Payment',
-            'amount': final_fees,
-            'due_date': enrollment_date,
-        }]
+    if final_fees < ENROLLMENT_PAYMENT_AMOUNT:
+        return []
 
-    split_count = min(max(int(split_count or 2), 2), 12)
     remaining = max(final_fees - ENROLLMENT_PAYMENT_AMOUNT, 0)
     rows = [{'label': 'Enrollment', 'amount': ENROLLMENT_PAYMENT_AMOUNT, 'due_date': enrollment_date}]
+    if not remaining:
+        return rows
+
+    requested_count = min(max(int(split_count or 2), 1), 12)
+    max_count = max(((remaining - 1) // MIN_INSTALLMENT_AMOUNT) + 1, 1)
+    split_count = min(requested_count, max_count)
     due_date = first_due_date
     for index, amount in enumerate(_split_integer_amount(remaining, split_count), start=1):
         rows.append({'label': _installment_label(index), 'amount': amount, 'due_date': due_date})

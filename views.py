@@ -84,7 +84,7 @@ from crm.models import (
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory, WalkInAssignmentChangeRequest,
     get_default_installment_schedule, get_enrollment_installment_schedule, get_saved_enrollment_installment_schedule,
     normalize_installment_schedule,
-    enrollment_payable_fee, PAYMENT_SPLIT_THRESHOLD,
+    enrollment_payable_fee, ENROLLMENT_PAYMENT_AMOUNT, MIN_INSTALLMENT_AMOUNT,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -7626,6 +7626,22 @@ def binary_or_legacy_file(signing, binary_field, legacy_field):
     return None
 
 
+def latest_signed_rules_pdf(signing):
+    signature_bytes = binary_or_legacy_file(signing, 'signature_image_file', 'signature_image')
+    selfie_bytes = binary_or_legacy_file(signing, 'selfie_image_file', 'selfie_image')
+    if signature_bytes:
+        try:
+            return build_signed_rules_pdf(
+                signing.enrollment,
+                signature_bytes=signature_bytes,
+                selfie_bytes=selfie_bytes,
+                submitted_at=signing.submitted_at,
+            )
+        except Exception:
+            logger.exception('Dynamic signed rules PDF generation failed for enrollment=%s.', signing.enrollment_id)
+    return binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+
+
 class RulesSignedPdfView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
@@ -7637,13 +7653,13 @@ class RulesSignedPdfView(APIView):
             'signed_pdf_file',
             'submitted_ip',
             'submitted_user_agent',
-        ).select_related('enrollment__branch').filter(enrollment_id=enrollment_id).first()
+        ).select_related('enrollment__branch', 'enrollment__course').filter(enrollment_id=enrollment_id).first()
         if not signing:
             return proof_unavailable_response()
         enrollment = signing.enrollment
         if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
             return Response({'detail': 'You do not have permission to view this signed PDF.'}, status=403)
-        pdf_bytes = binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+        pdf_bytes = latest_signed_rules_pdf(signing)
         if not pdf_bytes:
             return proof_unavailable_response()
         resolve_rules_signed_notifications(enrollment.id)
@@ -7687,13 +7703,13 @@ class PublicRulesSignedPdfView(APIView):
             'signed_pdf_file',
             'submitted_ip',
             'submitted_user_agent',
-        ).select_related('enrollment').filter(
+        ).select_related('enrollment__course', 'enrollment__branch').filter(
             token=token,
             status=RulesSigningRequest.Status.SUBMITTED,
         ).first()
         if not signing:
             return proof_unavailable_response()
-        pdf_bytes = binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+        pdf_bytes = latest_signed_rules_pdf(signing)
         if not pdf_bytes:
             return proof_unavailable_response()
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
@@ -8180,9 +8196,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         cleaned = []
         total = Decimal('0')
         expected_total = Decimal(str(enrollment_payable_fee(enrollment) or 0)).quantize(Decimal('0.01'))
-        full_payment_only = expected_total <= Decimal(str(PAYMENT_SPLIT_THRESHOLD))
-        if full_payment_only and len(schedule) != 1:
-            return None, 'Courses up to Rs 7,000 must use Full Payment only.'
+        if expected_total < Decimal(str(ENROLLMENT_PAYMENT_AMOUNT)):
+            return None, 'Course fee must be at least Rs 5,000.'
         for index, item in enumerate(schedule, start=1):
             if not isinstance(item, dict):
                 return None, 'Each payment schedule row must be valid.'
@@ -8198,13 +8213,21 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 return None, 'Installment amount must be numeric.'
             if not amount.is_finite() or amount <= 0:
                 return None, 'Installment amount must be greater than zero.'
+            if index == 1 and amount != Decimal(str(ENROLLMENT_PAYMENT_AMOUNT)):
+                return None, 'Enrollment Fee must be Rs 5,000.'
+            if index > 1 and index < len(schedule) and amount < Decimal(str(MIN_INSTALLMENT_AMOUNT)):
+                return None, 'Each installment must be Rs 5,000 or above.'
+            if index > 1 and index == len(schedule) and amount < Decimal(str(MIN_INSTALLMENT_AMOUNT)):
+                pending_before_final = expected_total - total
+                if amount != pending_before_final:
+                    return None, 'Each installment must be Rs 5,000 or above.'
             due_date = parse_date(str(raw_due_date))
             if not due_date:
                 return None, 'Each installment needs a valid due date.'
             total += amount
             amount = amount.quantize(Decimal('0.01'))
             cleaned.append({
-                'label': str(item.get('label') or '').strip() or f'{index} Installment',
+                'label': 'Enrollment' if index == 1 else (str(item.get('label') or '').strip() or f'{index - 1} Installment'),
                 'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
                 'due_date': due_date.isoformat(),
             })
@@ -8212,13 +8235,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return None, 'Installment total cannot exceed course fee.'
         if total.quantize(Decimal('0.01')) != expected_total:
             return None, 'Payment schedule total must match net payable fee.'
-        if full_payment_only and cleaned[0]['label'] != 'Full Payment':
-            cleaned[0]['label'] = 'Full Payment'
         return normalize_installment_schedule(cleaned), ''
 
     def _ensure_enrollment_schedule(self, enrollment, split_count=None, lock=False):
         payable_fee = int(round(float(enrollment_payable_fee(enrollment) or 0)))
-        if payable_fee <= PAYMENT_SPLIT_THRESHOLD or split_count is not None or not enrollment.payment_schedule:
+        if split_count is not None or not enrollment.payment_schedule:
             schedule, error = self._schedule_from_split_count(enrollment, split_count or 2)
             if error:
                 raise ValueError(error)
@@ -9780,7 +9801,14 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if not isinstance(schedule, list) or not schedule:
             return Response({'detail': 'Payment schedule is required.'}, status=400)
         cleaned = []
-        total_fees = Decimal('0')
+        schedule_total = Decimal('0')
+        expected_total = Decimal(str(payment.total_fees or 0)).quantize(Decimal('0.01'))
+        summary = payment_installment_summary(payment)
+        locked_rows = {
+            item['index']: item
+            for item in summary
+            if Decimal(str(item.get('paid_amount') or 0)) > 0
+        }
         for index, item in enumerate(schedule, start=1):
             amount = item.get('amount')
             due_date = item.get('due_date')
@@ -9795,17 +9823,36 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             if amount <= 0:
                 return Response({'detail': 'Installment amount must be greater than zero.'}, status=400)
             amount = amount.quantize(Decimal('0.01'))
+            if index == 1 and amount != Decimal(str(ENROLLMENT_PAYMENT_AMOUNT)):
+                return Response({'detail': 'Enrollment Fee must be Rs 5,000.'}, status=400)
+            if index > 1 and index < len(schedule) and amount < Decimal(str(MIN_INSTALLMENT_AMOUNT)):
+                return Response({'detail': 'Each installment must be Rs 5,000 or above.'}, status=400)
+            if index > 1 and index == len(schedule) and amount < Decimal(str(MIN_INSTALLMENT_AMOUNT)):
+                if amount != expected_total - schedule_total:
+                    return Response({'detail': 'Each installment must be Rs 5,000 or above.'}, status=400)
             parsed_due_date = parse_date(str(due_date))
             if not parsed_due_date:
                 return Response({'detail': 'Each installment needs a valid due date.'}, status=400)
-            total_fees += amount
-            cleaned.append({
-                'label': item.get('label') or f'{index} Installment',
+            schedule_total += amount
+            cleaned_row = {
+                'label': item.get('label') or ('Enrollment' if index == 1 else f'{index - 1} Installment'),
                 'amount': int(amount) if amount == amount.to_integral_value() else float(amount),
                 'due_date': parsed_due_date.isoformat(),
-            })
-        if total_fees <= 0:
-            return Response({'detail': 'Payment schedule total must be greater than zero.'}, status=400)
+            }
+            locked = locked_rows.get(index)
+            if locked:
+                current = get_payment_installment_schedule(payment)[index - 1]
+                current_due_date = current.get('due_date')
+                current_due_date = current_due_date.isoformat() if hasattr(current_due_date, 'isoformat') else current_due_date
+                if (
+                    Decimal(str(current.get('amount') or 0)).quantize(Decimal('0.01')) != amount
+                    or str(current.get('label') or '') != str(cleaned_row['label'])
+                    or str(current_due_date or '') != str(cleaned_row['due_date'] or '')
+                ):
+                    return Response({'detail': 'Existing paid installments cannot be modified.'}, status=400)
+            cleaned.append(cleaned_row)
+        if schedule_total != expected_total:
+            return Response({'detail': 'Payment schedule total must match course fee.'}, status=400)
         with transaction.atomic():
             payment = (
                 Payment.objects
@@ -9813,19 +9860,16 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 .select_related('enrollment')
                 .get(pk=payment.pk)
             )
-            payment.enrollment.custom_payable_fee = total_fees
-            payment.enrollment.net_payable_fee = total_fees
             payment.enrollment.payment_schedule = cleaned
             payment.enrollment.payment_schedule_locked = True
             payment.enrollment.payment_schedule_finalized_at = payment.enrollment.payment_schedule_finalized_at or timezone.now()
             payment.enrollment.save(update_fields=[
-                'custom_payable_fee', 'net_payable_fee', 'payment_schedule',
-                'payment_schedule_locked', 'payment_schedule_finalized_at', 'updated_at',
+                'payment_schedule', 'payment_schedule_locked',
+                'payment_schedule_finalized_at', 'updated_at',
             ])
             payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
-            payment.total_fees = total_fees
             payment.manual_installment_schedule = cleaned
-            payment.save(update_fields=['total_fees', 'manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
+            payment.save(update_fields=['manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
         resolve_payment_due_notifications_if_inactive(payment)
         return Response(PaymentSerializer(payment, context={'request': request}).data)
 

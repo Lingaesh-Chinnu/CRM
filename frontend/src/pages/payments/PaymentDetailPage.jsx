@@ -136,7 +136,7 @@ function validateSchedule(schedule) {
     return 'Payment schedule is required.'
   }
   let total = 0
-  for (const item of schedule) {
+  for (const [index, item] of schedule.entries()) {
     if (item.amount === '' || item.amount === null || item.amount === undefined) {
       return 'Each installment needs an amount.'
     }
@@ -144,9 +144,11 @@ function validateSchedule(schedule) {
     if (!Number.isFinite(amount)) {
       return 'Installment amounts must be numeric.'
     }
-    if (amount < 0) {
-      return 'Installment amount cannot be negative.'
+    if (amount <= 0) {
+      return 'Installment amount must be greater than zero.'
     }
+    if (index === 0 && amount !== 5000) return 'Enrollment Fee must be Rs 5,000.'
+    if (index > 0 && index < schedule.length - 1 && amount < 5000) return 'Each installment must be Rs 5,000 or above.'
     if (!item.due_date) {
       return 'Each installment needs a due date.'
     }
@@ -156,6 +158,41 @@ function validateSchedule(schedule) {
     return 'Payment schedule total must be greater than zero.'
   }
   return ''
+}
+
+function addPendingInstallment(schedule, summary) {
+  const rows = schedule.map((item, index) => ({
+    ...item,
+    paid_amount: Number(summary[index]?.paid_amount || 0),
+  }))
+  const firstPendingIndex = rows.findIndex((item) => item.paid_amount <= 0)
+  if (firstPendingIndex < 0) return null
+
+  const pendingRows = rows.slice(firstPendingIndex)
+  const pendingTotal = pendingRows.reduce((total, item) => total + Number(item.amount || 0), 0)
+  const nextCount = pendingRows.length + 1
+  if (pendingTotal <= (nextCount - 1) * 5000) return null
+
+  const base = Math.floor(pendingTotal / nextCount)
+  const amounts = base >= 5000
+    ? [...Array(nextCount).fill(base)]
+    : [...Array(nextCount - 1).fill(5000), pendingTotal - ((nextCount - 1) * 5000)]
+  if (base >= 5000) amounts[amounts.length - 1] += pendingTotal - (base * nextCount)
+
+  let dueDate = pendingRows[0]?.due_date || new Date().toISOString().slice(0, 10)
+  const rebuiltPending = amounts.map((amount, offset) => {
+    const existing = pendingRows[offset] || {}
+    const row = {
+      label: `${firstPendingIndex + offset}${['st', 'nd', 'rd'][firstPendingIndex + offset - 1] || 'th'} Installment`,
+      amount,
+      due_date: existing.due_date || dueDate,
+    }
+    const nextDate = new Date(`${row.due_date}T00:00:00`)
+    nextDate.setMonth(nextDate.getMonth() + 1)
+    dueDate = nextDate.toISOString().slice(0, 10)
+    return row
+  })
+  return [...rows.slice(0, firstPendingIndex).map(({ paid_amount, ...item }) => item), ...rebuiltPending]
 }
 
 export default function PaymentDetailPage() {
@@ -314,6 +351,16 @@ export default function PaymentDetailPage() {
     }
   }
 
+  const addScheduleInstallment = () => {
+    const next = addPendingInstallment(schedule, installmentSummary)
+    if (!next) {
+      setMessage('Remaining pending amount cannot be split into another valid installment.')
+      return
+    }
+    setSchedule(next)
+    setMessage('')
+  }
+
   const deletePayment = async () => {
     await api.delete(`/payments/${id}/`)
     navigate('/payments', {
@@ -412,14 +459,24 @@ export default function PaymentDetailPage() {
                 </p>
               </div>
               {isSuperAdmin && (
-                <button
-                  type="button"
-                  onClick={updateSchedule}
-                  disabled={saving}
-                  className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
-                >
-                  Save Schedule
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={addScheduleInstallment}
+                    disabled={saving}
+                    className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Add Installment
+                  </button>
+                  <button
+                    type="button"
+                    onClick={updateSchedule}
+                    disabled={saving}
+                    className="rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  >
+                    Save Schedule
+                  </button>
+                </div>
               )}
             </div>
             <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -432,8 +489,9 @@ export default function PaymentDetailPage() {
                     <div className="mt-3 space-y-3">
                       <input
                         type="number"
-                        min="0"
+                        min={index === 0 ? '5000' : '0.01'}
                         value={item.amount}
+                        disabled={index === 0 || Number(summary?.paid_amount || 0) > 0}
                         onChange={(event) => {
                           const next = [...schedule]
                           next[index] = { ...next[index], amount: event.target.value }
@@ -444,6 +502,7 @@ export default function PaymentDetailPage() {
                       <input
                         type="date"
                         value={item.due_date || ''}
+                        disabled={Number(summary?.paid_amount || 0) > 0}
                         onChange={(event) => {
                           const next = [...schedule]
                           next[index] = { ...next[index], due_date: event.target.value }

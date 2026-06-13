@@ -38,6 +38,16 @@ function splitAmount(total, parts) {
   return amounts
 }
 
+function splitInstallmentAmount(total, parts) {
+  const safeTotal = Math.max(Math.round(Number(total || 0)), 0)
+  const maxParts = Math.max(Math.floor((safeTotal - 1) / 5000) + 1, 1)
+  const count = Math.min(Math.max(Number(parts || 1), 1), maxParts)
+  if (count > 1 && Math.floor(safeTotal / count) < 5000) {
+    return [...Array(count - 1).fill(5000), safeTotal - ((count - 1) * 5000)]
+  }
+  return splitAmount(safeTotal, count)
+}
+
 function installmentLabel(index) {
   const known = {
     1: '1st Installment',
@@ -55,12 +65,11 @@ function buildSchedule(row, startDate, splitCount = 2) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
   const courseStartDate = startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
-  if (finalFees <= 7000) {
-    return [{ label: 'Full Payment', amount: finalFees, due_date: enrollmentDate, paid_amount: 0, pending_amount: finalFees, status: 'pending' }]
-  }
+  if (finalFees < 5000) return []
   let dueDate = courseStartDate
   const rows = [{ label: 'Enrollment', amount: 5000, due_date: enrollmentDate, paid_amount: 0, pending_amount: 5000, status: 'pending' }]
-  splitAmount(finalFees - 5000, Math.min(Math.max(Number(splitCount || 2), 2), 12)).forEach((amount, index) => {
+  splitInstallmentAmount(finalFees - 5000, Math.min(Math.max(Number(splitCount || 2), 1), 12)).forEach((amount, index) => {
+    if (amount <= 0) return
     rows.push({ label: installmentLabel(index + 1), amount, due_date: dueDate, paid_amount: 0, pending_amount: amount, status: 'pending' })
     dueDate = addOneMonth(dueDate) || dueDate
   })
@@ -69,13 +78,13 @@ function buildSchedule(row, startDate, splitCount = 2) {
 
 function recalculateInstallmentPlan(row, startDate, rows, installmentCount) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
-  if (finalFees <= 7000) return buildSchedule(row, startDate, 2)
+  if (finalFees < 5000) return []
 
   const existingRows = cloneSchedule(rows)
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
   let dueDate = existingRows[1]?.due_date || startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
-  const count = Math.min(Math.max(Number(installmentCount || existingRows.length - 1 || 2), 2), 12)
-  const amounts = splitAmount(finalFees - 5000, count)
+  const count = Math.min(Math.max(Number(installmentCount || existingRows.length - 1 || 1), 1), 12)
+  const amounts = splitInstallmentAmount(finalFees - 5000, count)
   const nextRows = [{
     label: 'Enrollment',
     amount: 5000,
@@ -154,10 +163,12 @@ function scheduleTotal(schedule) {
 function scheduleValidation(schedule, finalFees) {
   const rows = schedule || []
   if (!rows.length) return 'Payment schedule is required.'
-  if (finalFees <= 7000 && rows.length !== 1) return 'Courses up to Rs 7,000 use Full Payment only.'
-  for (const item of rows) {
+  if (finalFees < 5000) return 'Course fee must be at least Rs 5,000.'
+  for (const [index, item] of rows.entries()) {
     const amount = Number(item.amount)
     if (!Number.isFinite(amount) || amount <= 0) return 'Each installment amount must be greater than zero.'
+    if (index === 0 && amount !== 5000) return 'Enrollment Fee must be Rs 5,000.'
+    if (index > 0 && index < rows.length - 1 && amount < 5000) return 'Each installment must be Rs 5,000 or above.'
     if (!item.due_date) return 'Each installment needs a due date.'
   }
   const total = Math.round(scheduleTotal(rows) * 100) / 100
@@ -553,12 +564,14 @@ export default function EnrollmentDetailPage() {
       setMessage('Course start date is required before adding an installment.')
       return
     }
-    if (finalFees <= 7000) {
-      setMessage('Courses up to Rs 7,000 use Full Payment only.')
+    const currentRows = scheduleDraft.length ? scheduleDraft : schedule
+    const pendingBalance = finalFees - 5000
+    const currentInstallmentCount = Math.max(currentRows.length - 1, 0)
+    const nextSplitCount = currentInstallmentCount + 1
+    if (pendingBalance <= currentInstallmentCount * 5000) {
+      setMessage('Remaining pending amount cannot be split into another valid installment.')
       return
     }
-    const currentRows = scheduleDraft.length ? scheduleDraft : schedule
-    const nextSplitCount = Math.min(Math.max(currentRows.length, 2), 12)
     setSplitCount(nextSplitCount)
     setScheduleDraft(recalculateInstallmentPlan(row, startDate, currentRows, nextSplitCount))
     setEditingSchedule(true)
@@ -618,7 +631,7 @@ export default function EnrollmentDetailPage() {
   const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
   const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
   const canManageSchedule = !scheduleIsReadOnly
-  const canAddInstallment = finalFees > 7000 && schedule.length < 13 && canManageSchedule
+  const canAddInstallment = schedule.length < 13 && canManageSchedule
   const canEnroll = hasSavedSchedule && rulesStatus === 'submitted'
   const scheduleBadge = scheduleIsReadOnly || row.payment_schedule_locked
     ? 'Locked'
@@ -879,9 +892,10 @@ export default function EnrollmentDetailPage() {
                   <div className="mt-3 space-y-3">
                     <input
                       type="number"
-                      min="0.01"
+                      min={index === 0 ? '5000' : '0.01'}
                       step="0.01"
                       value={item.amount}
+                      disabled={index === 0}
                       onChange={(event) => {
                         const next = cloneSchedule(scheduleDraft)
                         next[index] = { ...next[index], amount: event.target.value, pending_amount: event.target.value }

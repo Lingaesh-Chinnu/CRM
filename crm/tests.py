@@ -366,14 +366,15 @@ class PaymentScheduleSyncTests(APITestCase):
             payment_date='2026-05-02',
         )
 
-    def test_update_schedule_recalculates_candidate_fee_without_resetting_paid_amount(self):
+    def test_update_schedule_splits_only_unpaid_rows_without_changing_course_fee(self):
         self.client.force_authenticate(self.admin)
 
         response = self.client.post(f'/api/payments/{self.payment.id}/update-schedule/', {
             'payment_schedule': [
-                {'label': '1st Installment', 'amount': '5000', 'due_date': '2026-05-01'},
-                {'label': '2nd Installment', 'amount': '16950', 'due_date': '2026-05-15'},
-                {'label': '3rd Installment', 'amount': '16950', 'due_date': '2026-06-15'},
+                {'label': 'Enrollment', 'amount': '5000', 'due_date': '2026-05-01'},
+                {'label': '1st Installment', 'amount': '18950', 'due_date': '2026-05-15'},
+                {'label': '2nd Installment', 'amount': '10000', 'due_date': '2026-06-15'},
+                {'label': '3rd Installment', 'amount': '8950', 'due_date': '2026-07-15'},
             ],
         }, format='json')
 
@@ -381,18 +382,32 @@ class PaymentScheduleSyncTests(APITestCase):
         self.payment.refresh_from_db()
         self.enrollment.refresh_from_db()
         self.course.refresh_from_db()
-        self.assertEqual(self.payment.total_fees, Decimal('38900.00'))
+        self.assertEqual(self.payment.total_fees, Decimal('42900.00'))
         self.assertEqual(self.payment.paid_amount, Decimal('15000.00'))
-        self.assertEqual(self.payment.balance, Decimal('23900.00'))
+        self.assertEqual(self.payment.balance, Decimal('27900.00'))
         self.assertEqual(self.payment.status, Payment.Status.PARTIAL)
-        self.assertEqual(self.enrollment.custom_payable_fee, Decimal('38900.00'))
-        self.assertEqual(self.enrollment.net_payable_fee, Decimal('38900.00'))
+        self.assertIsNone(self.enrollment.custom_payable_fee)
+        self.assertEqual(self.enrollment.net_payable_fee, Decimal('42900.00'))
         self.assertEqual(self.course.actual_fees, Decimal('42900.00'))
         self.assertEqual(Enrollment.objects.count(), 1)
-        self.assertEqual(response.data['total_fees'], '38900.00')
+        self.assertEqual(response.data['total_fees'], '42900.00')
         self.assertEqual(response.data['paid_amount'], '15000.00')
-        self.assertEqual(response.data['balance'], '23900.00')
+        self.assertEqual(response.data['balance'], '27900.00')
         self.assertEqual(response.data['status'], Payment.Status.PARTIAL)
+
+    def test_update_schedule_rejects_changes_to_paid_installments(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/payments/{self.payment.id}/update-schedule/', {
+            'payment_schedule': [
+                {'label': 'Enrollment', 'amount': '6000', 'due_date': '2026-05-01'},
+                {'label': '1st Installment', 'amount': '17950', 'due_date': '2026-05-15'},
+                {'label': '2nd Installment', 'amount': '18950', 'due_date': '2026-06-15'},
+            ],
+        }, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Enrollment Fee must be Rs 5,000.')
 
     def test_update_schedule_rejects_negative_installment_amounts(self):
         self.client.force_authenticate(self.admin)
@@ -1168,7 +1183,7 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
         ])
 
-    def test_add_to_payment_uses_full_payment_for_course_fee_below_7000(self):
+    def test_add_to_payment_uses_fixed_enrollment_and_final_balance_below_5000(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1188,10 +1203,11 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         payment = Payment.objects.get(enrollment=enrollment)
         self.assertEqual(payment.manual_installment_schedule, [
-            {'label': 'Full Payment', 'amount': 5900, 'due_date': '2026-05-11'},
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 900, 'due_date': '2026-05-12'},
         ])
 
-    def test_stale_split_schedule_is_ignored_for_course_fee_below_7000(self):
+    def test_saved_low_fee_schedule_keeps_fixed_enrollment_and_final_balance(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1222,11 +1238,12 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['payment_schedule'], [
-            {'label': 'Full Payment', 'amount': 6900, 'due_date': '2026-05-11'},
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 1900, 'due_date': '2026-05-12'},
         ])
-        self.assertEqual(response.data['installment_summary'][0]['label'], 'Full Payment')
+        self.assertEqual(response.data['installment_summary'][0]['label'], 'Enrollment')
 
-    def test_course_fee_7000_uses_full_payment_only(self):
+    def test_course_fee_7000_uses_fixed_enrollment_and_final_balance(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1250,7 +1267,8 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         payment = Payment.objects.get(enrollment=enrollment)
         self.assertEqual(payment.manual_installment_schedule, [
-            {'label': 'Full Payment', 'amount': 7000, 'due_date': '2026-05-11'},
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 2000, 'due_date': '2026-05-12'},
         ])
 
     def test_deleted_payment_installment_rebuilds_payment_summary_and_schedule_statuses(self):
@@ -1582,6 +1600,40 @@ class PublicWalkInFormTests(APITestCase):
             ],
         )
 
+    def test_signed_rules_pdf_is_rebuilt_from_latest_schedule(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Dynamic Signed PDF Student',
+            phone='9000000140',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 5450, 'due_date': '2026-05-12'},
+                {'label': '2nd Installment', 'amount': 5450, 'due_date': '2026-06-12'},
+            ],
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signature_image_file=b'signature',
+            signed_pdf_file=b'%PDF-stored',
+        )
+
+        with mock.patch('views.build_signed_rules_pdf', return_value=b'%PDF-latest') as build_pdf:
+            response = self.client.get(f'/public/rules-signed-pdf/{signing.token}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'%PDF-latest')
+        build_pdf.assert_called_once()
+        self.assertEqual(build_pdf.call_args.args[0], enrollment)
+
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -1892,7 +1944,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.data['message'], 'fee schedule exploded')
         self.assertTrue(any('Course approval failed' in entry for entry in logs.output))
 
-    def test_admin_schedule_override_updates_candidate_payable_fee_and_payment_totals(self):
+    def test_admin_schedule_override_cannot_change_candidate_payable_fee(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.final_course,
@@ -1925,17 +1977,16 @@ class PublicWalkInFormTests(APITestCase):
             ],
         }, format='json')
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Payment schedule total must match course fee.')
         enrollment.refresh_from_db()
         payment.refresh_from_db()
         self.assertEqual(enrollment.actual_fees, Decimal('42900.00'))
-        self.assertEqual(enrollment.custom_payable_fee, Decimal('38900.00'))
-        self.assertEqual(enrollment.net_payable_fee, Decimal('38900.00'))
-        self.assertEqual(payment.total_fees, Decimal('38900.00'))
-        self.assertEqual(payment.balance, Decimal('33900.00'))
+        self.assertIsNone(enrollment.custom_payable_fee)
+        self.assertEqual(enrollment.net_payable_fee, Decimal('42900.00'))
+        self.assertEqual(payment.total_fees, Decimal('42900.00'))
+        self.assertEqual(payment.balance, Decimal('37900.00'))
         self.assertEqual(payment.status, Payment.Status.PARTIAL)
-        self.assertEqual(Decimal(str(response.data['total_fees'])), Decimal('38900.00'))
-        self.assertEqual(Decimal(str(response.data['balance'])), Decimal('33900.00'))
 
     def test_generated_bills_use_current_payment_and_cumulative_paid_amounts(self):
         enrollment = Enrollment.objects.create(
@@ -2004,7 +2055,10 @@ class PublicWalkInFormTests(APITestCase):
                 'Single Payment Bill Student',
                 '9000000136',
                 6500,
-                [{'label': 'Full Payment', 'amount': 6500, 'due_date': '2026-05-11'}],
+                [
+                    {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                    {'label': '1st Installment', 'amount': 1500, 'due_date': '2026-05-20'},
+                ],
             ),
             (
                 'Three Installment Bill Student',
