@@ -104,13 +104,7 @@ ENROLLMENT_VALUE_STATUSES = (Enrollment.Status.ENROLLED, Enrollment.Status.ACTIV
 
 
 def official_enrollment_queryset(queryset):
-    return queryset.filter(
-        Q(status__in=ENROLLMENT_COUNT_STATUSES)
-        | Q(
-            status=Enrollment.Status.RULES_SUBMITTED,
-            rules_signing__status=RulesSigningRequest.Status.SUBMITTED,
-        )
-    )
+    return queryset.filter(status__in=ENROLLMENT_COUNT_STATUSES)
 
 
 def enrollment_value_queryset(queryset):
@@ -7748,6 +7742,7 @@ import django_filters
 
 class EnrollmentFilter(django_filters.FilterSet):
     status = django_filters.CharFilter(method='filter_status')
+    queue = django_filters.CharFilter(method='filter_queue')
     enrolled_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
     enrolled_to   = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
     important_only = django_filters.BooleanFilter(method='filter_important_only')
@@ -7759,12 +7754,19 @@ class EnrollmentFilter(django_filters.FilterSet):
             return queryset.filter(status__in=[Enrollment.Status.DRAFT, Enrollment.Status.PENDING_RULES, Enrollment.Status.RULES_SENT, Enrollment.Status.RULES_SUBMITTED])
         return queryset.filter(status=value) if value else queryset
 
+    def filter_queue(self, queryset, name, value):
+        if value == 'yet_to_enroll':
+            return queryset.exclude(status__in=Enrollment.FINAL_STATUSES)
+        if value == 'enrolled':
+            return queryset.filter(status__in=Enrollment.FINAL_STATUSES)
+        return queryset
+
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(is_important=True) if value else queryset
 
     class Meta:
         model  = Enrollment
-        fields = ['status', 'branch', 'course', 'important_only']
+        fields = ['status', 'queue', 'branch', 'course', 'important_only']
 
 
 def serialize_installment_schedule(schedule):
@@ -8149,7 +8151,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = visible_candidate_queryset(Enrollment.objects.select_related(
-            'course','branch','enrolled_by','created_by','lead','walkin','walkin__lead'
+            'course','branch','enrolled_by','created_by','lead','walkin','walkin__lead','rules_signing'
         ).prefetch_related(
             'payment__installments',
             'course_change_history',
@@ -8159,7 +8161,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         ))
         if not self.request.user.is_super_admin:
             qs = qs.filter(branch=self.request.user.branch)
-        if getattr(self, 'action', None) == 'list':
+        if getattr(self, 'action', None) == 'list' and self.request.query_params.get('queue') != 'yet_to_enroll':
             qs = official_enrollment_queryset(qs)
         return qs
 

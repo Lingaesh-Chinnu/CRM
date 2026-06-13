@@ -87,7 +87,34 @@ function SidebarContent({ onNavigate }) {
       <div className="flex-1 overflow-y-auto px-4 py-5">
         <nav className="space-y-2">
           {navigation.filter((item) => !item.staffOnly || user?.role !== 'super_admin').map((item) => (
-            item.pending ? (
+            item.name === 'Enrollments' ? (
+              <div key={item.name} className="space-y-1">
+                <NavItem
+                  item={item}
+                  active={location.pathname.startsWith('/enrollments')}
+                  onNavigate={onNavigate}
+                />
+                {location.pathname.startsWith('/enrollments') && (
+                  <div className="ml-12 space-y-1">
+                    {[
+                      ['Yet To Enroll', '/enrollments/yet-to-enroll'],
+                      ['Enrolled', '/enrollments'],
+                    ].map(([name, href]) => (
+                      <Link
+                        key={href}
+                        to={href}
+                        onClick={onNavigate}
+                        className={`block rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                          location.pathname === href ? 'bg-white/12 text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                        }`}
+                      >
+                        {name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : item.pending ? (
               <div key={item.name} className="space-y-1">
                 <NavItem
                   item={item}

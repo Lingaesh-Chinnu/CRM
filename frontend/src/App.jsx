@@ -130,6 +130,7 @@ export default function App() {
 
         {/* Enrollments */}
         <Route path="enrollments"     element={<EnrollmentsListPage />} />
+        <Route path="enrollments/yet-to-enroll" element={<EnrollmentsListPage queue="yet_to_enroll" />} />
         <Route path="enrollments/:id" element={<EnrollmentDetailPage />} />
 
         {/* Payments */}

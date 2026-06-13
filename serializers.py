@@ -1495,6 +1495,8 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     preferred_timing_display = serializers.CharField(source='get_preferred_timing_display', read_only=True)
     qualification_display = serializers.SerializerMethodField()
+    rules_signing_status = serializers.SerializerMethodField()
+    payment_schedule_status = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1506,7 +1508,8 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'counselor_user','is_important',
                   'custom_payable_fee','net_payable_fee','source','source_display','preferred_timing',
                   'preferred_timing_display','qualification','qualification_display','degree',
-                  'demo_class','interested_global_certification']
+                  'demo_class','interested_global_certification','rules_signing_status',
+                  'payment_schedule_status']
 
     def get_payment_status(self, obj):
         if hasattr(obj, 'payment'):
@@ -1532,6 +1535,17 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
+
+    def get_rules_signing_status(self, obj):
+        signing = getattr(obj, 'rules_signing', None)
+        return signing.status if signing else RulesSigningRequest.Status.PENDING
+
+    def get_payment_schedule_status(self, obj):
+        if obj.payment_schedule_locked:
+            return 'locked'
+        if obj.payment_schedule:
+            return 'saved'
+        return 'draft'
 
 
 class EnrollmentDetailSerializer(serializers.ModelSerializer):

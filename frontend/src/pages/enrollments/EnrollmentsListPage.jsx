@@ -76,6 +76,11 @@ function getPaymentLabel(value) {
   return 'Payment pending'
 }
 
+function queueStatusLabel(value) {
+  if (!value) return 'Pending'
+  return value.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
 function money(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
@@ -123,7 +128,8 @@ function monthBounds(offset = 0) {
 const thisMonthRange = monthBounds()
 const lastMonthRange = monthBounds(-1)
 
-export default function EnrollmentsListPage() {
+export default function EnrollmentsListPage({ queue = 'enrolled' }) {
+  const isYetToEnroll = queue === 'yet_to_enroll'
   const [rows, setRows] = useState([])
   const [metricRows, setMetricRows] = useState([])
   const [previousMetricRows, setPreviousMetricRows] = useState([])
@@ -134,9 +140,9 @@ export default function EnrollmentsListPage() {
     course: '',
     status: '',
     search: '',
-    period: 'this_month',
-    enrolledFrom: thisMonthRange.from,
-    enrolledTo: thisMonthRange.to,
+    period: isYetToEnroll ? 'all' : 'this_month',
+    enrolledFrom: isYetToEnroll ? '' : thisMonthRange.from,
+    enrolledTo: isYetToEnroll ? '' : thisMonthRange.to,
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -159,7 +165,7 @@ export default function EnrollmentsListPage() {
 
   useEffect(() => {
     loadEnrollments()
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
+  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin, queue])
 
   const loadFilterOptions = async () => {
     try {
@@ -179,7 +185,7 @@ export default function EnrollmentsListPage() {
     setLoading(true)
 
     try {
-      const baseParams = {}
+      const baseParams = { queue }
 
       if (isSuperAdmin && filters.branch) {
         baseParams.branch = filters.branch
@@ -199,8 +205,8 @@ export default function EnrollmentsListPage() {
 
       const [rowsRes, currentMetricsRes, previousMetricsRes] = await Promise.all([
         api.get('/enrollments/', { params }),
-        api.get('/enrollments/', { params: { ...baseParams, enrolled_from: thisMonthRange.from, enrolled_to: thisMonthRange.to } }),
-        api.get('/enrollments/', { params: { ...baseParams, enrolled_from: lastMonthRange.from, enrolled_to: lastMonthRange.to } }),
+        isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: thisMonthRange.from, enrolled_to: thisMonthRange.to } }),
+        isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: lastMonthRange.from, enrolled_to: lastMonthRange.to } }),
       ])
       setRows(normaliseListResponse(rowsRes.data))
       setMetricRows(normaliseListResponse(currentMetricsRes.data))
@@ -258,12 +264,18 @@ export default function EnrollmentsListPage() {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Enrollments</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">Confirmed student enrollments</h1>
+        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Yet To Enroll' : 'Confirmed student enrollments'}</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
-          {isSuperAdmin
+          {isYetToEnroll
+            ? 'Candidates converted to enrollment who are waiting for Rules & Regulations completion and final enrollment confirmation.'
+            : isSuperAdmin
             ? 'View current month admissions across every branch and narrow the list with branch, course, status, and search filters.'
             : 'This page automatically shows current month admissions from your branch, with course details and enrollment dates.'}
         </p>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link to="/enrollments/yet-to-enroll" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${isYetToEnroll ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Yet To Enroll</Link>
+          <Link to="/enrollments" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${!isYetToEnroll ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Enrolled</Link>
+        </div>
       </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
@@ -306,7 +318,7 @@ export default function EnrollmentsListPage() {
             </select>
           </label>
 
-          <label className="min-w-[160px] flex-1">
+          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Status
             </span>
@@ -324,7 +336,7 @@ export default function EnrollmentsListPage() {
               <option value="dropped">Dropped</option>
               <option value="transferred">Transferred</option>
             </select>
-          </label>
+          </label>}
 
           <label className="min-w-[240px] flex-[1.3]">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -337,26 +349,26 @@ export default function EnrollmentsListPage() {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>
-          <label className="min-w-[160px] flex-1">
+          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Period</span>
             <select value={filters.period} onChange={(event) => setPeriod(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
               <option value="this_month">This Month</option>
               <option value="last_month">Last Month</option>
               <option value="custom">Custom Date Range</option>
             </select>
-          </label>
-          <label className="min-w-[160px] flex-1">
+          </label>}
+          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
             <input type="date" value={filters.enrolledFrom} onChange={(event) => setCustomDate('enrolledFrom', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
-          </label>
-          <label className="min-w-[160px] flex-1">
+          </label>}
+          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
             <input type="date" value={filters.enrolledTo} onChange={(event) => setCustomDate('enrolledTo', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
-          </label>
+          </label>}
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2">
+      {!isYetToEnroll && <section className="grid gap-4 md:grid-cols-2">
         <SummaryCard
           label="Total Enrollments"
           value={currentMonthEnrollmentCount}
@@ -369,7 +381,7 @@ export default function EnrollmentsListPage() {
           current={totalRevenue}
           previous={previousRevenue}
         />
-      </section>
+      </section>}
 
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         {(navigationMessage || message) && (
@@ -379,16 +391,16 @@ export default function EnrollmentsListPage() {
         )}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Current Month Admissions</p>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">Enrollment list with course details</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{isYetToEnroll ? 'Enrollment Queue' : 'Current Month Admissions'}</p>
+            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Candidates waiting for final enrollment' : 'Enrollment list with course details'}</h2>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
-            <StatusFilterChips
+            {!isYetToEnroll && <StatusFilterChips
               items={statusSummary}
               value={filters.status}
               onChange={(value) => setFilters((current) => ({ ...current, status: value }))}
               className="justify-end"
-            />
+            />}
           </div>
         </div>
 
@@ -405,9 +417,14 @@ export default function EnrollmentsListPage() {
                 { key: 'name', header: 'Student', width: 'minmax(155px,1.15fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={withReturnTo(`/enrollments/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
                 { key: 'course', header: 'Course', width: 'minmax(120px,0.95fr)', className: 'flex items-center', render: (row) => <span className="overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{row.course_name || 'Course pending'}</span> },
                 ...(isSuperAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(76px,0.65fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> }] : []),
-                { key: 'status', header: 'Status', width: '92px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
-                { key: 'fees', header: 'Fees', width: '82px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
-                { key: 'balance', header: 'Balance', width: '82px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                ...(isYetToEnroll ? [
+                  { key: 'rules', header: 'Rules Form', width: '110px', className: 'flex items-center', render: (row) => <StatusBadge tone={row.rules_signing_status === 'submitted' ? 'green' : 'slate'}>{queueStatusLabel(row.rules_signing_status)}</StatusBadge> },
+                  { key: 'schedule', header: 'Payment Schedule', width: '125px', className: 'flex items-center', render: (row) => <StatusBadge tone={row.payment_schedule_status === 'locked' || row.payment_schedule_status === 'saved' ? 'green' : 'slate'}>{queueStatusLabel(row.payment_schedule_status)}</StatusBadge> },
+                ] : [
+                  { key: 'status', header: 'Status', width: '92px', className: 'flex items-center', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{getStatusLabel(row.status)}</StatusBadge> },
+                  { key: 'fees', header: 'Fees', width: '82px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.net_payable_fee || row.final_fees)}</span> },
+                  { key: 'balance', header: 'Balance', width: '82px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.payment_balance)}</span> },
+                ]),
                 { key: 'counselor', header: 'Counselor', width: 'minmax(88px,0.75fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
               ]}
             />

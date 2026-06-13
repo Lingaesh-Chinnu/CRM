@@ -953,6 +953,60 @@ class PublicWalkInFormTests(APITestCase):
         )
         self.assertIsNone(conversion_follow_up.next_follow_up_date)
 
+    def test_yet_to_enroll_queue_moves_candidate_only_after_enroll_student(self):
+        pending = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Queue Candidate',
+            phone='9000000143',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.PENDING_RULES,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10000, 'due_date': '2026-05-12'},
+            ],
+        )
+        active = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Confirmed Student',
+            phone='9000000144',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        RulesSigningRequest.objects.create(
+            enrollment=pending,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.staff)
+
+        yet_response = self.client.get('/api/enrollments/', {'queue': 'yet_to_enroll'})
+        enrolled_response = self.client.get('/api/enrollments/', {'queue': 'enrolled'})
+
+        self.assertEqual(yet_response.status_code, 200)
+        self.assertEqual([item['id'] for item in yet_response.data], [pending.id])
+        self.assertEqual(yet_response.data[0]['rules_signing_status'], RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(yet_response.data[0]['payment_schedule_status'], 'saved')
+        self.assertEqual([item['id'] for item in enrolled_response.data], [active.id])
+
+        enroll_response = self.client.post(f'/api/enrollments/{pending.id}/enroll-student/')
+
+        self.assertEqual(enroll_response.status_code, 200)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, Enrollment.Status.ACTIVE)
+        self.assertEqual(self.client.get('/api/enrollments/', {'queue': 'yet_to_enroll'}).data, [])
+        enrolled_ids = [item['id'] for item in self.client.get('/api/enrollments/', {'queue': 'enrolled'}).data]
+        self.assertCountEqual(enrolled_ids, [pending.id, active.id])
+
     def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
         walkin = WalkIn.objects.create(
             branch=self.branch,

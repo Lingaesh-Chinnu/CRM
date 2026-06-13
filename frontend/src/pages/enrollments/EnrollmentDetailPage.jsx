@@ -295,6 +295,30 @@ export default function EnrollmentDetailPage() {
     }
   }, [id, isSuperAdmin])
 
+  useEffect(() => {
+    if (!row || ['enrolled', 'active', 'completed', 'dropped', 'on_hold', 'inactive', 'transferred'].includes(row.status)) return undefined
+
+    let cancelled = false
+    const refreshEnrollmentStatus = async () => {
+      if (saving || editingDetails || editingSchedule) return
+      try {
+        const { data } = await api.get(`/enrollments/${id}/`)
+        if (cancelled) return
+        setRow(data)
+        setScheduleDraft(cloneSchedule(data.installment_schedule || []))
+      } catch {
+        // Keep the current detail visible and retry on the next interval.
+      }
+    }
+    const interval = window.setInterval(refreshEnrollmentStatus, 5000)
+    window.addEventListener('focus', refreshEnrollmentStatus)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshEnrollmentStatus)
+    }
+  }, [id, row?.status, saving, editingDetails, editingSchedule])
+
   if (!row) {
     return (
       <div className="p-6 text-slate-500">
