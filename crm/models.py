@@ -892,6 +892,7 @@ def enrollment_payable_fee(enrollment):
 
 ENROLLMENT_PAYMENT_AMOUNT = 5000
 MIN_INSTALLMENT_AMOUNT = 5000
+SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
 
 
 def _split_integer_amount(total_amount, parts):
@@ -944,7 +945,11 @@ def get_default_installment_schedule(enrollment, split_count=2):
     if not remaining:
         return rows
 
-    requested_count = min(max(int(split_count or 2), 1), 12)
+    requested_count = (
+        1
+        if final_fees <= SINGLE_INSTALLMENT_MAX_COURSE_FEE
+        else min(max(int(split_count or 2), 1), 12)
+    )
     max_count = max(((remaining - 1) // MIN_INSTALLMENT_AMOUNT) + 1, 1)
     split_count = min(requested_count, max_count)
     due_date = first_due_date

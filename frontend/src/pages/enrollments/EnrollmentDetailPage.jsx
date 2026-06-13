@@ -20,6 +20,8 @@ const batchTimingOptions = [
   'Weekend Batch'
 ]
 
+const SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
+
 function addOneMonth(value) {
   if (!value) return ''
   const date = new Date(`${value}T00:00:00`)
@@ -68,7 +70,10 @@ function buildSchedule(row, startDate, splitCount = 2) {
   if (finalFees < 5000) return []
   let dueDate = courseStartDate
   const rows = [{ label: 'Enrollment', amount: 5000, due_date: enrollmentDate, paid_amount: 0, pending_amount: 5000, status: 'pending' }]
-  splitInstallmentAmount(finalFees - 5000, Math.min(Math.max(Number(splitCount || 2), 1), 12)).forEach((amount, index) => {
+  const defaultInstallmentCount = finalFees <= SINGLE_INSTALLMENT_MAX_COURSE_FEE
+    ? 1
+    : Math.min(Math.max(Number(splitCount || 2), 1), 12)
+  splitInstallmentAmount(finalFees - 5000, defaultInstallmentCount).forEach((amount, index) => {
     if (amount <= 0) return
     rows.push({ label: installmentLabel(index + 1), amount, due_date: dueDate, paid_amount: 0, pending_amount: amount, status: 'pending' })
     dueDate = addOneMonth(dueDate) || dueDate

@@ -1179,8 +1179,56 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(payment.paid_amount, 0)
         self.assertEqual(payment.manual_installment_schedule, [
             {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-12'},
-            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+            {'label': '1st Installment', 'amount': 10000, 'due_date': '2026-05-12'},
+        ])
+
+    def test_default_schedule_at_18900_uses_one_remaining_balance_installment(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Threshold Schedule Student',
+            phone='9000000141',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=18900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 13900, 'due_date': '2026-05-12'},
+        ])
+
+    def test_default_schedule_above_18900_keeps_current_split_logic(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Above Threshold Schedule Student',
+            phone='9000000142',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=19000,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+        self.assertEqual(response.status_code, 201)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.manual_installment_schedule, [
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '1st Installment', 'amount': 7000, 'due_date': '2026-05-12'},
+            {'label': '2nd Installment', 'amount': 7000, 'due_date': '2026-06-12'},
         ])
 
     def test_add_to_payment_uses_fixed_enrollment_and_final_balance_below_5000(self):
