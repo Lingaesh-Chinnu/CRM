@@ -7391,7 +7391,7 @@ class PublicWalkInFormView(APIView):
             with transaction.atomic():
                 duplicate_records = matching_candidate_phone_records(phone)
                 existing_walkin = None
-                active_walkins = WalkIn.objects.exclude(
+                active_walkins = visible_candidate_queryset(WalkIn.objects.all()).exclude(
                     status=WalkIn.Status.CONVERTED,
                 ).filter(
                     Q(converted_to_type__isnull=True) | Q(converted_to_type='')
@@ -7414,30 +7414,50 @@ class PublicWalkInFormView(APIView):
                     walkin = serializer.update(existing_walkin, {**serializer.validated_data, **save_kwargs})
                 else:
                     walkin = serializer.save(**save_kwargs)
-
-                notify_branch_users(
-                    branch,
-                    'New public walk-in submitted',
-                    f'{walkin.name} submitted the public walk-in form for {course.name}.',
-                    Notification.NType.INFO,
-                    f'/walkins/{walkin.id}',
-                )
-                for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
-                    create_user_notification(
-                        admin_user,
-                        'New public walk-in submitted',
-                        f'{walkin.name} submitted the public walk-in form for {branch.name}.',
-                        Notification.NType.INFO,
-                        f'/walkins/{walkin.id}',
-                    )
+            logger.info(
+                'Public walk-in saved successfully: walkin_id=%s candidate_number=%s branch_id=%s updated=%s',
+                walkin.id,
+                walkin.candidate_number,
+                walkin.branch_id,
+                bool(existing_walkin),
+            )
         except Exception as exc:
-            logger.exception('Public walk-in submission failed.')
+            logger.exception(
+                'Public walk-in save failed: phone=%s branch_id=%s course_id=%s error=%s',
+                phone,
+                getattr(branch, 'id', None),
+                getattr(course, 'id', None),
+                exc.__class__.__name__,
+            )
             return Response(
                 {
                     'detail': 'We could not submit your enquiry right now. Please try again or contact the selected branch.',
                     'error': exc.__class__.__name__,
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        try:
+            notify_branch_users(
+                branch,
+                'New public walk-in submitted',
+                f'{walkin.name} submitted the public walk-in form for {course.name}.',
+                Notification.NType.INFO,
+                f'/walkins/{walkin.id}',
+            )
+            for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
+                create_user_notification(
+                    admin_user,
+                    'New public walk-in submitted',
+                    f'{walkin.name} submitted the public walk-in form for {branch.name}.',
+                    Notification.NType.INFO,
+                    f'/walkins/{walkin.id}',
+                )
+        except Exception:
+            logger.exception(
+                'Public walk-in notification creation failed after save: walkin_id=%s branch_id=%s',
+                walkin.id,
+                walkin.branch_id,
             )
 
         return Response(

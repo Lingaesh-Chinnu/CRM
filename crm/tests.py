@@ -889,6 +889,54 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(WalkIn.objects.count(), 1)
         self.assertEqual(WalkIn.objects.get().name, 'Candidate Updated')
 
+    def test_public_walkin_matching_deleted_phone_creates_visible_record(self):
+        deleted_walkin = WalkIn.objects.create(
+            branch=self.other_branch,
+            course=self.course,
+            name='Deleted Candidate',
+            phone='9876543210',
+            status=WalkIn.Status.NEW,
+            is_deleted=True,
+        )
+
+        response = self.client.post('/api/public/walkin/', self.payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        self.assertFalse(response.data['updated'])
+        self.assertEqual(WalkIn.objects.count(), 2)
+        created_walkin = WalkIn.objects.get(pk=response.data['id'])
+        self.assertFalse(created_walkin.is_deleted)
+        self.assertEqual(created_walkin.branch, self.branch)
+        deleted_walkin.refresh_from_db()
+        self.assertTrue(deleted_walkin.is_deleted)
+        self.assertEqual(deleted_walkin.name, 'Deleted Candidate')
+        self.assertTrue(Notification.objects.filter(
+            title='New public walk-in submitted',
+            related_url=f'/walkins/{created_walkin.id}',
+        ).exists())
+        self.assertFalse(Notification.objects.filter(
+            title='New public walk-in submitted',
+            related_url=f'/walkins/{deleted_walkin.id}',
+        ).exists())
+
+    def test_public_walkin_save_failure_does_not_create_notifications(self):
+        with mock.patch('views.PublicWalkInCreateSerializer.save', side_effect=RuntimeError('save failed')):
+            response = self.client.post('/api/public/walkin/', self.payload, format='json')
+
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(WalkIn.objects.exists())
+        self.assertFalse(Notification.objects.filter(title='New public walk-in submitted').exists())
+
+    def test_public_walkin_notification_failure_does_not_rollback_saved_record(self):
+        with mock.patch('views.notify_branch_users', side_effect=RuntimeError('notification failed')):
+            response = self.client.post('/api/public/walkin/', self.payload, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        walkin = WalkIn.objects.get(pk=response.data['id'])
+        self.assertEqual(walkin.branch, self.branch)
+        self.assertFalse(walkin.is_deleted)
+        self.assertFalse(Notification.objects.filter(title='New public walk-in submitted').exists())
+
     def test_branch_staff_and_admin_can_view_public_walkin(self):
         self.client.post('/api/public/walkin/', self.payload, format='json')
 
