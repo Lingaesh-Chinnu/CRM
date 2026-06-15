@@ -220,6 +220,14 @@ export default function WalkInsListPage() {
   const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = searchParams.get('follow_up_date_to') || ''
   const focus = searchParams.get('focus') || ''
+  const hasDateRangeFilter = Boolean(
+    appliedFilters.date_from
+    || appliedFilters.date_to
+    || visitDateFrom
+    || visitDateTo
+    || followUpDateFrom
+    || followUpDateTo
+  )
   const publicWalkInPath = `${appBasePath}/public/walk-in${!canFilterByBranch && user?.branch_id ? `?branch=${user.branch_id}` : ''}`
   const publicWalkInLink = `${window.location.origin}${publicWalkInPath}`
 
@@ -260,7 +268,7 @@ export default function WalkInsListPage() {
     const fetchWalkins = async () => {
       setLoading(true)
       try {
-        const params = { sectioned: 1 }
+        const params = hasDateRangeFilter ? {} : { sectioned: 1 }
         Object.entries(appliedFilters).forEach(([key, value]) => {
           if (key === 'search') return
           if (value) params[key] = value
@@ -272,10 +280,18 @@ export default function WalkInsListPage() {
         if (followUpDateTo) params.follow_up_date_to = followUpDateTo
 
         const { data } = await api.get('/walkins/', { params })
-        setCurrentMonthWalkins(data.current_month_walkins || [])
-        setOtherWalkins(data.other_walkins || [])
-        setCurrentMonthCount(data.current_month_count || 0)
-        setOtherWalkinsCount(data.other_walkins_count || 0)
+        if (hasDateRangeFilter) {
+          const rows = data.results || data || []
+          setCurrentMonthWalkins(rows)
+          setOtherWalkins([])
+          setCurrentMonthCount(rows.length)
+          setOtherWalkinsCount(0)
+        } else {
+          setCurrentMonthWalkins(data.current_month_walkins || [])
+          setOtherWalkins(data.other_walkins || [])
+          setCurrentMonthCount(data.current_month_count || 0)
+          setOtherWalkinsCount(data.other_walkins_count || 0)
+        }
         setLoadMessage('')
       } catch (error) {
         setCurrentMonthWalkins([])
@@ -289,7 +305,7 @@ export default function WalkInsListPage() {
     }
 
     fetchWalkins()
-  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus])
+  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus, hasDateRangeFilter])
 
   const updateFilter = (key, value) => {
     setFilters((current) => ({ ...current, [key]: value }))
@@ -458,10 +474,10 @@ export default function WalkInsListPage() {
       )}
 
       <WalkInSection
-        title="Current Month Walk-ins"
+        title={hasDateRangeFilter ? 'Filtered Walk-ins' : 'Current Month Walk-ins'}
         walkins={currentMonthWalkins}
         count={currentMonthCount}
-        emptyMessage="No current month walk-ins found."
+        emptyMessage={hasDateRangeFilter ? 'No walk-ins found within the selected date range.' : 'No current month walk-ins found.'}
         onFollowUpSaved={updateWalkInFollowUp}
         onImportantToggle={toggleWalkInImportant}
         activeFilter={activeSmartFilter}
@@ -471,7 +487,7 @@ export default function WalkInsListPage() {
         listFilters={filters}
       />
 
-      <div className="pt-2">
+      {!hasDateRangeFilter && <div className="pt-2">
         <WalkInSection
           title="All Other Walk-ins"
           walkins={otherWalkins}
@@ -485,7 +501,7 @@ export default function WalkInsListPage() {
           returnTo={returnTo}
           listFilters={filters}
         />
-      </div>
+      </div>}
     </div>
   )
 }

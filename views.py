@@ -6645,12 +6645,12 @@ class WalkInFilter(django_filters.FilterSet):
     def filter_activity_date_from(self, queryset, name, value):
         if not value or not self.request or not self.request.user.is_super_admin:
             return queryset
-        return queryset.filter(Q(visit_date__gte=value) | Q(visit_date__isnull=True, created_at__date__gte=value))
+        return queryset.filter(created_at__date__gte=value)
 
     def filter_activity_date_to(self, queryset, name, value):
         if not value or not self.request or not self.request.user.is_super_admin:
             return queryset
-        return queryset.filter(Q(visit_date__lte=value) | Q(visit_date__isnull=True, created_at__date__lte=value))
+        return queryset.filter(created_at__date__lte=value)
 
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(is_important=True) if value else queryset

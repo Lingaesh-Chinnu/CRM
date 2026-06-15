@@ -159,6 +159,7 @@ export default function PaymentsListPage() {
   const duePaymentsFilter = paymentStatus === 'due' || paymentStatus === 'pending_today'
   const weeklyPendingFilter = paymentStatus === 'weekly_pending'
   const reasonRequestId = searchParams.get('reason_request') || ''
+  const hasCustomDateRange = duration === 'custom' && Boolean(dateFrom || dateTo)
   const overdueCount = rows.filter(isOverduePayment).length
   const paymentSummary = [
     { label: 'Total', value: '', count: rows.length },
@@ -516,7 +517,7 @@ export default function PaymentsListPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-4">
+      {!hasCustomDateRange && <section className="grid gap-4 md:grid-cols-4">
         {[
           ['Total Pending Amount', `Rs ${money(summary.total_pending_amount)}`],
           ['This Month Pending', `Rs ${money(summary.this_month_pending)}`],
@@ -528,7 +529,7 @@ export default function PaymentsListPage() {
             <p className="mt-3 text-2xl font-black tracking-tight text-slate-950">{value}</p>
           </div>
         ))}
-      </section>
+      </section>}
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="mb-4 flex flex-wrap gap-2">
@@ -630,7 +631,7 @@ export default function PaymentsListPage() {
         <div className="border-b border-slate-200 px-5 py-4">
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <h2 className="text-xl font-black tracking-tight text-slate-950">
-              {weeklyPendingFilter ? 'Weekly Pending Payments' : duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment tracking'}
+              {hasCustomDateRange ? 'Filtered Payments' : weeklyPendingFilter ? 'Weekly Pending Payments' : duePaymentsFilter ? 'Due & Overdue Payments' : 'Payment tracking'}
             </h2>
             <StatusFilterChips
               items={paymentSummary}
@@ -649,6 +650,8 @@ export default function PaymentsListPage() {
               ? 'No weekly pending payments found.'
               : duePaymentsFilter
               ? 'No due or overdue pending payments found.'
+              : hasCustomDateRange
+              ? 'No payment records found within the selected date range.'
               : 'No payment records found for this month.'}
           </div>
         ) : (

@@ -951,6 +951,90 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(admin_response.status_code, 200)
         self.assertEqual(len(admin_response.data), 1)
 
+    def test_admin_walkin_date_range_returns_only_records_created_within_range(self):
+        within_range = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Created In May',
+            phone='9000000201',
+            visit_date='2026-06-10',
+        )
+        outside_range = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Created In April',
+            phone='9000000202',
+            visit_date='2026-05-15',
+        )
+        WalkIn.objects.filter(pk=within_range.pk).update(created_at='2026-05-20T10:00:00Z')
+        WalkIn.objects.filter(pk=outside_range.pk).update(created_at='2026-04-20T10:00:00Z')
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.get('/api/walkins/', {
+            'date_from': '2026-05-01',
+            'date_to': '2026-05-31',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [within_range.id])
+
+    def test_admin_lead_date_range_returns_only_records_created_within_range(self):
+        within_range = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Lead Created In May',
+            phone='9000000203',
+        )
+        outside_range = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Lead Created In April',
+            phone='9000000204',
+        )
+        Lead.objects.filter(pk=within_range.pk).update(created_at='2026-05-20T10:00:00Z')
+        Lead.objects.filter(pk=outside_range.pk).update(created_at='2026-04-20T10:00:00Z')
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.get('/api/leads/', {
+            'created_from': '2026-05-01',
+            'created_to': '2026-05-31',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [within_range.id])
+
+    def test_student_date_range_returns_only_enrollments_within_range(self):
+        within_range = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Student Enrolled In May',
+            phone='9000000205',
+            actual_fees=10000,
+            discount_amount=0,
+            enrollment_date='2026-05-20',
+            status=Enrollment.Status.ACTIVE,
+        )
+        Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Student Enrolled In April',
+            phone='9000000206',
+            actual_fees=10000,
+            discount_amount=0,
+            enrollment_date='2026-04-20',
+            status=Enrollment.Status.ACTIVE,
+        )
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.get('/api/enrollments/', {
+            'queue': 'enrolled',
+            'enrolled_from': '2026-05-01',
+            'enrolled_to': '2026-05-31',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.data], [within_range.id])
+
     def test_walkin_to_enrollment_can_change_course_without_overwriting_walkin_course(self):
         walkin = WalkIn.objects.create(
             branch=self.branch,

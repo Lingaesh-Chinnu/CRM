@@ -140,9 +140,6 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     course: '',
     status: '',
     search: '',
-    period: isYetToEnroll ? 'all' : 'this_month',
-    enrolledFrom: isYetToEnroll ? '' : thisMonthRange.from,
-    enrolledTo: isYetToEnroll ? '' : thisMonthRange.to,
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -165,7 +162,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
 
   useEffect(() => {
     loadEnrollments()
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin, queue])
+  }, [filters.branch, filters.course, filters.status, debouncedSearch, isSuperAdmin, queue])
 
   const loadFilterOptions = async () => {
     try {
@@ -199,12 +196,8 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
       if (debouncedSearch) {
         baseParams.search = debouncedSearch
       }
-      const params = { ...baseParams }
-      if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
-      if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
-
       const [rowsRes, currentMetricsRes, previousMetricsRes] = await Promise.all([
-        api.get('/enrollments/', { params }),
+        api.get('/enrollments/', { params: baseParams }),
         isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: thisMonthRange.from, enrolled_to: thisMonthRange.to } }),
         isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: lastMonthRange.from, enrolled_to: lastMonthRange.to } }),
       ])
@@ -234,32 +227,6 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   const totalRevenue = metricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
   const previousRevenue = previousMetricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
 
-  const setPeriod = (period) => {
-    if (period === 'this_month') {
-      setFilters((current) => ({
-        ...current,
-        period,
-        enrolledFrom: thisMonthRange.from,
-        enrolledTo: thisMonthRange.to,
-      }))
-      return
-    }
-    if (period === 'last_month') {
-      setFilters((current) => ({
-        ...current,
-        period,
-        enrolledFrom: lastMonthRange.from,
-        enrolledTo: lastMonthRange.to,
-      }))
-      return
-    }
-    setFilters((current) => ({ ...current, period }))
-  }
-
-  const setCustomDate = (field, value) => {
-    setFilters((current) => ({ ...current, period: 'custom', [field]: value }))
-  }
-
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -269,8 +236,8 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
           {isYetToEnroll
             ? 'Candidates converted to enrollment who are waiting for Rules & Regulations completion and final enrollment confirmation.'
             : isSuperAdmin
-            ? 'View current month admissions across every branch and narrow the list with branch, course, status, and search filters.'
-            : 'This page automatically shows current month admissions from your branch, with course details and enrollment dates.'}
+            ? 'Manage enrolled students across every branch and narrow the operational list with branch, course, status, and search filters.'
+            : 'Manage enrolled students from your branch with course details, enrollment dates, and current workflow status.'}
         </p>
         <div className="mt-5 flex flex-wrap gap-2">
           <Link to="/enrollments/yet-to-enroll" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${isYetToEnroll ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Yet To Enroll</Link>
@@ -349,22 +316,6 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>
-          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Period</span>
-            <select value={filters.period} onChange={(event) => setPeriod(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
-              <option value="this_month">This Month</option>
-              <option value="last_month">Last Month</option>
-              <option value="custom">Custom Date Range</option>
-            </select>
-          </label>}
-          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">From Date</span>
-            <input type="date" value={filters.enrolledFrom} onChange={(event) => setCustomDate('enrolledFrom', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
-          </label>}
-          {!isYetToEnroll && <label className="min-w-[160px] flex-1">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
-            <input type="date" value={filters.enrolledTo} onChange={(event) => setCustomDate('enrolledTo', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
-          </label>}
         </div>
       </section>
 
@@ -391,8 +342,8 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
         )}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{isYetToEnroll ? 'Enrollment Queue' : 'Current Month Admissions'}</p>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Candidates waiting for final enrollment' : 'Enrollment list with course details'}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{isYetToEnroll ? 'Enrollment Queue' : 'Enrolled Students'}</p>
+            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Candidates waiting for final enrollment' : 'Operational enrollment list with course details'}</h2>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             {!isYetToEnroll && <StatusFilterChips
