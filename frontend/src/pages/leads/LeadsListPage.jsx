@@ -25,6 +25,25 @@ function addDays(value, days) {
   return next
 }
 
+function addMonths(value, months) {
+  const next = new Date(value)
+  const day = next.getDate()
+  next.setDate(1)
+  next.setMonth(next.getMonth() + months)
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+  next.setDate(Math.min(day, lastDay))
+  return next
+}
+
+function leadPeriodRange(period) {
+  const today = new Date()
+  if (period === 'last1') return { createdFrom: isoDate(addMonths(today, -1)), createdTo: isoDate(today) }
+  if (period === 'last3') return { createdFrom: isoDate(addMonths(today, -3)), createdTo: isoDate(today) }
+  if (period === 'last6') return { createdFrom: isoDate(addMonths(today, -6)), createdTo: isoDate(today) }
+  if (period === 'year') return { createdFrom: `${today.getFullYear()}-01-01`, createdTo: isoDate(today) }
+  return { createdFrom: '', createdTo: '' }
+}
+
 function formatDateTimeCompact(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -102,6 +121,7 @@ export default function LeadsListPage() {
     status: '',
     source: '',
     followUp: '',
+    leadPeriod: '',
     followUpBy: '',
     branch: '',
     createdFrom: '',
@@ -126,9 +146,9 @@ export default function LeadsListPage() {
   const statusFilter = searchParams.get('status') || ''
   const walkinDateFrom = searchParams.get('walkin_date_from') || ''
   const walkinDateTo = searchParams.get('walkin_date_to') || ''
-  const nextFollowUpDateFrom = searchParams.get('next_follow_up_date_from') || ''
-  const nextFollowUpDateTo = searchParams.get('next_follow_up_date_to') || ''
-  const focus = searchParams.get('focus') || ''
+  const nextFollowUpDateFrom = isSuperAdmin ? '' : searchParams.get('next_follow_up_date_from') || ''
+  const nextFollowUpDateTo = isSuperAdmin ? '' : searchParams.get('next_follow_up_date_to') || ''
+  const focus = isSuperAdmin ? '' : searchParams.get('focus') || ''
 
   const filteredLeads = useMemo(() => {
     const today = new Date()
@@ -192,6 +212,7 @@ export default function LeadsListPage() {
     || filters.status
     || filters.source
     || filters.followUp
+    || filters.leadPeriod
     || filters.followUpBy
     || filters.branch
     || filters.createdFrom
@@ -219,6 +240,7 @@ export default function LeadsListPage() {
     filters.branch,
     filters.source,
     filters.followUp,
+    filters.leadPeriod,
     filters.followUpBy,
     filters.createdFrom,
     filters.createdTo,
@@ -278,16 +300,18 @@ export default function LeadsListPage() {
       if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
       const today = new Date()
-      if (filters.followUp === 'today') {
+      if (!isSuperAdmin && filters.followUp === 'today') {
         params.next_follow_up_date_from = isoDate(today)
         params.next_follow_up_date_to = isoDate(today)
-      } else if (filters.followUp === 'tomorrow') {
+      } else if (!isSuperAdmin && filters.followUp === 'tomorrow') {
         const tomorrow = isoDate(addDays(today, 1))
         params.next_follow_up_date_from = tomorrow
         params.next_follow_up_date_to = tomorrow
-      } else if (filters.followUp === 'next7') {
+      } else if (!isSuperAdmin && filters.followUp === 'next7') {
         params.next_follow_up_date_from = isoDate(today)
         params.next_follow_up_date_to = isoDate(addDays(today, 7))
+      } else if (!isSuperAdmin && filters.followUp === 'overdue') {
+        params.next_follow_up_date_to = isoDate(addDays(today, -1))
       }
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
@@ -333,6 +357,14 @@ export default function LeadsListPage() {
   }
 
   const updateFilter = (field, value) => {
+    if (field === 'leadPeriod') {
+      setFilters((current) => ({
+        ...current,
+        leadPeriod: current.leadPeriod === value ? '' : value,
+        ...leadPeriodRange(current.leadPeriod === value ? '' : value),
+      }))
+      return
+    }
     setFilters((current) => ({ ...current, [field]: value }))
   }
 
@@ -347,6 +379,7 @@ export default function LeadsListPage() {
       status: '',
       source: '',
       followUp: '',
+      leadPeriod: '',
       followUpBy: '',
       branch: '',
       createdFrom: '',
@@ -587,17 +620,23 @@ export default function LeadsListPage() {
           </button>
         </form>
         <div className="mt-4 flex flex-wrap gap-2">
-          {[
-            ['today', 'Today Follow-up'],
-            ['tomorrow', 'Tomorrow Follow-up'],
-            ['next7', 'Next 7 Days Follow-up'],
-          ].map(([value, label]) => (
+          {(isSuperAdmin ? [
+            ['last1', 'Last 1 Month Leads'],
+            ['last3', 'Last 3 Months Leads'],
+            ['last6', 'Last 6 Months Leads'],
+            ['year', 'This Year Leads'],
+          ] : [
+            ['today', 'Today Follow-ups'],
+            ['tomorrow', 'Tomorrow Follow-ups'],
+            ['next7', 'Next 7 Days Follow-ups'],
+            ['overdue', 'Overdue Follow-ups'],
+          ]).map(([value, label]) => (
             <button
               key={value}
               type="button"
-              onClick={() => updateFilter('followUp', filters.followUp === value ? '' : value)}
+              onClick={() => updateFilter(isSuperAdmin ? 'leadPeriod' : 'followUp', value)}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
-                filters.followUp === value
+                (isSuperAdmin ? filters.leadPeriod : filters.followUp) === value
                   ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
               }`}

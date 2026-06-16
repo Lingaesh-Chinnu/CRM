@@ -17,6 +17,7 @@ const emptyFilters = {
   course: '',
   status: '',
   source: '',
+  quick_filter: '',
   date_from: '',
   date_to: '',
   important_only: '',
@@ -43,6 +44,7 @@ function readFilters(searchParams, canFilterByBranch) {
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
     source: searchParams.get('source') || '',
+    quick_filter: searchParams.get('quick_filter') || '',
     date_from: canFilterByBranch ? searchParams.get('date_from') || '' : '',
     date_to: canFilterByBranch ? searchParams.get('date_to') || '' : '',
     important_only: searchParams.get('important_only') || '',
@@ -90,6 +92,35 @@ function CompactStamp({ dateValue, timeValue }) {
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
+}
+
+function addDays(value, days) {
+  const next = new Date(value)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+function addMonths(value, months) {
+  const next = new Date(value)
+  const day = next.getDate()
+  next.setDate(1)
+  next.setMonth(next.getMonth() + months)
+  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
+  next.setDate(Math.min(day, lastDay))
+  return next
+}
+
+function walkInPeriodRange(period) {
+  const today = new Date()
+  if (period === 'last1') return { date_from: todayIsoFrom(addMonths(today, -1)), date_to: todayIsoFrom(today) }
+  if (period === 'last3') return { date_from: todayIsoFrom(addMonths(today, -3)), date_to: todayIsoFrom(today) }
+  if (period === 'last6') return { date_from: todayIsoFrom(addMonths(today, -6)), date_to: todayIsoFrom(today) }
+  if (period === 'year') return { date_from: `${today.getFullYear()}-01-01`, date_to: todayIsoFrom(today) }
+  return { date_from: '', date_to: '' }
+}
+
+function todayIsoFrom(value) {
+  return value.toISOString().slice(0, 10)
 }
 
 function counselorLabel(walkin) {
@@ -217,9 +248,9 @@ export default function WalkInsListPage() {
   const appliedFilters = useMemo(() => readFilters(searchParams, canFilterByBranch), [searchParams, canFilterByBranch])
   const visitDateFrom = searchParams.get('visit_date_from') || ''
   const visitDateTo = searchParams.get('visit_date_to') || ''
-  const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
-  const followUpDateTo = searchParams.get('follow_up_date_to') || ''
-  const focus = searchParams.get('focus') || ''
+  const followUpDateFrom = canFilterByBranch ? '' : searchParams.get('follow_up_date_from') || ''
+  const followUpDateTo = canFilterByBranch ? '' : searchParams.get('follow_up_date_to') || ''
+  const focus = canFilterByBranch ? '' : searchParams.get('focus') || ''
   const hasDateRangeFilter = Boolean(
     appliedFilters.date_from
     || appliedFilters.date_to
@@ -270,7 +301,7 @@ export default function WalkInsListPage() {
       try {
         const params = hasDateRangeFilter ? {} : { sectioned: 1 }
         Object.entries(appliedFilters).forEach(([key, value]) => {
-          if (key === 'search') return
+          if (key === 'search' || key === 'quick_filter') return
           if (value) params[key] = value
         })
         if (appliedFilters.search) params.search = appliedFilters.search
@@ -308,7 +339,73 @@ export default function WalkInsListPage() {
   }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus, hasDateRangeFilter])
 
   const updateFilter = (key, value) => {
+    if (key === 'quick_filter') {
+      setFilters((current) => {
+        const nextValue = current.quick_filter === value ? '' : value
+        if (canFilterByBranch) {
+          return {
+            ...current,
+            quick_filter: nextValue,
+            ...walkInPeriodRange(nextValue),
+          }
+        }
+        return { ...current, quick_filter: nextValue }
+      })
+      return
+    }
     setFilters((current) => ({ ...current, [key]: value }))
+  }
+
+  const applyQuickFilter = (value) => {
+    const active = filters.quick_filter === value
+    const nextValue = active ? '' : value
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.delete('quick_filter')
+    nextParams.delete('visit_date_from')
+    nextParams.delete('visit_date_to')
+    nextParams.delete('follow_up_date_from')
+    nextParams.delete('follow_up_date_to')
+    nextParams.delete('focus')
+    if (canFilterByBranch) {
+      const range = walkInPeriodRange(nextValue)
+      setFilters((current) => ({
+        ...current,
+        quick_filter: nextValue,
+        ...range,
+      }))
+      nextParams.delete('date_from')
+      nextParams.delete('date_to')
+      if (nextValue) {
+        nextParams.set('quick_filter', nextValue)
+        nextParams.set('date_from', range.date_from)
+        nextParams.set('date_to', range.date_to)
+      }
+      Object.entries(filters).forEach(([key, filterValue]) => {
+        if (['quick_filter', 'date_from', 'date_to'].includes(key)) return
+        if (filterValue.trim()) nextParams.set(key, filterValue.trim())
+      })
+      setSearchParams(nextParams)
+      return
+    }
+    const today = new Date()
+    setFilters((current) => ({ ...current, quick_filter: nextValue }))
+    if (nextValue) {
+      nextParams.set('quick_filter', nextValue)
+      if (value === 'today') {
+        nextParams.set('follow_up_date_from', todayIsoFrom(today))
+        nextParams.set('follow_up_date_to', todayIsoFrom(today))
+      } else if (value === 'tomorrow') {
+        const tomorrow = todayIsoFrom(addDays(today, 1))
+        nextParams.set('follow_up_date_from', tomorrow)
+        nextParams.set('follow_up_date_to', tomorrow)
+      } else if (value === 'next7') {
+        nextParams.set('follow_up_date_from', todayIsoFrom(today))
+        nextParams.set('follow_up_date_to', todayIsoFrom(addDays(today, 7)))
+      } else if (value === 'overdue') {
+        nextParams.set('follow_up_date_to', todayIsoFrom(addDays(today, -1)))
+      }
+    }
+    setSearchParams(nextParams)
   }
 
   const updateWalkInFollowUp = (walkinId, followUp) => {
@@ -370,8 +467,26 @@ export default function WalkInsListPage() {
     Object.entries(filters).forEach(([key, value]) => {
       if (key === 'branch' && !canFilterByBranch) return
       if ((key === 'date_from' || key === 'date_to') && !canFilterByBranch) return
+      if (key === 'quick_filter') return
       if (value.trim()) nextParams.set(key, value.trim())
     })
+    if (!canFilterByBranch && filters.quick_filter) {
+      const today = new Date()
+      nextParams.set('quick_filter', filters.quick_filter)
+      if (filters.quick_filter === 'today') {
+        nextParams.set('follow_up_date_from', todayIsoFrom(today))
+        nextParams.set('follow_up_date_to', todayIsoFrom(today))
+      } else if (filters.quick_filter === 'tomorrow') {
+        const tomorrow = todayIsoFrom(addDays(today, 1))
+        nextParams.set('follow_up_date_from', tomorrow)
+        nextParams.set('follow_up_date_to', tomorrow)
+      } else if (filters.quick_filter === 'next7') {
+        nextParams.set('follow_up_date_from', todayIsoFrom(today))
+        nextParams.set('follow_up_date_to', todayIsoFrom(addDays(today, 7)))
+      } else if (filters.quick_filter === 'overdue') {
+        nextParams.set('follow_up_date_to', todayIsoFrom(addDays(today, -1)))
+      }
+    }
     setSearchParams(nextParams)
   }
 
@@ -456,6 +571,32 @@ export default function WalkInsListPage() {
           <div className="flex items-end">
             <ImportantFilter checked={filters.important_only === 'true'} onChange={(checked) => updateFilter('important_only', checked ? 'true' : '')} />
           </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(canFilterByBranch ? [
+            ['last1', 'Last 1 Month Walk-ins'],
+            ['last3', 'Last 3 Months Walk-ins'],
+            ['last6', 'Last 6 Months Walk-ins'],
+            ['year', 'This Year Walk-ins'],
+          ] : [
+            ['today', 'Today Follow-ups'],
+            ['tomorrow', 'Tomorrow Follow-ups'],
+            ['next7', 'Next 7 Days Follow-ups'],
+            ['overdue', 'Overdue Follow-ups'],
+          ]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => applyQuickFilter(value)}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
+                filters.quick_filter === value
+                  ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         <div className="mt-4 flex flex-wrap gap-3 sm:justify-end">
             <button type="submit" className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800">
