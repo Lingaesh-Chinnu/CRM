@@ -16,7 +16,10 @@ function statusLabel(status) {
 }
 
 function isoDate(value) {
-  return value.toISOString().slice(0, 10)
+  const year = value.getFullYear()
+  const month = String(value.getMonth() + 1).padStart(2, '0')
+  const day = String(value.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function addDays(value, days) {
@@ -25,24 +28,34 @@ function addDays(value, days) {
   return next
 }
 
-function addMonths(value, months) {
-  const next = new Date(value)
-  const day = next.getDate()
-  next.setDate(1)
-  next.setMonth(next.getMonth() + months)
-  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
-  next.setDate(Math.min(day, lastDay))
-  return next
-}
-
 function leadPeriodRange(period) {
   const today = new Date()
-  if (period === 'last1') return { createdFrom: isoDate(addMonths(today, -1)), createdTo: isoDate(today) }
-  if (period === 'last3') return { createdFrom: isoDate(addMonths(today, -3)), createdTo: isoDate(today) }
-  if (period === 'last6') return { createdFrom: isoDate(addMonths(today, -6)), createdTo: isoDate(today) }
-  if (period === 'year') return { createdFrom: `${today.getFullYear()}-01-01`, createdTo: isoDate(today) }
+  if (period === 'today') return { createdFrom: isoDate(today), createdTo: isoDate(today) }
+  if (period === 'this_month') return { createdFrom: isoDate(new Date(today.getFullYear(), today.getMonth(), 1)), createdTo: isoDate(today) }
+  if (period === 'last_month') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+    const lastDay = new Date(today.getFullYear(), today.getMonth(), 0)
+    return { createdFrom: isoDate(firstDay), createdTo: isoDate(lastDay) }
+  }
+  if (period === 'last3') return { createdFrom: isoDate(addDays(today, -90)), createdTo: isoDate(today) }
+  if (period === 'last6') return { createdFrom: isoDate(addDays(today, -180)), createdTo: isoDate(today) }
   return { createdFrom: '', createdTo: '' }
 }
+
+const leadPeriodFilters = [
+  ['today', 'Today Leads'],
+  ['this_month', 'This Month Leads'],
+  ['last_month', 'Last Month Leads'],
+  ['last3', 'Last 3 Months Leads'],
+  ['last6', 'Last 6 Months Leads'],
+  ['custom', 'Custom Range'],
+]
+
+const leadFollowUpFilters = [
+  ['today', 'Today Follow-ups'],
+  ['tomorrow', 'Tomorrow Follow-ups'],
+  ['next7', 'Next 7 Days Follow-ups'],
+]
 
 function formatDateTimeCompact(value) {
   if (!value) return '-'
@@ -219,6 +232,7 @@ export default function LeadsListPage() {
     || filters.createdTo
     || filters.importantOnly
   )
+  const showCustomDateRange = filters.leadPeriod === 'custom'
   const leadSummary = [
     { label: 'Total', value: '', count: statusSummaryBaseLeads.length },
     { label: 'New Lead', value: 'new', count: statusSummaryBaseLeads.filter((lead) => lead.status === 'new' && lead.source !== 'manual').length },
@@ -296,8 +310,8 @@ export default function LeadsListPage() {
       if (filters.source) params.source = filters.source
       if (filters.followUpBy) params.follow_up_by = filters.followUpBy
       if (appliedSearch) params.search = appliedSearch
-      if (isSuperAdmin && filters.createdFrom) params.created_from = filters.createdFrom
-      if (isSuperAdmin && filters.createdTo) params.created_to = filters.createdTo
+      if (filters.createdFrom) params.created_from = filters.createdFrom
+      if (filters.createdTo) params.created_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
       const today = new Date()
       if (!isSuperAdmin && filters.followUp === 'today') {
@@ -567,6 +581,10 @@ export default function LeadsListPage() {
                   ))}
                 </select>
               </label>
+            </>
+          )}
+          {showCustomDateRange && (
+            <>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-600">From Date</span>
                 <input
@@ -620,23 +638,27 @@ export default function LeadsListPage() {
           </button>
         </form>
         <div className="mt-4 flex flex-wrap gap-2">
-          {(isSuperAdmin ? [
-            ['last1', 'Last 1 Month Leads'],
-            ['last3', 'Last 3 Months Leads'],
-            ['last6', 'Last 6 Months Leads'],
-            ['year', 'This Year Leads'],
-          ] : [
-            ['today', 'Today Follow-ups'],
-            ['tomorrow', 'Tomorrow Follow-ups'],
-            ['next7', 'Next 7 Days Follow-ups'],
-            ['overdue', 'Overdue Follow-ups'],
-          ]).map(([value, label]) => (
+          {(!isSuperAdmin ? leadFollowUpFilters : []).map(([value, label]) => (
             <button
               key={value}
               type="button"
-              onClick={() => updateFilter(isSuperAdmin ? 'leadPeriod' : 'followUp', value)}
+              onClick={() => updateFilter('followUp', value)}
               className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
-                (isSuperAdmin ? filters.leadPeriod : filters.followUp) === value
+                filters.followUp === value
+                  ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
+                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          {leadPeriodFilters.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => updateFilter('leadPeriod', value)}
+              className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition ${
+                filters.leadPeriod === value
                   ? 'border-cyan-300 bg-cyan-50 text-cyan-800'
                   : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
               }`}
