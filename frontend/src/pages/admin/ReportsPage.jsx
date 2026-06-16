@@ -19,6 +19,43 @@ function monthLabel(value) {
   return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
 }
 
+function localIso(date) {
+  const offset = date.getTimezoneOffset()
+  return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10)
+}
+
+function quickRangeDates(range) {
+  const today = new Date()
+  const start = new Date(today)
+  const end = new Date(today)
+  if (range === 'today') return { date_from: localIso(today), date_to: localIso(today) }
+  if (range === 'yesterday') {
+    start.setDate(today.getDate() - 1)
+    return { date_from: localIso(start), date_to: localIso(start) }
+  }
+  if (range === 'last_7_days') start.setDate(today.getDate() - 6)
+  if (range === 'last_30_days') start.setDate(today.getDate() - 29)
+  if (range === 'this_month') start.setDate(1)
+  if (range === 'last_month') {
+    start.setDate(1)
+    start.setMonth(today.getMonth() - 1)
+    end.setDate(0)
+  }
+  if (range === 'last_3_months') {
+    start.setDate(1)
+    start.setMonth(today.getMonth() - 2)
+  }
+  if (range === 'last_6_months') {
+    start.setDate(1)
+    start.setMonth(today.getMonth() - 5)
+  }
+  if (range === 'this_year') {
+    start.setMonth(0)
+    start.setDate(1)
+  }
+  return { date_from: localIso(start), date_to: localIso(end) }
+}
+
 const metricColors = {
   leads: { light: '#93c5fd', dark: '#1d4ed8', soft: 'bg-blue-50', text: 'text-blue-800' },
   walkins: { light: '#fcd34d', dark: '#b45309', soft: 'bg-amber-50', text: 'text-amber-800' },
@@ -81,6 +118,7 @@ export default function ReportsPage() {
     user: '',
     course: '',
     source: '',
+    date_range: 'this_month',
     date_from: '',
     date_to: '',
   })
@@ -132,6 +170,14 @@ export default function ReportsPage() {
   }, [analytics, analyticsFilters.branch])
 
   const updateAnalyticsFilter = (key, value) => {
+    if (key === 'date_range') {
+      setAnalyticsFilters((current) => ({
+        ...current,
+        date_range: value,
+        ...(value === 'custom' ? {} : quickRangeDates(value)),
+      }))
+      return
+    }
     setAnalyticsFilters((current) => ({
       ...current,
       [key]: value,
@@ -231,8 +277,24 @@ export default function ReportsPage() {
             <option value="">All sources</option>
             {(analytics?.filters?.sources || []).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
-          <input type="date" value={analyticsFilters.date_from} onChange={(event) => updateAnalyticsFilter('date_from', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
-          <input type="date" value={analyticsFilters.date_to} onChange={(event) => updateAnalyticsFilter('date_to', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+          <select value={analyticsFilters.date_range} onChange={(event) => updateAnalyticsFilter('date_range', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last_7_days">Last 7 Days</option>
+            <option value="last_30_days">Last 30 Days</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+            <option value="last_3_months">Last 3 Months</option>
+            <option value="last_6_months">Last 6 Months</option>
+            <option value="this_year">This Year</option>
+            <option value="custom">Custom Range</option>
+          </select>
+          {analyticsFilters.date_range === 'custom' && (
+            <>
+              <input type="date" value={analyticsFilters.date_from} onChange={(event) => updateAnalyticsFilter('date_from', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+              <input type="date" value={analyticsFilters.date_to} onChange={(event) => updateAnalyticsFilter('date_to', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
+            </>
+          )}
         </div>
       </section>
 

@@ -59,7 +59,7 @@ from django.utils.dateparse import parse_date
 from django.utils.html import escape
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import base64
@@ -2043,7 +2043,7 @@ class UserPerformanceReportView(APIView):
         month_str = request.query_params.get('month', timezone.now().strftime('%Y-%m'))
         year, month = map(int, month_str.split('-'))
 
-        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch').order_by('username')
+        users = User.objects.exclude(role=User.Role.SUPER_ADMIN).select_related('branch').order_by('username')
         report_rows = []
 
         def attainment(actual, target):
@@ -2055,25 +2055,21 @@ class UserPerformanceReportView(APIView):
 
         for user in users:
             target = BranchTarget.objects.filter(branch=user.branch, year=year, month=month).first()
-            leads_count = Lead.objects.filter(
-                created_by=user, created_at__year=year, created_at__month=month
-            ).count()
+            row_metrics = scoped_metrics(
+                user_id=user.id,
+                start_date=date(year, month, 1),
+                end_date=date(year, month, monthrange(year, month)[1]),
+            )
+            leads_count = row_metrics['leads']
             transferred_leads_count = LeadTransferHistory.objects.filter(
                 from_user=user, created_at__year=year, created_at__month=month
             ).count()
             received_leads_count = LeadTransferHistory.objects.filter(
                 to_user=user, created_at__year=year, created_at__month=month
             ).count()
-            walkins_count = WalkIn.objects.filter(
-                assigned_to=user, visit_date__year=year, visit_date__month=month
-            ).count()
-            enrollments = current_month_enrollment_queryset(
-                Enrollment.objects.filter(created_by=user),
-                year,
-                month,
-            )
-            enrollments_count = enrollments.count()
-            value_total = enrollments.aggregate(total=Sum('net_payable_fee'))['total'] or 0
+            walkins_count = row_metrics['walkins']
+            enrollments_count = row_metrics['enrollments']
+            value_total = row_metrics['revenue']
 
             lead_target = target.lead_target if target else 0
             walkin_target = target.walkin_target if target else 0
@@ -2174,6 +2170,62 @@ def ratio(numerator, denominator):
     if denominator_value <= 0:
         return 0.0
     return round((float(numerator or 0) / denominator_value) * 100, 2)
+
+
+def bounded_ratio(numerator, denominator):
+    return min(ratio(numerator, denominator), 100.0)
+
+
+def counselor_owner_q(field_name):
+    return Q(**{f'{field_name}__role': User.Role.STAFF, f'{field_name}__is_active': True})
+
+
+def reporting_enrollment_queryset(queryset):
+    return enrollment_value_queryset(visible_candidate_queryset(queryset))
+
+
+def reporting_scope(branch=None, user_id=None, course=None, source=None):
+    leads = visible_candidate_queryset(Lead.objects.all())
+    walkins = visible_candidate_queryset(WalkIn.objects.all())
+    enrollments = reporting_enrollment_queryset(Enrollment.objects.all())
+    followups = FollowUp.objects.all()
+
+    if branch:
+        leads = leads.filter(branch_id=branch)
+        walkins = walkins.filter(branch_id=branch)
+        enrollments = enrollments.filter(branch_id=branch)
+        followups = followups.filter(updated_by__branch_id=branch)
+    if user_id:
+        leads = leads.filter(assigned_to_id=user_id)
+        walkins = walkins.filter(assigned_to_id=user_id)
+        enrollments = enrollments.filter(enrolled_by_id=user_id)
+        followups = followups.filter(updated_by_id=user_id)
+    if course:
+        leads = leads.filter(course_id=course)
+        walkins = walkins.filter(course_id=course)
+        enrollments = enrollments.filter(course_id=course)
+    if source:
+        leads = leads.filter(source=source)
+        walkins = walkins.filter(source=source)
+        enrollments = enrollments.filter(source=source)
+
+    return {
+        'leads': leads,
+        'walkins': walkins,
+        'enrollments': enrollments,
+        'followups': followups,
+    }
+
+
+def scoped_metrics(branch=None, user_id=None, course=None, source=None, start_date=None, end_date=None):
+    scope = reporting_scope(branch=branch, user_id=user_id, course=course, source=source)
+    if not start_date or not end_date:
+        start_date, end_date = month_bounds_for()
+    return performance_metrics(scope, start_date, end_date)
+
+
+def month_filter_kwargs(date_field, year, month):
+    return {f'{date_field}__year': year, f'{date_field}__month': month}
 
 
 def seconds_to_duration(total_seconds):
@@ -2289,7 +2341,10 @@ def enrollment_value(queryset):
 def performance_metrics(scope, start_date, end_date):
     leads = scope['leads'].filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
     walkins = scope['walkins'].filter(visit_date__gte=start_date, visit_date__lte=end_date)
-    enrollments = scope['enrollments'].filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+    enrollments = reporting_enrollment_queryset(scope['enrollments']).filter(
+        enrollment_date__gte=start_date,
+        enrollment_date__lte=end_date,
+    )
     followups = scope['followups'].filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
     pending_leads = scope['leads'].filter(next_follow_up_date__lt=timezone.localdate()).exclude(status__in=[
         Lead.Status.ENROLLED,
@@ -2322,7 +2377,8 @@ def performance_metrics(scope, start_date, end_date):
         'staff_generated_walkins': staff_referrals_count,
         'walkins_converted': converted_walkins,
         'enrollments': enrollments_count,
-        'conversion_ratio': ratio(enrollments_count, leads_count),
+        'conversion_ratio': bounded_ratio(enrollments_count, walkins_count),
+        'conversion_basis': 'walkins',
         'pending_followups': pending_leads.count() + pending_walkins.count(),
         'total_followups': followups.count(),
         'revenue': revenue,
@@ -2551,9 +2607,9 @@ def best_metric_label(rows):
 
 def user_scope(user):
     return {
-        'leads': Lead.objects.filter(Q(created_by=user) | Q(assigned_to=user), is_deleted=False).distinct(),
+        'leads': Lead.objects.filter(assigned_to=user, is_deleted=False),
         'walkins': WalkIn.objects.filter(assigned_to=user, is_deleted=False),
-        'enrollments': Enrollment.objects.filter(Q(created_by=user) | Q(enrolled_by=user), is_deleted=False).distinct(),
+        'enrollments': reporting_enrollment_queryset(Enrollment.objects.filter(enrolled_by=user)),
         'followups': FollowUp.objects.filter(updated_by=user),
     }
 
@@ -2562,7 +2618,7 @@ def branch_scope(branch):
     return {
         'leads': Lead.objects.filter(branch=branch, is_deleted=False),
         'walkins': WalkIn.objects.filter(branch=branch, is_deleted=False),
-        'enrollments': Enrollment.objects.filter(branch=branch, is_deleted=False),
+        'enrollments': reporting_enrollment_queryset(Enrollment.objects.filter(branch=branch)),
         'followups': FollowUp.objects.filter(updated_by__branch=branch),
     }
 
@@ -2571,7 +2627,7 @@ def organization_scope():
     return {
         'leads': Lead.objects.filter(is_deleted=False),
         'walkins': WalkIn.objects.filter(is_deleted=False),
-        'enrollments': Enrollment.objects.filter(is_deleted=False),
+        'enrollments': reporting_enrollment_queryset(Enrollment.objects.all()),
         'followups': FollowUp.objects.all(),
     }
 
@@ -2624,7 +2680,7 @@ class PerformanceHubView(APIView):
             ('revenue', 'Revenue Generated'),
         ])
 
-        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
+        users = User.objects.exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
         user_rows = []
         total_user_seconds = 0
         daily_totals = {}
@@ -2830,34 +2886,7 @@ class AdminAnalyticsDashboardView(APIView):
         user_id = request.query_params.get('user')
         course = request.query_params.get('course')
         source = request.query_params.get('source')
-        leads = Lead.objects.filter(is_deleted=False)
-        walkins = WalkIn.objects.filter(is_deleted=False)
-        enrollments = Enrollment.objects.filter(is_deleted=False)
-        followups = FollowUp.objects.all()
-        if branch:
-            leads = leads.filter(branch_id=branch)
-            walkins = walkins.filter(branch_id=branch)
-            enrollments = enrollments.filter(branch_id=branch)
-            followups = followups.filter(updated_by__branch_id=branch)
-        if user_id:
-            leads = leads.filter(Q(created_by_id=user_id) | Q(assigned_to_id=user_id))
-            walkins = walkins.filter(assigned_to_id=user_id)
-            enrollments = enrollments.filter(Q(created_by_id=user_id) | Q(enrolled_by_id=user_id))
-            followups = followups.filter(updated_by_id=user_id)
-        if course:
-            leads = leads.filter(course_id=course)
-            walkins = walkins.filter(course_id=course)
-            enrollments = enrollments.filter(course_id=course)
-        if source:
-            leads = leads.filter(source=source)
-            walkins = walkins.filter(source=source)
-            enrollments = enrollments.filter(source=source)
-        return start_date, end_date, {
-            'leads': leads,
-            'walkins': walkins,
-            'enrollments': enrollments,
-            'followups': followups,
-        }
+        return start_date, end_date, reporting_scope(branch=branch, user_id=user_id, course=course, source=source)
 
     def get(self, request):
         start_date, end_date, scope = self._filtered_scope(request)
@@ -2880,32 +2909,75 @@ class AdminAnalyticsDashboardView(APIView):
             for row in scope['enrollments'].filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
                 .values('enrollment_date').annotate(total=Sum('net_payable_fee')).order_by('enrollment_date')
         }
-        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
         branch_filter = request.query_params.get('branch')
+        user_filter = request.query_params.get('user')
+        course_filter = request.query_params.get('course')
+        source_filter = request.query_params.get('source')
+        users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
         if branch_filter:
             users = users.filter(branch_id=branch_filter)
-        user_filter = request.query_params.get('user')
         if user_filter:
             users = users.filter(id=user_filter)
         counselor_rows = []
         for user in users:
-            row_scope = user_scope(user)
-            row_metrics = performance_metrics(row_scope, start_date, end_date)
+            row_metrics = scoped_metrics(
+                branch=branch_filter,
+                user_id=user.id,
+                course=course_filter,
+                source=source_filter,
+                start_date=start_date,
+                end_date=end_date,
+            )
             counselor_rows.append({
                 'user_id': user.id,
                 'name': user.full_name,
                 'branch_name': user.branch.name if user.branch else '',
                 **row_metrics,
             })
+        if not user_filter:
+            unassigned_scope = reporting_scope(branch=branch_filter, course=course_filter, source=source_filter)
+            unassigned_scope['leads'] = unassigned_scope['leads'].filter(assigned_to__isnull=True)
+            unassigned_scope['walkins'] = unassigned_scope['walkins'].filter(assigned_to__isnull=True)
+            unassigned_scope['enrollments'] = unassigned_scope['enrollments'].filter(enrolled_by__isnull=True)
+            unassigned_metrics = performance_metrics(unassigned_scope, start_date, end_date)
+            if any(unassigned_metrics.get(key) for key in ('leads', 'walkins', 'enrollments', 'revenue')):
+                counselor_rows.append({
+                    'user_id': None,
+                    'name': 'Unassigned',
+                    'branch_name': '',
+                    **unassigned_metrics,
+                })
         counselor_rows.sort(key=lambda item: (-item['enrollments'], -float(item['revenue'] or 0), item['name']))
         branch_rows = []
-        for branch in Branch.objects.filter(is_active=True).order_by('name'):
-            row_metrics = performance_metrics(branch_scope(branch), start_date, end_date)
+        branches = Branch.objects.order_by('name')
+        if branch_filter:
+            branches = branches.filter(id=branch_filter)
+        for branch in branches:
+            row_metrics = scoped_metrics(
+                branch=branch.id,
+                user_id=user_filter,
+                course=course_filter,
+                source=source_filter,
+                start_date=start_date,
+                end_date=end_date,
+            )
             branch_rows.append({
                 'branch_id': branch.id,
                 'branch_name': branch.name,
                 **row_metrics,
             })
+        if not branch_filter:
+            unassigned_branch_scope = reporting_scope(user_id=user_filter, course=course_filter, source=source_filter)
+            unassigned_branch_scope['leads'] = unassigned_branch_scope['leads'].filter(branch__isnull=True)
+            unassigned_branch_scope['walkins'] = unassigned_branch_scope['walkins'].filter(branch__isnull=True)
+            unassigned_branch_scope['enrollments'] = unassigned_branch_scope['enrollments'].filter(branch__isnull=True)
+            unassigned_branch_metrics = performance_metrics(unassigned_branch_scope, start_date, end_date)
+            if any(unassigned_branch_metrics.get(key) for key in ('leads', 'walkins', 'enrollments', 'revenue')):
+                branch_rows.append({
+                    'branch_id': None,
+                    'branch_name': 'Unassigned Branch',
+                    **unassigned_branch_metrics,
+                })
         followup_total = metrics['total_followups']
         followup_pending = metrics['pending_followups']
         insights = [
@@ -2913,18 +2985,14 @@ class AdminAnalyticsDashboardView(APIView):
             f'Conversion rate is {metrics["conversion_ratio"]:.2f}% for the selected period.',
         ]
         payments = Payment.objects.select_related('enrollment', 'enrollment__branch', 'enrollment__course').filter(enrollment__is_deleted=False)
-        branch = request.query_params.get('branch')
-        user_id = request.query_params.get('user')
-        course = request.query_params.get('course')
-        source = request.query_params.get('source')
-        if branch:
-            payments = payments.filter(enrollment__branch_id=branch)
-        if user_id:
-            payments = payments.filter(Q(enrollment__created_by_id=user_id) | Q(enrollment__enrolled_by_id=user_id))
-        if course:
-            payments = payments.filter(enrollment__course_id=course)
-        if source:
-            payments = payments.filter(enrollment__source=source)
+        if branch_filter:
+            payments = payments.filter(enrollment__branch_id=branch_filter)
+        if user_filter:
+            payments = payments.filter(enrollment__enrolled_by_id=user_filter)
+        if course_filter:
+            payments = payments.filter(enrollment__course_id=course_filter)
+        if source_filter:
+            payments = payments.filter(enrollment__source=source_filter)
         collection = PaymentInstallment.objects.filter(
             payment__in=payments,
             payment_date__gte=start_date,
@@ -11437,15 +11505,11 @@ class DashboardSummaryView(APIView):
 
         total_fee_amount = pay_qs.aggregate(total=Sum('total_fees'))['total'] or 0
         total_paid_amount = pay_qs.aggregate(total=Sum('paid_amount'))['total'] or 0
-        value_enroll_qs = enrollment_value_queryset(enroll_qs)
+        value_enroll_qs = reporting_enrollment_queryset(enroll_qs)
         total_value_amount = value_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
-        dashboard_monthly_enroll_qs = enroll_qs.filter(
-            created_at__year=year,
-            created_at__month=month,
-            status__in=["enrolled", "active"],
-        )
+        dashboard_monthly_enroll_qs = value_enroll_qs.filter(enrollment_date__year=year, enrollment_date__month=month)
         value_this_month = dashboard_monthly_enroll_qs.aggregate(
             total=Sum('net_payable_fee')
         )['total'] or 0
@@ -11501,9 +11565,9 @@ class DashboardSummaryView(APIView):
         weekly_pending_amount = (weekly_totals['total'] or 0) - (weekly_totals['paid'] or 0)
         leads_this_month = lead_qs.filter(created_at__year=year, created_at__month=month).count()
         walkins_this_month = walkin_qs.filter(visit_date__year=year, visit_date__month=month).count()
-        counted_enroll_qs = enrollment_value_queryset(enroll_qs)
+        counted_enroll_qs = value_enroll_qs
         enroll_this_month = dashboard_monthly_enroll_qs.count()
-        conversion_rate = round((enroll_this_month / leads_this_month) * 100, 2) if leads_this_month else 0
+        conversion_rate = bounded_ratio(enroll_this_month, walkins_this_month)
 
         return Response({
             'total_leads':        lead_qs.count(),
@@ -11557,19 +11621,16 @@ class DashboardBranchComparisonView(APIView):
         data = []
         for branch in branches:
             year, month = map(int, month_str.split('-'))
-            enroll = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(
-                branch=branch,
-            )), year, month)
-            value = enroll.aggregate(v=Sum('net_payable_fee'))['v'] or 0
+            start_date = date(year, month, 1)
+            end_date = date(year, month, monthrange(year, month)[1])
+            metrics = scoped_metrics(branch=branch.id, start_date=start_date, end_date=end_date)
             data.append({
                 'branch_id':   branch.id,
                 'branch_name': branch.name,
-                'leads':       visible_candidate_queryset(Lead.objects.filter(branch=branch, created_at__year=year,
-                                                   created_at__month=month)).count(),
-                'walkins':     visible_candidate_queryset(WalkIn.objects.filter(branch=branch, visit_date__year=year,
-                                                     visit_date__month=month)).count(),
-                'enrollments': enroll.count(),
-                'value':       value,
+                'leads':       metrics['leads'],
+                'walkins':     metrics['walkins'],
+                'enrollments': metrics['enrollments'],
+                'value':       metrics['revenue'],
             })
         return Response(data)
 
@@ -11712,28 +11773,24 @@ class ConversionFunnelReportView(APIView):
         year = int(request.query_params.get('year') or timezone.localdate().year)
         month = int(request.query_params.get('month') or timezone.localdate().month)
         branch_id = request.query_params.get('branch')
+        start_date = date(year, month, 1)
+        end_date = date(year, month, monthrange(year, month)[1])
         lead_qs = visible_candidate_queryset(Lead.objects.filter(created_at__year=year, created_at__month=month))
-        walkin_qs = visible_candidate_queryset(WalkIn.objects.filter(visit_date__year=year, visit_date__month=month))
-        enroll_qs = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.all()), year, month)
+        metrics = scoped_metrics(branch=branch_id if branch_id and branch_id != 'all' else None, start_date=start_date, end_date=end_date)
         if branch_id and branch_id != 'all':
             lead_qs = lead_qs.filter(branch_id=branch_id)
-            walkin_qs = walkin_qs.filter(branch_id=branch_id)
-            enroll_qs = enroll_qs.filter(branch_id=branch_id)
         total_leads = lead_qs.count()
         contacted = lead_qs.filter(status__in=[Lead.Status.CONTACTED, Lead.Status.INTERESTED, Lead.Status.FOLLOW_UP, Lead.Status.WALK_IN, Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN]).count()
-        walkins = walkin_qs.count()
-        enrollments = enroll_qs.count()
-
-        def pct(value, base):
-            return round((value / base) * 100, 2) if base else 0
+        walkins = metrics['walkins']
+        enrollments = metrics['enrollments']
 
         return Response({
             'filters': {'year': year, 'month': month, 'branch': branch_id or 'all'},
             'funnel': [
                 {'stage': 'Leads', 'count': total_leads, 'conversion_percent': 100 if total_leads else 0},
-                {'stage': 'Contacted', 'count': contacted, 'conversion_percent': pct(contacted, total_leads)},
-                {'stage': 'Walk-ins', 'count': walkins, 'conversion_percent': pct(walkins, total_leads)},
-                {'stage': 'Enrollments', 'count': enrollments, 'conversion_percent': pct(enrollments, total_leads)},
+                {'stage': 'Contacted', 'count': contacted, 'conversion_percent': bounded_ratio(contacted, total_leads)},
+                {'stage': 'Walk-ins', 'count': walkins, 'conversion_percent': bounded_ratio(walkins, total_leads)},
+                {'stage': 'Enrollments', 'count': enrollments, 'conversion_percent': bounded_ratio(enrollments, walkins)},
             ],
         })
 
@@ -11747,9 +11804,11 @@ class BranchPerformanceComparisonReportView(APIView):
         today = timezone.localdate()
         rows = []
         for branch in Branch.objects.filter(is_active=True).order_by('name'):
+            start_date = date(year, month, 1)
+            end_date = date(year, month, monthrange(year, month)[1])
+            metrics = scoped_metrics(branch=branch.id, start_date=start_date, end_date=end_date)
             leads = visible_candidate_queryset(Lead.objects.filter(branch=branch, created_at__year=year, created_at__month=month))
             walkins = visible_candidate_queryset(WalkIn.objects.filter(branch=branch, visit_date__year=year, visit_date__month=month))
-            enrollments = current_month_enrollment_queryset(visible_candidate_queryset(Enrollment.objects.filter(branch=branch)), year, month)
             payments = visible_payment_queryset(Payment.objects.filter(enrollment__branch=branch))
             transfers_out = LeadTransferHistory.objects.filter(from_branch=branch, created_at__year=year, created_at__month=month).count()
             transfers_in = LeadTransferHistory.objects.filter(to_branch=branch, created_at__year=year, created_at__month=month).count()
@@ -11761,13 +11820,13 @@ class BranchPerformanceComparisonReportView(APIView):
                 Q(record_type=FollowUp.RecordType.WALKIN, record_id__in=walkins.values('id'))
             ).count()
             due_followups = missed_leads + missed_walkins + completed_followups
-            value = enrollments.aggregate(total=Sum('net_payable_fee'))['total'] or 0
+            value = metrics['revenue']
             target_score = 0
             if target:
                 achieved = sum([
-                    leads.count() >= target.lead_target,
-                    walkins.count() >= target.walkin_target,
-                    enrollments.count() >= target.enroll_target,
+                    metrics['leads'] >= target.lead_target,
+                    metrics['walkins'] >= target.walkin_target,
+                    metrics['enrollments'] >= target.enroll_target,
                     value >= target.revenue_target,
                 ])
                 target_score = round((achieved / 4) * 100, 2)
@@ -11777,11 +11836,11 @@ class BranchPerformanceComparisonReportView(APIView):
             rows.append({
                 'branch_id': branch.id,
                 'branch_name': branch.name,
-                'leads': leads.count(),
+                'leads': metrics['leads'],
                 'transferred_leads': transfers_out,
                 'received_leads': transfers_in,
-                'walkins': walkins.count(),
-                'enrollments': enrollments.count(),
+                'walkins': metrics['walkins'],
+                'enrollments': metrics['enrollments'],
                 'value': value,
                 'target_achievement': target_score,
                 'follow_up_completion': round((completed_followups / due_followups) * 100, 2) if due_followups else 100,
