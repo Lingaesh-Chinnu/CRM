@@ -1417,7 +1417,7 @@ class PublicWalkInFormTests(APITestCase):
             {'label': '2nd Installment', 'amount': 7000, 'due_date': '2026-06-12'},
         ])
 
-    def test_add_to_payment_uses_fixed_enrollment_and_final_balance_below_5000(self):
+    def test_add_to_payment_uses_single_payment_for_low_fee_course(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1437,11 +1437,10 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         payment = Payment.objects.get(enrollment=enrollment)
         self.assertEqual(payment.manual_installment_schedule, [
-            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '1st Installment', 'amount': 900, 'due_date': '2026-05-12'},
+            {'label': 'Single Payment', 'amount': 5900, 'due_date': '2026-05-11'},
         ])
 
-    def test_saved_low_fee_schedule_keeps_fixed_enrollment_and_final_balance(self):
+    def test_saved_low_fee_schedule_is_returned_as_single_payment(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1472,10 +1471,43 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['payment_schedule'], [
-            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '1st Installment', 'amount': 1900, 'due_date': '2026-05-12'},
+            {'label': 'Single Payment', 'amount': 6900, 'due_date': '2026-05-11'},
         ])
-        self.assertEqual(response.data['installment_summary'][0]['label'], 'Enrollment')
+        self.assertEqual(response.data['installment_summary'][0]['label'], 'Single Payment')
+
+    def test_default_schedule_uses_single_payment_at_low_fee_boundaries(self):
+        cases = [
+            (2900, [{'label': 'Single Payment', 'amount': 2900, 'due_date': '2026-05-11'}]),
+            (6900, [{'label': 'Single Payment', 'amount': 6900, 'due_date': '2026-05-11'}]),
+            (
+                6901,
+                [
+                    {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                    {'label': '1st Installment', 'amount': 1901, 'due_date': '2026-05-12'},
+                ],
+            ),
+        ]
+        self.client.force_authenticate(self.staff)
+        for fee, expected_schedule in cases:
+            with self.subTest(fee=fee):
+                enrollment = Enrollment.objects.create(
+                    branch=self.branch,
+                    course=self.course,
+                    name=f'Boundary Fee {fee}',
+                    phone=f'900000{fee}',
+                    preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                    enrollment_date='2026-05-11',
+                    start_date='2026-05-12',
+                    actual_fees=fee,
+                    discount_amount=0,
+                    status=Enrollment.Status.ACTIVE,
+                )
+
+                response = self.client.post(f'/api/enrollments/{enrollment.id}/add-to-payment/', format='json')
+
+                self.assertEqual(response.status_code, 201)
+                payment = Payment.objects.get(enrollment=enrollment)
+                self.assertEqual(payment.manual_installment_schedule, expected_schedule)
 
     def test_course_fee_7000_uses_fixed_enrollment_and_final_balance(self):
         enrollment = Enrollment.objects.create(

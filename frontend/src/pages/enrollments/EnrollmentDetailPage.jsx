@@ -21,6 +21,7 @@ const batchTimingOptions = [
 ]
 
 const SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
+const LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
 
 function addOneMonth(value) {
   if (!value) return ''
@@ -67,6 +68,9 @@ function buildSchedule(row, startDate, splitCount = 2) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
   const enrollmentDate = row?.enrollment_date || new Date().toISOString().slice(0, 10)
   const courseStartDate = startDate || row?.start_date || addOneMonth(enrollmentDate) || enrollmentDate
+  if (finalFees > 0 && finalFees <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE) {
+    return [{ label: 'Single Payment', amount: finalFees, due_date: enrollmentDate, paid_amount: 0, pending_amount: finalFees, status: 'pending' }]
+  }
   if (finalFees < 5000) return []
   let dueDate = courseStartDate
   const rows = [{ label: 'Enrollment', amount: 5000, due_date: enrollmentDate, paid_amount: 0, pending_amount: 5000, status: 'pending' }]
@@ -83,6 +87,18 @@ function buildSchedule(row, startDate, splitCount = 2) {
 
 function recalculateInstallmentPlan(row, startDate, rows, installmentCount) {
   const finalFees = Math.round(Number(row?.net_payable_fee || row?.final_fees || 0))
+  if (finalFees > 0 && finalFees <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE) {
+    const existingRows = cloneSchedule(rows)
+    const dueDate = existingRows[0]?.due_date || row?.enrollment_date || new Date().toISOString().slice(0, 10)
+    return [{
+      label: 'Single Payment',
+      amount: finalFees,
+      due_date: dueDate,
+      paid_amount: existingRows[0]?.paid_amount || 0,
+      pending_amount: finalFees,
+      status: existingRows[0]?.status || 'pending',
+    }]
+  }
   if (finalFees < 5000) return []
 
   const existingRows = cloneSchedule(rows)
@@ -168,6 +184,15 @@ function scheduleTotal(schedule) {
 function scheduleValidation(schedule, finalFees) {
   const rows = schedule || []
   if (!rows.length) return 'Payment schedule is required.'
+  if (finalFees > 0 && finalFees <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE) {
+    const row = rows[0]
+    const amount = Number(row.amount)
+    if (rows.length !== 1) return 'Small fee courses must use a single payment schedule.'
+    if (!Number.isFinite(amount) || amount <= 0) return 'Each installment amount must be greater than zero.'
+    if (amount !== finalFees) return 'Total planned amount must match course fee.'
+    if (!row.due_date) return 'Each installment needs a due date.'
+    return ''
+  }
   if (finalFees < 5000) return 'Course fee must be at least Rs 5,000.'
   for (const [index, item] of rows.entries()) {
     const amount = Number(item.amount)

@@ -84,7 +84,7 @@ from crm.models import (
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory, WalkInAssignmentChangeRequest,
     get_default_installment_schedule, get_enrollment_installment_schedule, get_saved_enrollment_installment_schedule,
     normalize_installment_schedule,
-    enrollment_payable_fee, ENROLLMENT_PAYMENT_AMOUNT, MIN_INSTALLMENT_AMOUNT,
+    enrollment_payable_fee, ENROLLMENT_PAYMENT_AMOUNT, LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE, MIN_INSTALLMENT_AMOUNT,
 )
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
@@ -8286,6 +8286,16 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         cleaned = []
         total = Decimal('0')
         expected_total = Decimal(str(enrollment_payable_fee(enrollment) or 0)).quantize(Decimal('0.01'))
+        if Decimal('0') < expected_total <= Decimal(str(LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE)):
+            raw_due_date = schedule[0].get('due_date') if isinstance(schedule[0], dict) else None
+            due_date = parse_date(str(raw_due_date)) if raw_due_date else enrollment.enrollment_date
+            if not due_date:
+                return None, 'Each installment needs a valid due date.'
+            return normalize_installment_schedule([{
+                'label': 'Single Payment',
+                'amount': decimal_to_schedule_amount(expected_total),
+                'due_date': due_date.isoformat(),
+            }]), ''
         if expected_total < Decimal(str(ENROLLMENT_PAYMENT_AMOUNT)):
             return None, 'Course fee must be at least Rs 5,000.'
         for index, item in enumerate(schedule, start=1):
@@ -9893,6 +9903,35 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         cleaned = []
         schedule_total = Decimal('0')
         expected_total = Decimal(str(payment.total_fees or 0)).quantize(Decimal('0.01'))
+        if Decimal('0') < expected_total <= Decimal(str(LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE)):
+            raw_due_date = schedule[0].get('due_date') if isinstance(schedule[0], dict) else None
+            parsed_due_date = parse_date(str(raw_due_date)) if raw_due_date else payment.enrollment.enrollment_date
+            if not parsed_due_date:
+                return Response({'detail': 'Each installment needs a valid due date.'}, status=400)
+            cleaned = [{
+                'label': 'Single Payment',
+                'amount': decimal_to_schedule_amount(expected_total),
+                'due_date': parsed_due_date.isoformat(),
+            }]
+            with transaction.atomic():
+                payment = (
+                    Payment.objects
+                    .select_for_update()
+                    .select_related('enrollment')
+                    .get(pk=payment.pk)
+                )
+                payment.enrollment.payment_schedule = cleaned
+                payment.enrollment.payment_schedule_locked = True
+                payment.enrollment.payment_schedule_finalized_at = payment.enrollment.payment_schedule_finalized_at or timezone.now()
+                payment.enrollment.save(update_fields=[
+                    'payment_schedule', 'payment_schedule_locked',
+                    'payment_schedule_finalized_at', 'updated_at',
+                ])
+                payment.paid_amount = payment.installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+                payment.manual_installment_schedule = cleaned
+                payment.save(update_fields=['manual_installment_schedule', 'paid_amount', 'status', 'next_payment_date', 'updated_at'])
+            resolve_payment_due_notifications_if_inactive(payment)
+            return Response(PaymentSerializer(payment, context={'request': request}).data)
         summary = payment_installment_summary(payment)
         locked_rows = {
             item['index']: item

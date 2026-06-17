@@ -4,6 +4,8 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 
+const LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
+
 const initialInstallment = {
   amount: '',
   payment_mode: 'cash',
@@ -131,9 +133,19 @@ function allocationPreview(installments, amount) {
   return rows
 }
 
-function validateSchedule(schedule) {
+function validateSchedule(schedule, totalFees) {
   if (!Array.isArray(schedule) || schedule.length === 0) {
     return 'Payment schedule is required.'
+  }
+  const expectedTotal = Number(totalFees || 0)
+  if (expectedTotal > 0 && expectedTotal <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE) {
+    const row = schedule[0]
+    const amount = Number(row?.amount)
+    if (schedule.length !== 1) return 'Small fee courses must use a single payment schedule.'
+    if (!Number.isFinite(amount) || amount <= 0) return 'Installment amount must be greater than zero.'
+    if (amount !== expectedTotal) return 'Payment schedule total must match course fee.'
+    if (!row.due_date) return 'Each installment needs a due date.'
+    return ''
   }
   let total = 0
   for (const [index, item] of schedule.entries()) {
@@ -330,7 +342,7 @@ export default function PaymentDetailPage() {
   }
 
   const updateSchedule = async () => {
-    const validationMessage = validateSchedule(schedule)
+    const validationMessage = validateSchedule(schedule, payment?.total_fees)
     if (validationMessage) {
       setMessage(validationMessage)
       return
@@ -352,6 +364,10 @@ export default function PaymentDetailPage() {
   }
 
   const addScheduleInstallment = () => {
+    if (Number(payment?.total_fees || 0) <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE) {
+      setMessage('Small fee courses use a single payment schedule.')
+      return
+    }
     const next = addPendingInstallment(schedule, installmentSummary)
     if (!next) {
       setMessage('Remaining pending amount cannot be split into another valid installment.')

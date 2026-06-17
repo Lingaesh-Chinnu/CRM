@@ -892,6 +892,7 @@ def enrollment_payable_fee(enrollment):
 
 ENROLLMENT_PAYMENT_AMOUNT = 5000
 MIN_INSTALLMENT_AMOUNT = 5000
+LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
 SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
 
 
@@ -932,11 +933,21 @@ def normalize_installment_schedule(schedule):
     return rows
 
 
+def _single_payment_schedule(enrollment, total_fees=None):
+    final_fees = int(round(float(total_fees if total_fees is not None else enrollment_payable_fee(enrollment) or 0)))
+    if 0 < final_fees <= LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE:
+        return [{'label': 'Single Payment', 'amount': final_fees, 'due_date': enrollment.enrollment_date}]
+    return None
+
+
 def get_default_installment_schedule(enrollment, split_count=2):
     final_fees = int(round(float(enrollment_payable_fee(enrollment) or 0)))
     enrollment_date = enrollment.enrollment_date
     first_due_date = enrollment.start_date or add_month_to_date(enrollment_date) or enrollment_date
 
+    single_payment_schedule = _single_payment_schedule(enrollment, final_fees)
+    if single_payment_schedule:
+        return single_payment_schedule
     if final_fees < ENROLLMENT_PAYMENT_AMOUNT:
         return []
 
@@ -960,12 +971,18 @@ def get_default_installment_schedule(enrollment, split_count=2):
 
 
 def get_enrollment_installment_schedule(enrollment):
+    single_payment_schedule = _single_payment_schedule(enrollment)
+    if single_payment_schedule:
+        return normalize_installment_schedule(single_payment_schedule)
     if getattr(enrollment, 'payment_schedule', None):
         return normalize_installment_schedule(enrollment.payment_schedule)
     return normalize_installment_schedule(get_default_installment_schedule(enrollment))
 
 
 def get_saved_enrollment_installment_schedule(enrollment):
+    single_payment_schedule = _single_payment_schedule(enrollment)
+    if single_payment_schedule:
+        return normalize_installment_schedule(single_payment_schedule)
     try:
         payment = getattr(enrollment, 'payment', None)
     except ObjectDoesNotExist:
@@ -978,6 +995,9 @@ def get_saved_enrollment_installment_schedule(enrollment):
 
 
 def get_payment_installment_schedule(payment):
+    single_payment_schedule = _single_payment_schedule(payment.enrollment, payment.total_fees)
+    if single_payment_schedule:
+        return normalize_installment_schedule(single_payment_schedule)
     if payment.manual_installment_schedule:
         return normalize_installment_schedule(payment.manual_installment_schedule)
     return get_enrollment_installment_schedule(payment.enrollment)
