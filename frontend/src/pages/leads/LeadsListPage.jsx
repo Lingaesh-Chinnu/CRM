@@ -344,6 +344,7 @@ export default function LeadsListPage() {
         ? {
             ...lead,
             remarks: followUp.remarks || lead.remarks,
+            latest_remark: followUp.remarks || lead.latest_remark || lead.remarks,
             next_follow_up_date: followUp.next_follow_up_date,
             latest_follow_up_at: followUp.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),

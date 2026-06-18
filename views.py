@@ -6365,6 +6365,14 @@ class PendingManagementView(APIView):
 
     def base_leads(self, request):
         qs = visible_candidate_queryset(Lead.objects.select_related('branch', 'course', 'assigned_to'))
+        latest_follow_up = FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=OuterRef('pk'),
+        ).order_by('-created_at', '-id')
+        qs = qs.annotate(
+            latest_follow_up_remark=Subquery(latest_follow_up.values('remarks')[:1]),
+            latest_follow_up_at=Subquery(latest_follow_up.values('created_at')[:1]),
+        )
         if not request.user.is_super_admin:
             qs = qs.filter(branch=request.user.branch)
         elif request.query_params.get('branch'):
@@ -6389,6 +6397,14 @@ class PendingManagementView(APIView):
 
     def base_walkins(self, request):
         qs = visible_candidate_queryset(WalkIn.objects.select_related('branch', 'course', 'assigned_to'))
+        latest_follow_up = FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=OuterRef('pk'),
+        ).order_by('-created_at', '-id')
+        qs = qs.annotate(
+            latest_follow_up_remark=Subquery(latest_follow_up.values('remarks')[:1]),
+            latest_follow_up_at=Subquery(latest_follow_up.values('created_at')[:1]),
+        )
         if not request.user.is_super_admin:
             qs = qs.filter(branch=request.user.branch)
         elif request.query_params.get('branch'):
@@ -6447,6 +6463,7 @@ class PendingManagementView(APIView):
         return qs.order_by('next_payment_date', 'enrollment__name')
 
     def lead_row(self, lead):
+        latest_remark = getattr(lead, 'latest_follow_up_remark', None)
         return {
             'id': lead.id,
             'name': lead.name,
@@ -6456,7 +6473,9 @@ class PendingManagementView(APIView):
             'status': lead.status,
             'status_display': automated_lead_status_display(lead),
             'due_date': lead.next_follow_up_date,
-            'remarks': lead.remarks,
+            'remarks': latest_remark if latest_remark not in (None, '') else lead.remarks,
+            'latest_remark': latest_remark if latest_remark not in (None, '') else lead.remarks,
+            'latest_follow_up_at': getattr(lead, 'latest_follow_up_at', None),
             'assigned_to_name': lead.assigned_to.full_name if lead.assigned_to else '',
             'assigned_user': user_identity_payload(lead.assigned_to),
             'is_important': lead.is_important,
@@ -6464,6 +6483,7 @@ class PendingManagementView(APIView):
         }
 
     def walkin_row(self, walkin):
+        latest_remark = getattr(walkin, 'latest_follow_up_remark', None)
         return {
             'id': walkin.id,
             'name': walkin.name,
@@ -6473,7 +6493,9 @@ class PendingManagementView(APIView):
             'status': walkin.status,
             'status_display': automated_walkin_status_display(walkin),
             'due_date': walkin.follow_up_date,
-            'remarks': walkin.remarks,
+            'remarks': latest_remark if latest_remark not in (None, '') else walkin.remarks,
+            'latest_remark': latest_remark if latest_remark not in (None, '') else walkin.remarks,
+            'latest_follow_up_at': getattr(walkin, 'latest_follow_up_at', None),
             'assigned_to_name': walkin.assigned_to.full_name if walkin.assigned_to else '',
             'assigned_user': user_identity_payload(walkin.assigned_to),
             'is_important': walkin.is_important,
@@ -6760,6 +6782,14 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         if self.action == 'list':
             qs = visible_candidate_queryset(WalkIn.objects.select_related('course', 'branch', 'assigned_to', 'created_by', 'enrollment'))
+            latest_follow_up = FollowUp.objects.filter(
+                record_type=FollowUp.RecordType.WALKIN,
+                record_id=OuterRef('pk'),
+            ).order_by('-created_at', '-id')
+            qs = qs.annotate(
+                latest_follow_up_remark=Subquery(latest_follow_up.values('remarks')[:1]),
+                latest_follow_up_at=Subquery(latest_follow_up.values('created_at')[:1]),
+            )
         else:
             qs = visible_candidate_queryset(WalkIn.objects.select_related('course','branch','assigned_to','created_by','lead','enrollment'))
         missing_columns = missing_model_columns(WalkIn, [

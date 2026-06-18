@@ -537,12 +537,13 @@ class LeadListSerializer(serializers.ModelSerializer):
     imported_via_csv = serializers.SerializerMethodField()
     remarks = serializers.SerializerMethodField()
     latest_follow_up_at = serializers.SerializerMethodField()
+    latest_remark = serializers.SerializerMethodField()
     source_description = serializers.SerializerMethodField()
 
     class Meta:
         model  = Lead
         fields = ['id','lead_number','name','phone','location','course_name','remarks',
-                  'source_description','latest_follow_up_at',
+                  'source_description','latest_follow_up_at','latest_remark',
                   'status','status_display','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
                   'branch_name','created_by','converted_to_type','converted_record_id',
@@ -577,6 +578,9 @@ class LeadListSerializer(serializers.ModelSerializer):
     def get_remarks(self, obj):
         latest = getattr(obj, 'latest_follow_up_remark', None)
         return latest if latest not in (None, '') else safe_deferred_value(obj, 'remarks', '') or ''
+
+    def get_latest_remark(self, obj):
+        return self.get_remarks(obj)
 
     def get_latest_follow_up_at(self, obj):
         value = getattr(obj, 'latest_follow_up_at', None)
@@ -923,7 +927,9 @@ class WalkInListSerializer(serializers.ModelSerializer):
     walk_in_by_display = serializers.SerializerMethodField()
     enrollment_id = serializers.SerializerMethodField()
     is_converted_to_enrollment = serializers.SerializerMethodField()
+    remarks = serializers.SerializerMethodField()
     latest_remark = serializers.SerializerMethodField()
+    latest_follow_up_at = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -934,7 +940,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
-                  'is_converted_to_enrollment','latest_remark','is_important','created_at']
+                  'is_converted_to_enrollment','latest_remark','latest_follow_up_at','is_important','created_at']
 
     def to_representation(self, instance):
         defaults = {
@@ -1025,11 +1031,15 @@ class WalkInListSerializer(serializers.ModelSerializer):
         return self.get_enrollment_id(obj) is not None
 
     def get_latest_remark(self, obj):
-        follow_up = FollowUp.objects.filter(
-            record_type=FollowUp.RecordType.WALKIN,
-            record_id=obj.id,
-        ).order_by('-created_at', '-id').first()
-        return follow_up.remarks if follow_up else obj.remarks
+        return self.get_remarks(obj)
+
+    def get_remarks(self, obj):
+        latest = getattr(obj, 'latest_follow_up_remark', None)
+        return latest if latest not in (None, '') else safe_deferred_value(obj, 'remarks', '') or ''
+
+    def get_latest_follow_up_at(self, obj):
+        value = getattr(obj, 'latest_follow_up_at', None)
+        return value.isoformat() if hasattr(value, 'isoformat') else value
 
 
 class WalkInDetailSerializer(serializers.ModelSerializer):

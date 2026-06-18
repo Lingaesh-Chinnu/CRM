@@ -92,6 +92,103 @@ class AdminReceiptTests(APITestCase):
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
     SECURE_SSL_REDIRECT=False,
 )
+class FollowUpRemarkConsistencyTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.course = Course.objects.create(name='Python Full Stack', actual_fees=42900)
+        self.staff = User.objects.create_user(
+            username='remark-staff',
+            email='remark-staff@example.com',
+            password='pass12345',
+            branch=self.branch,
+            role=User.Role.STAFF,
+        )
+        self.client.force_authenticate(user=self.staff)
+
+    def test_lead_list_and_detail_use_latest_follow_up_remark(self):
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            created_by=self.staff,
+            name='Remark Lead',
+            phone='9000010001',
+            remarks='Old denormalized lead remark',
+            next_follow_up_date='2026-06-19',
+            status=Lead.Status.FOLLOW_UP,
+        )
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=lead.id,
+            follow_up_date='2026-06-17',
+            next_follow_up_date='2026-06-18',
+            remarks='Older lead follow-up',
+            updated_by=self.staff,
+        )
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.LEAD,
+            record_id=lead.id,
+            follow_up_date='2026-06-18',
+            next_follow_up_date='2026-06-19',
+            remarks='Newest lead follow-up',
+            updated_by=self.staff,
+        )
+
+        list_response = self.client.get('/api/leads/')
+        detail_response = self.client.get(f'/api/leads/{lead.id}/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(detail_response.status_code, 200)
+        list_row = next(item for item in list_response.data if item['id'] == lead.id)
+        self.assertEqual(list_row['remarks'], 'Newest lead follow-up')
+        self.assertEqual(list_row['latest_remark'], 'Newest lead follow-up')
+        self.assertEqual(detail_response.data['latest_remark'], 'Newest lead follow-up')
+        self.assertEqual(detail_response.data['follow_ups'][0]['remarks'], 'Newest lead follow-up')
+
+    def test_walkin_list_and_detail_use_latest_follow_up_remark(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            created_by=self.staff,
+            name='Remark Walkin',
+            phone='9000010002',
+            remarks='Old denormalized walk-in remark',
+            follow_up_date='2026-06-19',
+            status=WalkIn.Status.FOLLOW_UP,
+        )
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            follow_up_date='2026-06-17',
+            next_follow_up_date='2026-06-18',
+            remarks='Older walk-in follow-up',
+            updated_by=self.staff,
+        )
+        FollowUp.objects.create(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            follow_up_date='2026-06-18',
+            next_follow_up_date='2026-06-19',
+            remarks='Newest walk-in follow-up',
+            updated_by=self.staff,
+        )
+
+        list_response = self.client.get('/api/walkins/')
+        detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(detail_response.status_code, 200)
+        list_row = next(item for item in list_response.data if item['id'] == walkin.id)
+        self.assertEqual(list_row['remarks'], 'Newest walk-in follow-up')
+        self.assertEqual(list_row['latest_remark'], 'Newest walk-in follow-up')
+        self.assertEqual(detail_response.data['follow_ups'][0]['remarks'], 'Newest walk-in follow-up')
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
 class LeadTransferTests(APITestCase):
     def setUp(self):
         self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
