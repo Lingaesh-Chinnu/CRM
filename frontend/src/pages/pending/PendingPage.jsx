@@ -169,12 +169,12 @@ export default function PendingPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
-        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Pending</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Pending Management</p>
         <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{config.title}</h1>
         <div className="mt-5 flex flex-wrap gap-2">
-          <Link to="/pending/leads" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'leads' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Lead Pending</Link>
-          <Link to="/pending/walkins" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'walkins' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Walk-in Pending</Link>
-          <Link to="/pending/payments" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'payments' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Payment Pending</Link>
+          <Link to="/pending/leads" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'leads' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Leads</Link>
+          <Link to="/pending/walkins" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'walkins' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Walk-in</Link>
+          <Link to="/pending/payments" className={`rounded-2xl px-4 py-2 text-sm font-semibold ${module === 'payments' ? 'bg-slate-950 text-white' : 'border border-slate-200 text-slate-700'}`}>Payment</Link>
         </div>
       </section>
 

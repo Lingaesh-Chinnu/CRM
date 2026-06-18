@@ -88,33 +88,13 @@ function SidebarContent({ onNavigate }) {
         <nav className="space-y-2">
           {navigation.filter((item) => !item.staffOnly || user?.role !== 'super_admin').map((item) => (
             item.pending ? (
-              <div key={item.name} className="space-y-1">
-                <NavItem
-                  item={item}
-                  active={location.pathname.startsWith('/pending')}
-                  onNavigate={onNavigate}
-                  badge={pendingCounts.total_pending}
-                />
-                {location.pathname.startsWith('/pending') && (
-                  <div className="ml-12 space-y-1">
-                    {[
-                      ['Lead Pending', '/pending/leads', pendingCounts.lead_pending],
-                      ['Walk-in Pending', '/pending/walkins', pendingCounts.walkin_pending],
-                      ['Payment Pending', '/pending/payments', pendingCounts.payment_pending],
-                    ].map(([name, href, count]) => (
-                      <Link
-                        key={href}
-                        to={href}
-                        onClick={onNavigate}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold transition ${location.pathname === href ? 'bg-white/12 text-white' : 'text-slate-300 hover:bg-white/10 hover:text-white'}`}
-                      >
-                        <span>{name}</span>
-                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-black">{count || 0}</span>
-                      </Link>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <NavItem
+                key={item.name}
+                item={item}
+                active={location.pathname.startsWith('/pending')}
+                onNavigate={onNavigate}
+                badge={pendingCounts.total_pending}
+              />
             ) : (
               <NavItem
                 key={item.name}
