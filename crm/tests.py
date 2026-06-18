@@ -1866,7 +1866,7 @@ class PublicWalkInFormTests(APITestCase):
             ],
         )
 
-    def test_signed_rules_pdf_is_rebuilt_from_latest_schedule(self):
+    def test_signed_rules_pdf_view_uses_stored_pdf_without_rebuild(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.course,
@@ -1896,9 +1896,8 @@ class PublicWalkInFormTests(APITestCase):
             response = self.client.get(f'/public/rules-signed-pdf/{signing.token}/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, b'%PDF-latest')
-        build_pdf.assert_called_once()
-        self.assertEqual(build_pdf.call_args.args[0], enrollment)
+        self.assertEqual(response.content, b'%PDF-stored')
+        build_pdf.assert_not_called()
 
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
@@ -1936,9 +1935,25 @@ class PublicWalkInFormTests(APITestCase):
         enrollment.refresh_from_db()
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
         self.assertEqual(enrollment.status, Enrollment.Status.RULES_SUBMITTED)
-        self.assertTrue(signing.selfie_image_file)
-        self.assertTrue(signing.signature_image_file)
-        self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
+        self.assertTrue(signing.selfie_image)
+        self.assertTrue(signing.signature_image)
+        self.assertTrue(signing.signed_pdf)
+        self.assertFalse(signing.selfie_image_file)
+        self.assertFalse(signing.signature_image_file)
+        self.assertFalse(signing.signed_pdf_file)
+        self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
+
+        with mock.patch('views.build_signed_rules_pdf') as build_pdf:
+            pdf_response = self.client.get(f'/public/rules-signed-pdf/{signing.token}/')
+
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertTrue(b''.join(pdf_response.streaming_content).startswith(b'%PDF'))
+        build_pdf.assert_not_called()
+
+        self.client.force_authenticate(user=self.staff)
+        selfie_response = self.client.get(f'/rules-selfie/{enrollment.id}/')
+        self.assertEqual(selfie_response.status_code, 200)
+        self.assertTrue(b''.join(selfie_response.streaming_content).startswith(b'\x89PNG'))
 
     def test_public_rules_signing_hides_dependency_errors(self):
         enrollment = Enrollment.objects.create(
