@@ -1641,6 +1641,7 @@ class AdminReceipt(TimeStampedModel):
     purpose        = models.CharField(max_length=200)
     amount         = models.DecimalField(max_digits=10, decimal_places=2)
     payment_mode   = models.CharField(max_length=20, choices=Mode.choices, default=Mode.CASH)
+    reference_number = models.CharField(max_length=100, blank=True)
     payment_date   = models.DateField(default=timezone.now)
     notes          = models.TextField(blank=True)
     generated_by   = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,

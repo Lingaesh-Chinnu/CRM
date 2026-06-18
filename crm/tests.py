@@ -9,10 +9,69 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
+
+
+@override_settings(
+    ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
+    SECURE_SSL_REDIRECT=False,
+)
+class AdminReceiptTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(
+            name='Gandhipuram',
+            address='100 Feet Road',
+            city='Coimbatore',
+            state='Tamil Nadu',
+            pincode='641012',
+            phone='9000000001',
+        )
+        self.admin = User.objects.create_superuser(
+            username='receipt-admin',
+            email='receipt-admin@example.com',
+            password='pass12345',
+        )
+        self.client.force_authenticate(user=self.admin)
+
+    def test_admin_receipt_accepts_reference_and_generates_pdf(self):
+        response = self.client.post('/api/admin-receipts/', {
+            'name': 'Receipt Student',
+            'phone': '9000001111',
+            'purpose': 'Exam Fee',
+            'amount': '36900',
+            'payment_mode': 'upi',
+            'reference_number': 'UPI-12345',
+            'payment_date': '2026-06-18',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        receipt = AdminReceipt.objects.get()
+        self.assertEqual(receipt.reference_number, 'UPI-12345')
+
+        pdf_response = self.client.get(f'/api/admin-receipts/{receipt.id}/view-receipt/')
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertTrue(pdf_response.content.startswith(b'%PDF'))
+
+    def test_admin_receipt_defaults_to_gandhipuram_branch_details(self):
+        from views import AdminReceiptViewSet
+
+        payload = AdminReceiptViewSet()._branch_header_payload(None)
+        self.assertEqual(payload['branch_name'], 'Gandhipuram')
+        self.assertIn('100 Feet Road', payload['branch_address_lines'])
+        self.assertEqual(payload['branch_phone'], '9000000001')
+        self.assertNotIn('not set', ' '.join(payload['branch_address_lines']).lower())
+        self.assertNotIn('not set', payload['branch_phone'].lower())
+
+    def test_admin_receipt_amount_in_words_uses_indian_grouping(self):
+        from views import AdminReceiptViewSet
+
+        self.assertEqual(
+            AdminReceiptViewSet()._amount_in_words(Decimal('36900')),
+            'Thirty Six Thousand Nine Hundred Rupees Only',
+        )
 
 
 @override_settings(

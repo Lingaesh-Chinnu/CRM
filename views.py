@@ -11033,9 +11033,12 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
     pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['purpose', 'payment_mode', 'payment_date']
-    search_fields = ['receipt_number', 'name', 'phone', 'purpose']
+    search_fields = ['receipt_number', 'name', 'phone', 'purpose', 'reference_number']
     ordering_fields = ['payment_date', 'generated_on', 'amount', 'name', 'purpose']
     ordering = ['-payment_date', '-created_at']
+    DEFAULT_BRANCH_NAME = 'Gandhipuram'
+    SYSTEM_BRANCH_ADDRESS = 'Indra Institute of Education, Gandhipuram, Coimbatore'
+    SYSTEM_BRANCH_PHONE = '9000000001'
 
     def get_queryset(self):
         return AdminReceipt.objects.select_related('generated_by__branch').all()
@@ -11059,11 +11062,24 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
 
     def _receipt_date(self, value):
         if not value:
-            return 'Not set'
+            return timezone.localdate().strftime('%d/%m/%Y')
         if isinstance(value, str):
             value = parse_date(value)
         if hasattr(value, 'strftime'):
             return value.strftime('%d/%m/%Y')
+        return str(value)
+
+    def _receipt_datetime(self, value):
+        if not value:
+            value = timezone.now()
+        if isinstance(value, str):
+            parsed = parse_date(value)
+            if parsed:
+                return parsed.strftime('%d/%m/%Y')
+        if hasattr(value, 'utcoffset'):
+            value = timezone.localtime(value)
+        if hasattr(value, 'strftime'):
+            return value.strftime('%d/%m/%Y %I:%M %p')
         return str(value)
 
     def _logo_src(self):
@@ -11080,6 +11096,8 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         return ''
 
     def _branch_header_payload(self, branch):
+        default_branch = Branch.objects.filter(name__iexact=self.DEFAULT_BRANCH_NAME).first()
+        branch = default_branch or branch
         lines = []
         if branch:
             lines = [line.strip() for line in str(branch.address or '').splitlines() if line.strip()]
@@ -11093,11 +11111,44 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
             ])
             if city_line:
                 lines.append(city_line)
+        fallback_address = getattr(settings, 'ADMIN_RECEIPT_DEFAULT_BRANCH_ADDRESS', self.SYSTEM_BRANCH_ADDRESS)
+        fallback_phone = getattr(settings, 'ADMIN_RECEIPT_DEFAULT_BRANCH_PHONE', self.SYSTEM_BRANCH_PHONE)
         return {
-            'branch_name': branch.name if branch and branch.name else 'Branch not set',
-            'branch_address_lines': lines or ['Branch address not set'],
-            'branch_phone': branch.phone if branch and branch.phone else 'Phone number not set',
+            'branch_name': branch.name if branch and branch.name else getattr(settings, 'ADMIN_RECEIPT_DEFAULT_BRANCH_NAME', 'Gandhipuram Branch'),
+            'branch_address_lines': lines or [fallback_address],
+            'branch_phone': branch.phone if branch and branch.phone else fallback_phone,
         }
+
+    def _amount_in_words(self, amount):
+        amount = Decimal(str(amount or 0)).quantize(Decimal('1'))
+        number = int(amount)
+        if number == 0:
+            return 'Zero Rupees Only'
+        ones = [
+            '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+            'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+            'Seventeen', 'Eighteen', 'Nineteen',
+        ]
+        tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
+
+        def under_hundred(value):
+            if value < 20:
+                return ones[value]
+            return ' '.join(part for part in [tens[value // 10], ones[value % 10]] if part)
+
+        def under_thousand(value):
+            if value < 100:
+                return under_hundred(value)
+            return ' '.join(part for part in [ones[value // 100], 'Hundred', under_hundred(value % 100)] if part)
+
+        parts = []
+        for divisor, label in ((10000000, 'Crore'), (100000, 'Lakh'), (1000, 'Thousand')):
+            if number >= divisor:
+                parts.append(f'{under_thousand(number // divisor)} {label}')
+                number %= divisor
+        if number:
+            parts.append(under_thousand(number))
+        return f'{" ".join(parts)} Rupees Only'
 
     def _build_receipt_html(self, receipt):
         logo_src = self._logo_src()
@@ -11198,18 +11249,43 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
             raise RuntimeError('Pillow is required to generate receipt PDFs.') from exc
 
         width, height = 1240, 1754
-        margin = 82
+        margin = 76
         navy = '#1E3A5F'
+        ink = '#111827'
         slate = '#334155'
+        muted = '#64748b'
         border = '#CBD5E1'
+        soft = '#F8FAFC'
         page = Image.new('RGB', (width, height), 'white')
         draw = ImageDraw.Draw(page)
-        font = ImageFont.load_default()
-        title_font = ImageFont.load_default()
-        label_font = ImageFont.load_default()
 
-        branch_header = self._branch_header_payload(receipt.generated_by.branch if receipt.generated_by_id and receipt.generated_by else None)
-        header_height = 190
+        def load_font(weight, size):
+            font_candidates = [
+                Path(settings.BASE_DIR) / 'frontend' / 'src' / 'assets' / 'fonts' / f'libertinus-serif-{weight}.woff2',
+                Path(settings.BASE_DIR) / 'staticfiles' / 'assets' / f'libertinus-serif-{weight}.woff2',
+                Path('/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'),
+                Path('/usr/share/fonts/truetype/liberation2/LiberationSerif-Regular.ttf'),
+                Path('C:/Windows/Fonts/georgia.ttf'),
+                Path('C:/Windows/Fonts/times.ttf'),
+            ]
+            for font_path in font_candidates:
+                try:
+                    if font_path.exists():
+                        return ImageFont.truetype(str(font_path), size=size)
+                except Exception:
+                    continue
+            return ImageFont.load_default()
+
+        title_font = load_font(700, 42)
+        header_font = load_font(700, 30)
+        section_font = load_font(700, 25)
+        label_font = load_font(700, 17)
+        value_font = load_font(600, 24)
+        body_font = load_font(400, 21)
+        small_font = load_font(400, 18)
+
+        branch_header = self._branch_header_payload(None)
+        header_height = 245
         draw.rectangle((0, 0, width, header_height), fill=navy)
         logo_candidates = [
             Path(settings.BASE_DIR) / 'frontend' / 'public' / 'iie-white.png',
@@ -11218,8 +11294,8 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         for logo_path in logo_candidates:
             if logo_path.exists():
                 logo = Image.open(logo_path).convert('RGBA')
-                logo.thumbnail((112, 112))
-                page.paste(logo, (margin, 34), logo)
+                logo.thumbnail((126, 126))
+                page.paste(logo, (margin, 44), logo)
                 break
 
         def center_text(text, y, fill='white', selected_font=None):
@@ -11227,67 +11303,95 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
             bbox = draw.textbbox((0, 0), text, font=selected_font)
             draw.text(((width - (bbox[2] - bbox[0])) / 2, y), text, fill=fill, font=selected_font)
 
-        center_text('INDRA INSTITUTE OF EDUCATION', 34)
-        center_text('IT Training & Testing Services', 66)
+        center_text('INDRA INSTITUTE OF EDUCATION', 34, selected_font=title_font)
+        center_text(branch_header['branch_name'], 88, selected_font=header_font)
         address_lines = []
         for line in branch_header['branch_address_lines']:
-            address_lines.extend(wrap_text(draw, str(line), font, width - 360) or [str(line)])
+            address_lines.extend(wrap_text(draw, str(line), body_font, width - 400) or [str(line)])
         if branch_header.get('branch_phone'):
-            address_lines.append(str(branch_header['branch_phone']))
-        for line_index, line in enumerate(address_lines[:4]):
-            center_text(str(line), 98 + (line_index * 22), selected_font=font)
+            address_lines.append(f'Phone: {branch_header["branch_phone"]}')
+        for line_index, line in enumerate(address_lines[:5]):
+            center_text(str(line), 128 + (line_index * 25), selected_font=body_font)
 
-        y = header_height
-        draw.rectangle((0, y, width, y + 70), fill='white', outline=border)
-        draw.text((margin, y + 24), 'PAYMENT RECEIPT', fill='black', font=title_font)
-        receipt_label = f'Receipt No: {receipt.receipt_number}'
-        receipt_bbox = draw.textbbox((0, 0), receipt_label, font=title_font)
-        draw.text((width - margin - (receipt_bbox[2] - receipt_bbox[0]), y + 24), receipt_label, fill=navy, font=title_font)
+        y = header_height + 34
+        draw.rounded_rectangle((margin, y, width - margin, y + 92), radius=12, fill=soft, outline=border, width=2)
+        draw.text((margin + 26, y + 28), 'PAYMENT RECEIPT', fill=ink, font=header_font)
+        receipt_label = f'Receipt Number: {receipt.receipt_number or "-"}'
+        receipt_bbox = draw.textbbox((0, 0), receipt_label, font=value_font)
+        draw.text((width - margin - 26 - (receipt_bbox[2] - receipt_bbox[0]), y + 32), receipt_label, fill=navy, font=value_font)
 
-        y += 110
+        y += 128
         amount = Decimal(str(receipt.amount or 0))
-        fields = [
-            ('RECEIPT NO', receipt.receipt_number),
-            ('PAYMENT DATE', self._receipt_date(receipt.payment_date)),
-            ('NAME', receipt.name),
-            ('PHONE NUMBER', receipt.phone),
-            ('PURPOSE', receipt.purpose),
-            ('PAYMENT MODE', receipt.get_payment_mode_display()),
-            ('AMOUNT', f'Rs {amount:,.2f}'),
-        ]
-        if receipt.notes:
-            fields.append(('NOTES', receipt.notes))
-
-        col_width = (width - (margin * 2) - 40) / 2
-        row_height = 76
-        for index, (label, value) in enumerate(fields):
-            col = index % 2
-            row = index // 2
-            x = margin + col * (col_width + 40)
-            row_y = y + row * row_height
-            if label == 'NOTES':
-                x = margin
-                col_width = width - (margin * 2)
-            draw.text((x, row_y), label, fill=slate, font=label_font)
-            lines = wrap_text(draw, str(value), font, int(col_width))
-            for line_index, line in enumerate(lines[:3]):
-                draw.text((x, row_y + 26 + (line_index * 22)), line, fill='black', font=font)
-
+        amount_words = self._amount_in_words(amount)
         generated_by = receipt.generated_by.full_name if receipt.generated_by else 'Admin'
-        info_y = y + (((len(fields) + 1) // 2) * row_height) + 55
-        draw.line((margin, info_y - 24, width - margin, info_y - 24), fill=border, width=2)
-        draw.text((margin, info_y), f'GENERATED BY: {generated_by}', fill=slate, font=font)
-        draw.text((margin, info_y + 34), f'GENERATED ON: {self._receipt_date(receipt.generated_on)}', fill=slate, font=font)
+        reference_number = str(getattr(receipt, 'reference_number', '') or '').strip()
+
+        def section_title(title, current_y):
+            draw.text((margin, current_y), title, fill=navy, font=section_font)
+            draw.line((margin, current_y + 36, width - margin, current_y + 36), fill=border, width=2)
+            return current_y + 58
+
+        def draw_field(label, value, x, current_y, box_width, box_height=86):
+            draw.rounded_rectangle((x, current_y, x + box_width, current_y + box_height), radius=10, fill=soft, outline=border, width=1)
+            draw.text((x + 18, current_y + 15), label.upper(), fill=muted, font=label_font)
+            lines = wrap_text(draw, str(value or '-'), value_font, box_width - 36)
+            for line_index, line in enumerate(lines[:2]):
+                draw.text((x + 18, current_y + 43 + (line_index * 26)), line, fill=ink, font=value_font if line_index == 0 else body_font)
+
+        col_gap = 24
+        col_width = (width - (margin * 2) - col_gap) // 2
+
+        y = section_title('Receipt Details', y)
+        draw_field('Receipt Number', receipt.receipt_number, margin, y, col_width)
+        draw_field('Payment Date', self._receipt_date(receipt.payment_date), margin + col_width + col_gap, y, col_width)
+        y += 122
+
+        y = section_title('Received From', y)
+        draw_field('Student Name', receipt.name, margin, y, col_width)
+        draw_field('Phone Number', receipt.phone, margin + col_width + col_gap, y, col_width)
+        y += 122
+
+        y = section_title('Payment Information', y)
+        purpose_height = 102
+        draw_field('Purpose', receipt.purpose, margin, y, col_width, purpose_height)
+        draw_field('Payment Mode', receipt.get_payment_mode_display(), margin + col_width + col_gap, y, col_width, purpose_height)
+        y += purpose_height + 16
+        if reference_number:
+            draw_field('Reference Number', reference_number, margin, y, width - (margin * 2), 82)
+            y += 110
+
+        y = section_title('Amount', y)
+        amount_box_height = 132
+        draw.rounded_rectangle((margin, y, width - margin, y + amount_box_height), radius=12, fill=soft, outline=border, width=1)
+        draw.text((margin + 22, y + 18), 'AMOUNT', fill=muted, font=label_font)
+        draw.text((margin + 22, y + 50), f'Rs. {amount:,.2f}', fill=navy, font=title_font)
+        draw.text((margin + 460, y + 18), 'AMOUNT IN WORDS', fill=muted, font=label_font)
+        for line_index, line in enumerate(wrap_text(draw, amount_words, value_font, width - margin - 482)[:3]):
+            draw.text((margin + 460, y + 50 + (line_index * 30)), line, fill=ink, font=value_font)
+        y += amount_box_height + 38
+
+        y = section_title('Generated Details', y)
+        draw_field('Generated By', generated_by, margin, y, col_width)
+        draw_field('Generated Date & Time', self._receipt_datetime(receipt.generated_on), margin + col_width + col_gap, y, col_width)
+        y += 124
+
+        if receipt.notes:
+            y = section_title('Notes', y)
+            note_height = 96
+            draw.rounded_rectangle((margin, y, width - margin, y + note_height), radius=10, fill=soft, outline=border, width=1)
+            for line_index, line in enumerate(wrap_text(draw, receipt.notes, body_font, width - (margin * 2) - 36)[:3]):
+                draw.text((margin + 18, y + 18 + (line_index * 25)), line, fill=ink, font=body_font)
 
         footer_y = height - 92
         draw.rectangle((0, footer_y, width, height), fill=navy)
-        draw.text((margin, footer_y + 34), 'Fees once paid cannot be refunded.', fill='white', font=font)
-        footer_text = 'This is a computer-generated bill, no signature required.'
-        footer_bbox = draw.textbbox((0, 0), footer_text, font=font)
-        draw.text((width - margin - (footer_bbox[2] - footer_bbox[0]), footer_y + 34), footer_text, fill='white', font=font)
+        draw.text((margin, footer_y + 24), 'Indra Institute of Education', fill='white', font=value_font)
+        draw.text((margin, footer_y + 55), 'Fees once paid cannot be refunded.', fill='white', font=small_font)
+        footer_text = 'This is a computer-generated receipt, no signature required.'
+        footer_bbox = draw.textbbox((0, 0), footer_text, font=small_font)
+        draw.text((width - margin - (footer_bbox[2] - footer_bbox[0]), footer_y + 38), footer_text, fill='white', font=small_font)
 
         output = io.BytesIO()
-        page.save(output, format='PDF')
+        page.save(output, format='PDF', resolution=120.0)
         output.seek(0)
         return output.read()
 

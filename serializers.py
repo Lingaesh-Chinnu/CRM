@@ -2076,7 +2076,7 @@ class AdminReceiptSerializer(serializers.ModelSerializer):
         model = AdminReceipt
         fields = [
             'id', 'receipt_number', 'name', 'phone', 'purpose', 'amount',
-            'payment_mode', 'payment_mode_display', 'payment_date', 'notes',
+            'payment_mode', 'payment_mode_display', 'reference_number', 'payment_date', 'notes',
             'generated_by', 'generated_by_name', 'generated_on', 'created_at',
             'updated_at',
         ]
@@ -2084,6 +2084,21 @@ class AdminReceiptSerializer(serializers.ModelSerializer):
             'receipt_number', 'generated_by', 'generated_by_name',
             'generated_on', 'created_at', 'updated_at',
         ]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        for field in ('name', 'phone', 'purpose'):
+            value = attrs.get(field, getattr(self.instance, field, ''))
+            if not str(value or '').strip():
+                raise serializers.ValidationError({field: 'This field is required.'})
+            attrs[field] = str(value).strip()
+        for field in ('reference_number', 'notes'):
+            if field in attrs:
+                attrs[field] = str(attrs.get(field) or '').strip()
+        amount = attrs.get('amount', getattr(self.instance, 'amount', None))
+        if amount is not None and Decimal(str(amount or 0)) <= 0:
+            raise serializers.ValidationError({'amount': 'Amount must be greater than zero.'})
+        return attrs
 
 
 # ============================================================
