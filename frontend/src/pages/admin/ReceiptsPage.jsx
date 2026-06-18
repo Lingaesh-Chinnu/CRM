@@ -9,7 +9,6 @@ const initialForm = {
   purpose: '',
   amount: '',
   payment_mode: 'cash',
-  reference_number: '',
   payment_date: today,
   notes: '',
 }
@@ -174,12 +173,6 @@ export default function ReceiptsPage() {
               ))}
             </select>
             <input
-              value={form.reference_number}
-              onChange={(event) => setForm({ ...form, reference_number: event.target.value })}
-              placeholder="Reference Number"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            />
-            <input
               type="date"
               value={form.payment_date}
               onChange={(event) => setForm({ ...form, payment_date: event.target.value })}
@@ -268,7 +261,6 @@ export default function ReceiptsPage() {
                       <td className="px-5 py-4 align-top font-bold text-slate-950">Rs {formatAmount(receipt.amount)}</td>
                       <td className="px-5 py-4 align-top">
                         <p className="text-slate-700">{receipt.payment_mode_display}</p>
-                        {receipt.reference_number && <p className="mt-1 break-words text-xs text-slate-500">Ref: {receipt.reference_number}</p>}
                         <p className="mt-1 text-xs text-slate-500">{receipt.payment_date}</p>
                       </td>
                       <td className="px-5 py-4 align-top">
@@ -307,7 +299,7 @@ export default function ReceiptsPage() {
                     <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Name</p><p className="font-bold text-slate-950">{receipt.name}</p><p className="text-xs text-slate-500">{receipt.phone}</p></div>
                     <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Purpose</p><p className="font-bold text-slate-950">{receipt.purpose}</p></div>
                     <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Amount</p><p className="font-bold text-slate-950">Rs {formatAmount(receipt.amount)}</p></div>
-                    <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Payment</p><p className="font-bold text-slate-950">{receipt.payment_mode_display}</p>{receipt.reference_number && <p className="text-xs text-slate-500">Ref: {receipt.reference_number}</p>}<p className="text-xs text-slate-500">{receipt.payment_date}</p></div>
+                    <div><p className="text-xs uppercase tracking-[0.14em] text-slate-500">Payment</p><p className="font-bold text-slate-950">{receipt.payment_mode_display}</p><p className="text-xs text-slate-500">{receipt.payment_date}</p></div>
                   </div>
                   <div className="mt-4 flex w-full flex-col gap-2">
                     <button

@@ -11033,7 +11033,7 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
     pagination_class = None
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_fields = ['purpose', 'payment_mode', 'payment_date']
-    search_fields = ['receipt_number', 'name', 'phone', 'purpose', 'reference_number']
+    search_fields = ['receipt_number', 'name', 'phone', 'purpose']
     ordering_fields = ['payment_date', 'generated_on', 'amount', 'name', 'purpose']
     ordering = ['-payment_date', '-created_at']
     DEFAULT_BRANCH_NAME = 'Gandhipuram'
@@ -11042,6 +11042,27 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return AdminReceipt.objects.select_related('generated_by__branch').all()
+
+    def list(self, request, *args, **kwargs):
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception:
+            logger.exception('Admin receipt list failed.')
+            return Response({'detail': 'Failed to load receipts.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def retrieve(self, request, *args, **kwargs):
+        try:
+            return super().retrieve(request, *args, **kwargs)
+        except Exception:
+            logger.exception('Admin receipt retrieve failed: receipt_id=%s.', kwargs.get('pk'))
+            return Response({'detail': 'Failed to load receipt.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except Exception:
+            logger.exception('Admin receipt create failed.')
+            return Response({'detail': 'Failed to create receipt.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _generate_receipt_number(self):
         year = timezone.localdate().year
@@ -11096,7 +11117,11 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
         return ''
 
     def _branch_header_payload(self, branch):
-        default_branch = Branch.objects.filter(name__iexact=self.DEFAULT_BRANCH_NAME).first()
+        try:
+            default_branch = Branch.objects.filter(name__iexact=self.DEFAULT_BRANCH_NAME).first()
+        except Exception:
+            logger.exception('Admin receipt branch lookup failed.')
+            default_branch = None
         branch = default_branch or branch
         lines = []
         if branch:
@@ -11397,17 +11422,25 @@ class AdminReceiptViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='view-receipt')
     def view_receipt(self, request, pk=None):
-        receipt = self.get_object()
-        response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
-        response['Content-Disposition'] = f'inline; filename="{receipt.receipt_number}.pdf"'
-        return response
+        try:
+            receipt = self.get_object()
+            response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{receipt.receipt_number or f"receipt-{receipt.id}"}.pdf"'
+            return response
+        except Exception:
+            logger.exception('Admin receipt PDF view failed: receipt_id=%s.', pk)
+            return Response({'detail': 'Failed to open receipt PDF.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['get'], url_path='download-receipt')
     def download_receipt(self, request, pk=None):
-        receipt = self.get_object()
-        response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{receipt.receipt_number}.pdf"'
-        return response
+        try:
+            receipt = self.get_object()
+            response = HttpResponse(self._build_receipt_pdf(receipt), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{receipt.receipt_number or f"receipt-{receipt.id}"}.pdf"'
+            return response
+        except Exception:
+            logger.exception('Admin receipt PDF download failed: receipt_id=%s.', pk)
+            return Response({'detail': 'Failed to download receipt PDF.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class DeleteCandidatesView(APIView):

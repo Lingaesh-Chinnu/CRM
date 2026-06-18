@@ -36,24 +36,38 @@ class AdminReceiptTests(APITestCase):
         )
         self.client.force_authenticate(user=self.admin)
 
-    def test_admin_receipt_accepts_reference_and_generates_pdf(self):
+    def test_admin_receipt_list_search_filter_view_and_download_work(self):
         response = self.client.post('/api/admin-receipts/', {
             'name': 'Receipt Student',
             'phone': '9000001111',
             'purpose': 'Exam Fee',
             'amount': '36900',
             'payment_mode': 'upi',
-            'reference_number': 'UPI-12345',
             'payment_date': '2026-06-18',
         }, format='json')
 
         self.assertEqual(response.status_code, 201)
         receipt = AdminReceipt.objects.get()
-        self.assertEqual(receipt.reference_number, 'UPI-12345')
+
+        list_response = self.client.get('/api/admin-receipts/')
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.data), 1)
+
+        search_response = self.client.get('/api/admin-receipts/', {'search': 'Receipt Student'})
+        self.assertEqual(search_response.status_code, 200)
+        self.assertEqual(len(search_response.data), 1)
+
+        filter_response = self.client.get('/api/admin-receipts/', {'payment_date': '2026-06-18'})
+        self.assertEqual(filter_response.status_code, 200)
+        self.assertEqual(len(filter_response.data), 1)
 
         pdf_response = self.client.get(f'/api/admin-receipts/{receipt.id}/view-receipt/')
         self.assertEqual(pdf_response.status_code, 200)
         self.assertTrue(pdf_response.content.startswith(b'%PDF'))
+
+        download_response = self.client.get(f'/api/admin-receipts/{receipt.id}/download-receipt/')
+        self.assertEqual(download_response.status_code, 200)
+        self.assertTrue(download_response.content.startswith(b'%PDF'))
 
     def test_admin_receipt_defaults_to_gandhipuram_branch_details(self):
         from views import AdminReceiptViewSet
