@@ -458,7 +458,7 @@ class LeadImportValidationTests(APITestCase):
     SECURE_SSL_REDIRECT=False,
 )
 class MonthlyRatingResetTests(APITestCase):
-    def test_current_month_rating_starts_at_100_before_targets_are_due(self):
+    def test_current_month_rating_uses_kpi_scores(self):
         branch = Branch.objects.create(name='Rating Branch', city='Coimbatore')
         staff = User.objects.create_user(
             username='rating-staff',
@@ -481,10 +481,13 @@ class MonthlyRatingResetTests(APITestCase):
 
         rating = calculate_user_monthly_rating(staff, today.year, today.month)
 
-        self.assertEqual(rating.score, 100)
-        self.assertEqual(rating.stars, 5)
-        self.assertEqual(rating.breakdown['target_achievement']['deduction'], 0)
-        self.assertEqual(rating.breakdown['activity']['deduction'], 0)
+        self.assertEqual(rating.score, 20)
+        self.assertEqual(rating.stars, 1)
+        self.assertEqual(rating.breakdown['no_pending_followups']['score'], 20)
+        self.assertEqual(rating.breakdown['same_day_enrollment']['score'], 0)
+        self.assertEqual(rating.breakdown['same_day_collection']['score'], 0)
+        self.assertEqual(rating.breakdown['lead_to_walkin_conversion']['score'], 0)
+        self.assertEqual(rating.breakdown['walkin_to_enrollment_conversion']['score'], 0)
 
 
 @override_settings(

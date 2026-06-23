@@ -499,20 +499,27 @@ export default function ReportsPage() {
 
       <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-slate-200 px-6 py-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Monthly User Star Rating</p>
-          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Last 3 months performance</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Counselor KPI Rating</p>
+          <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Ranked counselor performance</h2>
         </div>
         <div className="overflow-x-auto">
-          <div className="grid min-w-[900px] grid-cols-[1.7fr_1fr_1fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="grid min-w-[1100px] grid-cols-[0.55fr_1.6fr_0.9fr_1fr_1fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <div>Rank</div>
             <div>User</div>
+            <div>KPI Rating</div>
             {ratingMonths.map((item) => <div key={`${item.year}-${item.month}`}>{monthLabel(item)}</div>)}
           </div>
           <div className="divide-y divide-slate-200">
             {ratingRows.map((row) => (
-              <div key={row.user_id} className="grid min-w-[900px] grid-cols-[1.7fr_1fr_1fr_1fr] gap-4 px-6 py-5 text-sm text-slate-700">
+              <div key={row.user_id} className="grid min-w-[1100px] grid-cols-[0.55fr_1.6fr_0.9fr_1fr_1fr_1fr] gap-4 px-6 py-5 text-sm text-slate-700">
+                <div className="font-bold text-slate-950">#{row.rank}</div>
                 <div>
                   <p className="font-bold text-slate-950">{row.full_name}</p>
                   <p className="text-slate-500">{row.username}{row.branch_name ? ` | ${row.branch_name}` : ''}</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-950">{starDisplay(row.stars)}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{row.score}%</p>
                 </div>
                 {row.ratings.map((rating) => (
                   <div key={`${row.user_id}-${rating.year}-${rating.month}`}>

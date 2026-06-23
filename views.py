@@ -87,6 +87,7 @@ from crm.models import (
     normalize_installment_schedule,
     enrollment_payable_fee, ENROLLMENT_PAYMENT_AMOUNT, LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE, MIN_INSTALLMENT_AMOUNT,
 )
+from crm.rating_service import calculate_kpi_rating
 from serializers import (
     BranchSerializer, UserSerializer, UserTargetSerializer,
     BranchTargetSerializer, HistoricalAnalyticsEntrySerializer,
@@ -11567,18 +11568,6 @@ def next_birthday(dob, today):
     return birthday
 
 
-def rating_stars(score):
-    if score >= 90:
-        return 5
-    if score >= 75:
-        return 4
-    if score >= 60:
-        return 3
-    if score >= 40:
-        return 2
-    return 1
-
-
 def month_window(year, month):
     start = timezone.datetime(year, month, 1).date()
     end = start.replace(day=monthrange(year, month)[1])
@@ -11600,152 +11589,7 @@ def previous_months(count=3, start_date=None):
 
 
 def calculate_user_monthly_rating(user, year=None, month=None):
-    if user.role == User.Role.SUPER_ADMIN:
-        return None
-
-    today = timezone.localdate()
-    year = year or today.year
-    month = month or today.month
-    start, end = month_window(year, month)
-    effective_end = min(end, today)
-    month_complete = end < today
-    score = 100
-    breakdown = {}
-
-    def deduct(key, points, detail):
-        nonlocal score
-        score -= points
-        breakdown[key] = {'deduction': points, 'detail': detail}
-
-    lead_qs = visible_candidate_queryset(Lead.objects.filter(created_by=user, created_at__date__gte=start, created_at__date__lte=end))
-    walkin_qs = visible_candidate_queryset(WalkIn.objects.filter(assigned_to=user, visit_date__gte=start, visit_date__lte=end))
-    enroll_qs = current_month_enrollment_queryset(
-        visible_candidate_queryset(Enrollment.objects.filter(created_by=user)),
-        year,
-        month,
-    )
-    lead_count = lead_qs.count()
-    enroll_count = enroll_qs.count()
-    conversion_rate = 100 if lead_count == 0 else (enroll_count / lead_count) * 100
-    if conversion_rate < 55:
-        deduct('conversion_rate', 20, f'Conversion rate {conversion_rate:.2f}% is below 55%.')
-    elif conversion_rate < 70:
-        deduct('conversion_rate', 10, f'Conversion rate {conversion_rate:.2f}% is between 55% and 70%.')
-    else:
-        breakdown['conversion_rate'] = {'deduction': 0, 'detail': f'Conversion rate {conversion_rate:.2f}%.'}
-
-    payment_due_end = end if month_complete else today - timedelta(days=1)
-    overdue_payments = visible_payment_queryset(Payment.objects.none())
-    if payment_due_end >= start:
-        overdue_payments = visible_payment_queryset(Payment.objects.filter(
-            enrollment__created_by=user,
-            status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
-            next_payment_date__gte=start,
-            next_payment_date__lte=payment_due_end,
-        ))
-    if overdue_payments.filter(status=Payment.Status.UNPAID).exists():
-        deduct('payment_reminder', 10, 'Missed payment reminder found for an unpaid due payment.')
-    elif overdue_payments.filter(status=Payment.Status.PARTIAL).exists():
-        deduct('payment_reminder', 5, 'Delayed payment reminder found for a partial due payment.')
-    else:
-        breakdown['payment_reminder'] = {'deduction': 0, 'detail': 'No missed or delayed payment reminders detected.'}
-
-    pending_not_collected = overdue_payments.exists()
-    if pending_not_collected:
-        deduct('payment_collection', 15, 'Pending payment due in the month was not fully collected.')
-    else:
-        breakdown['payment_collection'] = {'deduction': 0, 'detail': 'No pending uncollected due payment detected.'}
-
-    birthday_count = visible_candidate_queryset(Enrollment.objects.filter(
-        branch=user.branch,
-        dob__month=month,
-    ))
-    birthday_count = official_enrollment_queryset(birthday_count).exclude(dob__isnull=True).count() if user.branch_id else 0
-    birthday_sent = WhatsAppMessage.objects.filter(
-        sent_by=user,
-        message_type=WhatsAppMessage.MsgType.BIRTHDAY,
-        created_at__date__gte=start,
-        created_at__date__lte=end,
-    ).exists()
-    if birthday_count and not birthday_sent:
-        deduct('birthday_wishes', 5, 'Birthday window had students but no birthday wish log was found.')
-    else:
-        breakdown['birthday_wishes'] = {'deduction': 0, 'detail': 'Birthday wish requirement met or no birthdays detected.'}
-
-    missed_lead_followups = visible_candidate_queryset(Lead.objects.filter(
-        created_by=user,
-        next_follow_up_date__gte=start,
-        next_follow_up_date__lt=effective_end,
-    )).exclude(status__in=[Lead.Status.ENROLLED, Lead.Status.CONVERTED, Lead.Status.CONVERTED_TO_WALKIN, Lead.Status.NOT_INTERESTED, Lead.Status.DROPPED, Lead.Status.LOST]).exists()
-    if missed_lead_followups:
-        deduct('lead_followups', 10, 'Lead follow-up due date was missed.')
-    else:
-        breakdown['lead_followups'] = {'deduction': 0, 'detail': 'No missed lead follow-ups detected.'}
-
-    missed_walkin_followups = visible_candidate_queryset(WalkIn.objects.filter(
-        created_by=user,
-        follow_up_date__gte=start,
-        follow_up_date__lt=effective_end,
-    )).exclude(status__in=[WalkIn.Status.CONVERTED, WalkIn.Status.NOT_INTERESTED]).exists()
-    if missed_walkin_followups:
-        deduct('walkin_followups', 10, 'Walk-in follow-up due date was missed.')
-    else:
-        breakdown['walkin_followups'] = {'deduction': 0, 'detail': 'No missed walk-in follow-ups detected.'}
-
-    late_response_cutoff = timezone.now() - timedelta(days=1)
-    late_response = visible_candidate_queryset(Lead.objects.filter(
-        created_by=user,
-        created_at__date__gte=start,
-        created_at__date__lte=end,
-        created_at__lt=late_response_cutoff,
-        status=Lead.Status.NEW,
-    )).exists()
-    if late_response:
-        deduct('response_time', 10, 'New lead remained unanswered for more than one day.')
-    else:
-        breakdown['response_time'] = {'deduction': 0, 'detail': 'No late new-lead response detected.'}
-
-    active_login = UserSessionLog.objects.filter(
-        user=user,
-        login_at__date__gte=start,
-        login_at__date__lte=end,
-    ).exists()
-    if not active_login and month_complete:
-        deduct('activity', 5, 'No login activity found for the month.')
-    else:
-        breakdown['activity'] = {
-            'deduction': 0,
-            'detail': 'Login activity found for the month.' if active_login else 'Current month activity window is still open.',
-        }
-
-    target = BranchTarget.objects.filter(branch=user.branch, year=year, month=month).first()
-    target_not_achieved = False
-    if target:
-        target_not_achieved = (
-            lead_qs.count() < target.lead_target
-            or walkin_qs.count() < target.walkin_target
-            or enroll_qs.count() < target.enroll_target
-        )
-    if target_not_achieved and month_complete:
-        deduct('target_achievement', 15, 'Monthly target was not achieved.')
-    else:
-        breakdown['target_achievement'] = {
-            'deduction': 0,
-            'detail': 'Monthly target achieved or no user target set.' if not target_not_achieved else 'Current month target window is still open.',
-        }
-
-    score = max(0, min(100, score))
-    rating, _ = UserMonthlyRating.objects.update_or_create(
-        user=user,
-        year=year,
-        month=month,
-        defaults={
-            'score': score,
-            'stars': rating_stars(score),
-            'breakdown': breakdown,
-        },
-    )
-    return rating
+    return calculate_kpi_rating(user, year, month)
 
 
 class DashboardSummaryView(APIView):
@@ -12031,7 +11875,7 @@ class DashboardMyRatingView(APIView):
 
 
 class UserRatingReportView(APIView):
-    """GET /api/reports/user-ratings/ - last 3 months user star ratings."""
+    """GET /api/reports/user-ratings/ - KPI counselor ratings ranked by current month."""
     permission_classes = [IsSuperAdmin]
 
     def get(self, request):
@@ -12043,13 +11887,21 @@ class UserRatingReportView(APIView):
             for year, month in months:
                 rating = calculate_user_monthly_rating(user, year, month)
                 ratings.append(UserMonthlyRatingSerializer(rating).data)
+            current_rating = ratings[0] if ratings else None
             rows.append({
                 'user_id': user.id,
                 'username': user.username,
                 'full_name': user.full_name,
+                'counselor_name': user.full_name or user.username,
                 'branch_name': user.branch.name if user.branch else None,
+                'score': current_rating['score'] if current_rating else 0,
+                'stars': current_rating['stars'] if current_rating else 1,
+                'star_display': current_rating['star_display'] if current_rating else 'â­â˜†â˜†â˜†â˜†',
                 'ratings': ratings,
             })
+        rows.sort(key=lambda row: (-row['score'], row['counselor_name'].lower()))
+        for index, row in enumerate(rows, start=1):
+            row['rank'] = index
         return Response({
             'months': [{'year': year, 'month': month} for year, month in months],
             'results': rows,
