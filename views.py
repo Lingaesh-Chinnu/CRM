@@ -868,6 +868,17 @@ def create_notification_once(user, title, message, notification_type=Notificatio
     return notification
 
 
+def notification_actor_name(user, fallback='Staff'):
+    if not user:
+        return fallback
+    return (
+        getattr(user, 'full_name', '')
+        or getattr(user, 'username', '')
+        or getattr(user, 'email', '')
+        or fallback
+    )
+
+
 def counselor_request_url(request_id):
     return f'/counselor-change-requests?request={request_id}'
 
@@ -10198,11 +10209,13 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
 
     def _notify_admins_payment_added(self, installment):
+        creator_name = notification_actor_name(getattr(installment, 'collected_by', None))
+        title = f'Installment Added by {creator_name}'
         message = f'{installment.enrollment.name} payment installment added and awaiting approval.'
         for admin_user in User.objects.filter(role=User.Role.SUPER_ADMIN, is_active=True):
             create_user_notification(
                 admin_user,
-                'Installment Added by User',
+                title,
                 message,
                 Notification.NType.INFO,
                 f'/payments/{installment.payment_id}',
