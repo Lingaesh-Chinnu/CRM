@@ -4,6 +4,7 @@
 # ============================================================
 
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 
@@ -66,7 +67,7 @@ APP_BASE_PATH: str = (
 )
 ALLOWED_HOSTS = env_list(
     'ALLOWED_HOSTS',
-    '.onrender.com,localhost,127.0.0.1,wingrootechnologies.com,www.wingrootechnologies.com',
+    '.onrender.com,localhost,127.0.0.1,testserver,wingrootechnologies.com,www.wingrootechnologies.com',
 )
 CSRF_TRUSTED_ORIGINS = env_list(
     'CSRF_TRUSTED_ORIGINS',
@@ -75,7 +76,10 @@ CSRF_TRUSTED_ORIGINS = env_list(
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 SESSION_COOKIE_SECURE = env_bool('SESSION_COOKIE_SECURE', not DEBUG)
 CSRF_COOKIE_SECURE = env_bool('CSRF_COOKIE_SECURE', not DEBUG)
-SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', not DEBUG)
+default_secure_ssl_redirect = not DEBUG
+if os.environ.get('SECURE_SSL_REDIRECT') is None and any(arg.endswith('runserver') for arg in sys.argv):
+    default_secure_ssl_redirect = False
+SECURE_SSL_REDIRECT = env_bool('SECURE_SSL_REDIRECT', default_secure_ssl_redirect)
 SECURE_HSTS_SECONDS = int(os.environ.get('SECURE_HSTS_SECONDS', '31536000' if not DEBUG else '0'))
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool('SECURE_HSTS_INCLUDE_SUBDOMAINS', not DEBUG)
 SECURE_HSTS_PRELOAD = env_bool('SECURE_HSTS_PRELOAD', False)
@@ -161,11 +165,12 @@ DB_ENGINE = os.environ.get('DB_ENGINE', 'sqlite').strip().lower()
 DATABASES: dict[str, dict] = {}  # type: ignore
 
 if DATABASE_URL:
+    database_url_is_sqlite = DATABASE_URL.lower().startswith('sqlite')
     DATABASES = {  # type: ignore
         'default': dj_database_url.parse(
             DATABASE_URL,
             conn_max_age=int(os.environ.get('DB_CONN_MAX_AGE', '600')),
-            ssl_require=env_bool('DB_SSL_REQUIRE', not DEBUG),
+            ssl_require=env_bool('DB_SSL_REQUIRE', not DEBUG and not database_url_is_sqlite),
         )
     }
 elif DB_ENGINE == 'mysql':

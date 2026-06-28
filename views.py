@@ -6546,7 +6546,7 @@ class PendingManagementView(APIView):
                 'lead_pending': leads,
                 'walkin_pending': walkins,
                 'payment_pending': payments,
-                'total_pending': leads + walkins,
+                'total_pending': leads + walkins + payments,
             })
         if section == 'leads':
             rows = [self.lead_row(lead) for lead in self.base_leads(request)[:500]]
@@ -11880,7 +11880,23 @@ class DashboardMyRatingView(APIView):
 
     def get(self, request):
         if request.user.role == User.Role.SUPER_ADMIN:
-            return Response({'detail': 'Star rating applies only to users.'}, status=status.HTTP_404_NOT_FOUND)
+            today = timezone.localdate()
+            return Response({
+                'id': None,
+                'user': request.user.id,
+                'username': request.user.username,
+                'full_name': request.user.full_name,
+                'branch_name': request.user.branch.name if request.user.branch else None,
+                'year': today.year,
+                'month': today.month,
+                'score': 0,
+                'stars': 0,
+                'star_display': '',
+                'breakdown': {},
+                'created_at': None,
+                'updated_at': None,
+                'applies': False,
+            })
 
         today = timezone.localdate()
         rating = calculate_user_monthly_rating(request.user, today.year, today.month)
