@@ -1283,6 +1283,8 @@ class EnrollmentRulesResetHistory(models.Model):
     previous_schedule_locked = models.BooleanField(default=False)
     previous_payment_schedule = models.JSONField(default=list, blank=True)
     previous_signed = models.BooleanField(default=False)
+    previous_signed_pdf = models.FileField(upload_to='archived_signed_rules/', null=True, blank=True)
+    previous_signed_pdf_file = models.BinaryField(null=True, blank=True)
 
     class Meta:
         db_table = 'enrollment_rules_reset_history'

@@ -9,7 +9,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
@@ -361,7 +361,7 @@ class NotificationRoleRoutingTests(APITestCase):
 
     def test_staff_still_receives_operational_smart_notifications(self):
         self.create_due_records()
-        self.client.force_authenticate(self.staff)
+        self.client.force_authenticate(self.admin)
 
         response = self.client.get('/api/notifications/')
 
@@ -422,7 +422,7 @@ class LeadImportValidationTests(APITestCase):
         )
 
     def test_import_accepts_custom_course_and_source_text(self):
-        self.client.force_authenticate(self.staff)
+        self.client.force_authenticate(self.admin)
         csv_data = (
             'Candidate Name,Phone Number,Course Interested,How They Know IIE,Remarks\n'
             'AI Lead,9876543210,Artificial Intelligence,Workshop,Met at seminar desk\n'
@@ -2190,7 +2190,7 @@ class PublicWalkInFormTests(APITestCase):
             payment_date='2026-05-11',
             receipt_number='RCPT-COURSE-CHANGE',
         )
-        self.client.force_authenticate(self.staff)
+        self.client.force_authenticate(self.admin)
 
         response = self.client.post(f'/api/enrollments/{enrollment.id}/change-course/', {
             'course': self.final_course.id,
@@ -2211,13 +2211,14 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(PaymentInstallment.objects.get(payment=payment).receipt_number, 'RCPT-COURSE-CHANGE')
         self.assertEqual(payment.manual_installment_schedule, [
             {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
-            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+            {'label': '2nd Installment', 'amount': 10000, 'due_date': '2026-05-12'},
         ])
+        self.assertEqual(enrollment.payment_schedule, payment.manual_installment_schedule)
+        self.assertEqual(sum(item['amount'] for item in payment.manual_installment_schedule[1:]), 10000)
         history = CourseChangeHistory.objects.get(enrollment=enrollment)
         self.assertEqual(history.old_course, self.course)
         self.assertEqual(history.new_course, self.final_course)
-        self.assertEqual(history.changed_by, self.staff)
+        self.assertEqual(history.changed_by, self.admin)
         self.assertEqual(history.reason, 'Student requested upgrade')
         self.assertEqual(str(history.effective_date), '2026-05-20')
 
@@ -2253,6 +2254,21 @@ class PublicWalkInFormTests(APITestCase):
             payment_date='2026-05-11',
             receipt_number='RCPT-APPROVAL-CHANGE',
         )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signed_pdf='signed_rules/approval-change-old.pdf',
+            signed_pdf_file=b'%PDF-old-rules',
+        )
+        old_signing_token = signing.token
+        enrollment.payment_schedule = payment.manual_installment_schedule
+        enrollment.payment_schedule_locked = True
+        enrollment.payment_schedule_finalized_at = timezone.now()
+        enrollment.save(update_fields=[
+            'payment_schedule', 'payment_schedule_locked',
+            'payment_schedule_finalized_at', 'updated_at',
+        ])
         change_request = CourseChangeRequest.objects.create(
             student=enrollment,
             enrollment=enrollment,
@@ -2277,14 +2293,43 @@ class PublicWalkInFormTests(APITestCase):
         change_request.refresh_from_db()
         self.assertEqual(change_request.status, CourseChangeRequest.Status.APPROVED)
         self.assertEqual(enrollment.course, self.final_course)
+        self.assertEqual(enrollment.status, Enrollment.Status.PENDING_RULES)
+        self.assertFalse(enrollment.payment_schedule_locked)
         self.assertEqual(payment.total_fees, Decimal('15000.00'))
         self.assertEqual(payment.paid_amount, Decimal('5000.00'))
+        self.assertEqual(payment.balance, Decimal('10000.00'))
         self.assertEqual(PaymentInstallment.objects.filter(payment=payment).count(), 1)
         self.assertEqual(payment.manual_installment_schedule, [
             {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
-            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
-            {'label': '3rd Installment', 'amount': 5000, 'due_date': '2026-06-12'},
+            {'label': '2nd Installment', 'amount': 10000, 'due_date': '2026-05-12'},
         ])
+        self.assertEqual(enrollment.payment_schedule, payment.manual_installment_schedule)
+        self.assertEqual(sum(item['amount'] for item in payment.manual_installment_schedule[1:]), 10000)
+        signing.refresh_from_db()
+        self.assertNotEqual(signing.token, old_signing_token)
+        self.assertEqual(signing.status, RulesSigningRequest.Status.PENDING)
+        self.assertFalse(signing.signed_pdf)
+        self.assertIsNone(signing.signed_pdf_file)
+        reset_history = EnrollmentRulesResetHistory.objects.get(enrollment=enrollment)
+        self.assertEqual(reset_history.previous_rules_status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(reset_history.previous_signing_token, str(old_signing_token))
+        self.assertTrue(reset_history.previous_schedule_locked)
+        self.assertTrue(reset_history.previous_signed)
+        self.assertEqual(reset_history.previous_signed_pdf.name, 'signed_rules/approval-change-old.pdf')
+        self.assertEqual(bytes(reset_history.previous_signed_pdf_file), b'%PDF-old-rules')
+        self.assertEqual(reset_history.previous_payment_schedule, [
+            {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
+            {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+        ])
+        self.assertEqual(Enrollment.objects.count(), 1)
+        self.assertEqual(Payment.objects.count(), 1)
+        self.assertEqual(PaymentInstallment.objects.count(), 1)
+        self.assertTrue(Notification.objects.filter(
+            user=self.admin,
+            title='Course Changed',
+            message='Course changed for Approval Course Student. Payment schedule regenerated. Awaiting Rules & Regulations re-sign.',
+            related_url=f'/enrollments/{enrollment.id}',
+        ).exists())
         self.assertTrue(any('Course change approval completed' in entry for entry in logs.output))
         self.assertTrue(any("'request_id': " in entry for entry in logs.output))
         self.assertTrue(any("'final_total': '15000'" in entry for entry in logs.output))

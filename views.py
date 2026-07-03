@@ -8231,10 +8231,72 @@ def rebuild_pending_installment_schedule(enrollment, payment):
     return rebuilt_schedule
 
 
+def reset_rules_for_course_change(enrollment, user, reason, previous_schedule, previous_schedule_locked):
+    signing = RulesSigningRequest.objects.select_for_update().filter(enrollment=enrollment).first()
+    previous_rules_status = signing.status if signing else RulesSigningRequest.Status.PENDING
+    previous_token = str(signing.token) if signing else ''
+    previous_signed = bool(
+        signing and (
+            signing.status == RulesSigningRequest.Status.SUBMITTED
+            or signing.signed_pdf
+            or signing.signed_pdf_file
+        )
+    )
+
+    reset_history = EnrollmentRulesResetHistory.objects.create(
+        enrollment=enrollment,
+        reset_by=user,
+        reason=reason,
+        previous_rules_status=previous_rules_status,
+        previous_signing_token=previous_token,
+        previous_schedule_locked=previous_schedule_locked,
+        previous_payment_schedule=previous_schedule or [],
+        previous_signed=previous_signed,
+        previous_signed_pdf=signing.signed_pdf.name if signing and signing.signed_pdf else None,
+        previous_signed_pdf_file=signing.signed_pdf_file if signing and signing.signed_pdf_file else None,
+    )
+
+    if signing:
+        signing.token = uuid.uuid4()
+        signing.status = RulesSigningRequest.Status.PENDING
+        signing.sent_at = None
+        signing.submitted_at = None
+        signing.sent_by = None
+        signing.submitted_ip = None
+        signing.submitted_user_agent = ''
+        signing.selfie_image = None
+        signing.signature_image = None
+        signing.signed_pdf = None
+        signing.selfie_image_file = None
+        signing.signature_image_file = None
+        signing.signed_pdf_file = None
+        signing.save(update_fields=[
+            'token', 'status', 'sent_at', 'submitted_at', 'sent_by',
+            'submitted_ip', 'submitted_user_agent', 'selfie_image',
+            'signature_image', 'signed_pdf', 'selfie_image_file',
+            'signature_image_file', 'signed_pdf_file', 'updated_at',
+        ])
+    else:
+        RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.PENDING)
+    return reset_history
+
+
+def notify_admin_course_change_completed(enrollment):
+    notify_admin_users(
+        'Course Changed',
+        f'Course changed for {enrollment.name}. Payment schedule regenerated. Awaiting Rules & Regulations re-sign.',
+        Notification.NType.WARNING,
+        f'/enrollments/{enrollment.id}',
+        category=Notification.Category.APPROVAL,
+    )
+
+
 def apply_enrollment_course_change(enrollment, new_course, user, reason='', effective_date=None):
     effective_date = effective_date or timezone.localdate()
     old_course = enrollment.course
     old_fee = enrollment_payable_fee(enrollment)
+    previous_payment_schedule = enrollment.payment_schedule or []
+    previous_schedule_locked = enrollment.payment_schedule_locked
     logger.info(
         'Course change apply starting context=%s',
         course_change_log_context(
@@ -8316,6 +8378,14 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
             'total_fees', 'paid_amount', 'manual_installment_schedule',
             'status', 'next_payment_date', 'updated_at',
         ])
+        enrollment.payment_schedule = payment.manual_installment_schedule
+        enrollment.payment_schedule_locked = False
+        enrollment.payment_schedule_finalized_at = None
+        enrollment.status = Enrollment.Status.PENDING_RULES
+        enrollment.save(update_fields=[
+            'payment_schedule', 'payment_schedule_locked',
+            'payment_schedule_finalized_at', 'status', 'updated_at',
+        ])
         logger.info(
             'Course change payment schedule saved context=%s',
             course_change_log_context(
@@ -8334,6 +8404,14 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
             ),
         )
     else:
+        enrollment.payment_schedule = serialize_enrollment_payment_schedule(enrollment)
+        enrollment.payment_schedule_locked = False
+        enrollment.payment_schedule_finalized_at = None
+        enrollment.status = Enrollment.Status.PENDING_RULES
+        enrollment.save(update_fields=[
+            'payment_schedule', 'payment_schedule_locked',
+            'payment_schedule_finalized_at', 'status', 'updated_at',
+        ])
         logger.info(
             'Course change has no payment record to rebuild context=%s',
             course_change_log_context(
@@ -8344,6 +8422,15 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
                 new_fee=new_fee,
             ),
         )
+    reset_rules_for_course_change(
+        enrollment,
+        user,
+        reason or 'Course or fee changed. Previous Rules & Regulations PDF archived and re-sign required.',
+        previous_payment_schedule,
+        previous_schedule_locked,
+    )
+    resolve_rules_signed_notifications(enrollment.id)
+    notify_admin_course_change_completed(enrollment)
     return old_course, old_fee, new_fee
 
 
@@ -8523,7 +8610,6 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             enrollment = (
                 Enrollment.objects
                 .select_for_update()
-                .select_related('course', 'branch')
                 .get(pk=enrollment.pk)
             )
             apply_enrollment_course_change(enrollment, new_course, request.user, reason, effective_date)

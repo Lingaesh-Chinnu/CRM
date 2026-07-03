@@ -1460,6 +1460,7 @@ class EnrollmentCounselorChangeHistorySerializer(serializers.ModelSerializer):
 
 class EnrollmentRulesResetHistorySerializer(serializers.ModelSerializer):
     reset_by_name = serializers.CharField(source='reset_by.full_name', read_only=True)
+    previous_signed_pdf_path = serializers.CharField(source='previous_signed_pdf.name', read_only=True)
 
     class Meta:
         model = EnrollmentRulesResetHistory
@@ -1467,7 +1468,7 @@ class EnrollmentRulesResetHistorySerializer(serializers.ModelSerializer):
             'id', 'reset_by', 'reset_by_name', 'reset_at', 'reason',
             'previous_rules_status', 'previous_signing_token',
             'previous_schedule_locked', 'previous_payment_schedule',
-            'previous_signed',
+            'previous_signed', 'previous_signed_pdf_path',
         ]
 
 
