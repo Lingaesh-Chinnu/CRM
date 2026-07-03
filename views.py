@@ -8142,21 +8142,25 @@ def rebuild_pending_installment_schedule(enrollment, payment):
 
     locked_items = []
     locked_total = Decimal('0')
-    paid_cursor = Decimal('0')
-    for item in get_payment_installment_schedule(payment):
-        item_amount = Decimal(str(item.get('amount') or 0))
+    paid_installments = payment.installments.order_by('payment_date', 'created_at', 'pk')
+    existing_schedule = get_payment_installment_schedule(payment)
+    for installment in paid_installments:
+        item_amount = Decimal(str(installment.amount or 0))
         if item_amount <= 0:
             continue
-        if paid_cursor + item_amount > paid_amount:
+        if locked_total + item_amount > paid_amount:
             break
         if locked_total + item_amount > new_total:
             break
+        schedule_item = {}
+        if 0 < int(installment.installment_index or 0) <= len(existing_schedule):
+            schedule_item = existing_schedule[int(installment.installment_index) - 1]
+        due_date = installment.payment_date or schedule_item.get('due_date')
         locked_items.append({
-            'label': item.get('label') or f'{len(locked_items) + 1} Installment',
+            'label': installment.installment_label or schedule_item.get('label') or f'{len(locked_items) + 1} Installment',
             'amount': decimal_to_schedule_amount(item_amount),
-            'due_date': item.get('due_date').isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
+            'due_date': due_date.isoformat() if hasattr(due_date, 'isoformat') else due_date,
         })
-        paid_cursor += item_amount
         locked_total += item_amount
 
     remaining_total = new_total - locked_total
