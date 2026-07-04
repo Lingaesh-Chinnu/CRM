@@ -31,6 +31,22 @@ def user_identity_payload(user):
     }
 
 
+QUALIFICATION_KPI_FIELDS = (
+    'expected_course_budget',
+    'planned_joining_time',
+    'primary_goal',
+    'other_institutes_considering',
+    'counselor_status',
+    'competitor_status',
+    'follow_up_priority',
+    'conversion_probability',
+)
+
+
+def enrollment_counselor(enrollment):
+    return getattr(enrollment, 'counselor', None) or getattr(enrollment, 'created_by', None) or getattr(enrollment, 'enrolled_by', None)
+
+
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Adds user info payload to JWT tokens."""
 
@@ -547,6 +563,8 @@ class LeadListSerializer(serializers.ModelSerializer):
                   'status','status_display','lead_status','source','source_display','walkin_date','next_follow_up_date',
                   'assigned_to','follow_up_by','assigned_to_name','assigned_user',
                   'branch_name','created_by','converted_to_type','converted_record_id',
+                  'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
+                  'counselor_status','competitor_status','follow_up_priority','conversion_probability',
                   'imported_via_csv','is_important','created_at','updated_at']
 
     def get_status(self, obj):
@@ -718,6 +736,14 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             'external_course_interested': '',
             'external_message': '',
             'source_description': '',
+            'expected_course_budget': '',
+            'planned_joining_time': '',
+            'primary_goal': '',
+            'other_institutes_considering': '',
+            'counselor_status': '',
+            'competitor_status': '',
+            'follow_up_priority': '',
+            'conversion_probability': '',
             'is_duplicate': False,
             'imported_via_csv': False,
             'converted_to_type': '',
@@ -874,7 +900,12 @@ class LeadStaffUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = Lead
-        fields = ['walkin_date', 'next_follow_up_date', 'remarks', 'status']
+        fields = [
+            'walkin_date', 'next_follow_up_date', 'remarks', 'status',
+            'expected_course_budget', 'planned_joining_time', 'primary_goal',
+            'other_institutes_considering', 'counselor_status', 'competitor_status',
+            'follow_up_priority', 'conversion_probability',
+        ]
 
 
 class LeadImportHistorySerializer(serializers.ModelSerializer):
@@ -940,6 +971,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'preferred_timing','preferred_timing_display','source','source_display',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
+                  'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
+                  'counselor_status','competitor_status','follow_up_priority','conversion_probability',
                   'is_converted_to_enrollment','latest_remark','latest_follow_up_at','is_important','created_at']
 
     def to_representation(self, instance):
@@ -951,6 +984,14 @@ class WalkInListSerializer(serializers.ModelSerializer):
             'converted_record_id': None,
             'converted_at': None,
             'converted_by_id': None,
+            'expected_course_budget': '',
+            'planned_joining_time': '',
+            'primary_goal': '',
+            'other_institutes_considering': '',
+            'counselor_status': '',
+            'competitor_status': '',
+            'follow_up_priority': '',
+            'conversion_probability': '',
         }
         deferred = getattr(instance, 'get_deferred_fields', lambda: set())()
         for field_name, default in defaults.items():
@@ -1078,6 +1119,14 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             'profession': '',
             'year_of_passing': None,
             'college_company': '',
+            'expected_course_budget': '',
+            'planned_joining_time': '',
+            'primary_goal': '',
+            'other_institutes_considering': '',
+            'counselor_status': '',
+            'competitor_status': '',
+            'follow_up_priority': '',
+            'conversion_probability': '',
             'preferred_timing': '',
             'interested_global_certification': False,
             'walk_in_by': '',
@@ -1517,9 +1566,11 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','payment_balance','paid_amount','counselor_name',
-                  'counselor_user','is_important',
+                  'counselor','counselor_user','is_important',
                   'custom_payable_fee','net_payable_fee','source','source_display','preferred_timing',
                   'preferred_timing_display','qualification','qualification_display','degree',
+                  'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
+                  'counselor_status','competitor_status','follow_up_priority','conversion_probability',
                   'demo_class','interested_global_certification','rules_signing_status',
                   'payment_schedule_status']
 
@@ -1539,11 +1590,11 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
         return 0
 
     def get_counselor_name(self, obj):
-        user = obj.enrolled_by or obj.created_by
+        user = enrollment_counselor(obj)
         return user.full_name if user else ''
 
     def get_counselor_user(self, obj):
-        return user_identity_payload(obj.enrolled_by or obj.created_by)
+        return user_identity_payload(enrollment_counselor(obj))
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
@@ -1672,15 +1723,15 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         return None
 
     def get_counselor_id(self, obj):
-        user = obj.enrolled_by or obj.created_by
+        user = enrollment_counselor(obj)
         return user.id if user else None
 
     def get_counselor_name(self, obj):
-        user = obj.enrolled_by or obj.created_by
+        user = enrollment_counselor(obj)
         return user.full_name if user else ''
 
     def get_counselor_user(self, obj):
-        return user_identity_payload(obj.enrolled_by or obj.created_by)
+        return user_identity_payload(enrollment_counselor(obj))
 
     def get_qualification_display(self, obj):
         return qualification_display_value(obj.qualification)
@@ -2032,13 +2083,13 @@ class PaymentSerializer(serializers.ModelSerializer):
         return obj.enrollment.branch.name if obj.enrollment.branch else None
 
     def get_counselor_name(self, obj):
-        user = obj.enrollment.enrolled_by or obj.enrollment.created_by
+        user = enrollment_counselor(obj.enrollment)
         if not user:
             return ''
         return user.full_name or user.username
 
     def get_counselor_user(self, obj):
-        return user_identity_payload(obj.enrollment.enrolled_by or obj.enrollment.created_by)
+        return user_identity_payload(enrollment_counselor(obj.enrollment))
 
     def get_payment_schedule(self, obj):
         schedule = get_payment_installment_schedule(obj)

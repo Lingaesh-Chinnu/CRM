@@ -376,6 +376,57 @@ class Lead(TimeStampedModel):
         HOUSEWIFE = 'housewife', 'Housewife'
         WORKING_PROFESSIONAL = 'working_professional', 'Working Professional'
 
+    class ExpectedCourseBudget(models.TextChoices):
+        RANGE_15000_25000 = '15000_25000', 'Rs 15,000-Rs 25,000'
+        RANGE_26000_36000 = '26000_36000', 'Rs 26,000-Rs 36,000'
+        RANGE_37000_47000 = '37000_47000', 'Rs 37,000-Rs 47,000'
+        NOT_DECIDED = 'not_decided', 'Not Decided'
+
+    class PlannedJoiningTime(models.TextChoices):
+        IMMEDIATELY = 'immediately', 'Immediately'
+        WITHIN_1_WEEK = 'within_1_week', 'Within 1 Week'
+        WITHIN_1_MONTH = 'within_1_month', 'Within 1 Month'
+        NOT_DECIDED = 'not_decided', 'Not Decided'
+
+    class PrimaryGoal(models.TextChoices):
+        GET_JOB = 'get_job', 'Get a Job'
+        CAREER_SWITCH = 'career_switch', 'Career Switch'
+        SALARY_HIKE = 'salary_hike', 'Salary Hike'
+        INTERNSHIP_SKILL = 'internship_skill', 'Internship / Skill Enhancement'
+
+    class CounselorStatus(models.TextChoices):
+        NEW_LEAD = 'new_lead', 'New Lead'
+        CONTACTED = 'contacted', 'Contacted'
+        WILL_WALK_IN = 'will_walk_in', 'Will Walk-in'
+        WALK_IN_COMPLETED = 'walk_in_completed', 'Walk-in Completed'
+        DEMO_ATTENDED = 'demo_attended', 'Demo Attended'
+        FOLLOW_UP = 'follow_up', 'Follow-up'
+        READY_TO_JOIN = 'ready_to_join', 'Ready to Join'
+        JOINED = 'joined', 'Joined'
+        NA = 'na', 'NA'
+        CNA = 'cna', 'CNA'
+        NOT_INTERESTED = 'not_interested', 'Not Interested'
+        LOST_TO_COMPETITOR = 'lost_to_competitor', 'Lost to Competitor'
+
+    class CompetitorStatus(models.TextChoices):
+        NOT_ENQUIRED_ELSEWHERE = 'not_enquired_elsewhere', 'Not Enquired Elsewhere'
+        ENQUIRED_1 = 'enquired_1', 'Enquired at 1 Institute'
+        ENQUIRED_2_3 = 'enquired_2_3', 'Enquired at 2-3 Institutes'
+        ENQUIRED_MORE_3 = 'enquired_more_3', 'Enquired at More Than 3 Institutes'
+        FAKE_ENQUIRY = 'fake_enquiry', 'Fake Enquiry'
+
+    class FollowUpPriority(models.TextChoices):
+        HIGH = 'high', 'High'
+        MEDIUM = 'medium', 'Medium'
+        LOW = 'low', 'Low'
+
+    class ConversionProbability(models.TextChoices):
+        P90 = '90', '90%'
+        P75 = '75', '75%'
+        P50 = '50', '50%'
+        P25 = '25', '25%'
+        P10 = '10', '10%'
+
     lead_number = models.CharField(max_length=20, unique=True, editable=False)
     assigned_to = models.ForeignKey(User,   null=True, blank=True, on_delete=models.SET_NULL,
                                     related_name='assigned_leads')
@@ -394,6 +445,14 @@ class Lead(TimeStampedModel):
     pincode     = models.CharField(max_length=10, blank=True)
     qualification = models.CharField(max_length=200, blank=True)
     degree = models.CharField(max_length=200, blank=True)
+    expected_course_budget = models.CharField(max_length=20, choices=ExpectedCourseBudget.choices, blank=True)
+    planned_joining_time = models.CharField(max_length=20, choices=PlannedJoiningTime.choices, blank=True)
+    primary_goal = models.CharField(max_length=30, choices=PrimaryGoal.choices, blank=True)
+    other_institutes_considering = models.CharField(max_length=300, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True)
+    competitor_status = models.CharField(max_length=40, choices=CompetitorStatus.choices, blank=True)
+    follow_up_priority = models.CharField(max_length=10, choices=FollowUpPriority.choices, blank=True)
+    conversion_probability = models.CharField(max_length=3, choices=ConversionProbability.choices, blank=True)
     willing_to_join = models.CharField(max_length=20, choices=WillingToJoin.choices, blank=True)
     preferred_timing = models.CharField(max_length=30, choices=PreferredTiming.choices, blank=True)
     walkin_date = models.DateField(null=True, blank=True)
@@ -590,6 +649,14 @@ class WalkIn(TimeStampedModel):
         WORKING_PROFESSIONAL = 'working_professional', 'Working Professional'
         HOUSEWIFE = 'housewife', 'Housewife'
 
+    ExpectedCourseBudget = Lead.ExpectedCourseBudget
+    PlannedJoiningTime = Lead.PlannedJoiningTime
+    PrimaryGoal = Lead.PrimaryGoal
+    CounselorStatus = Lead.CounselorStatus
+    CompetitorStatus = Lead.CompetitorStatus
+    FollowUpPriority = Lead.FollowUpPriority
+    ConversionProbability = Lead.ConversionProbability
+
     candidate_number = models.CharField(max_length=20, unique=True, editable=False)
     lead             = models.OneToOneField(Lead,   null=True, blank=True, on_delete=models.SET_NULL,
                                             related_name='walkin')
@@ -615,6 +682,14 @@ class WalkIn(TimeStampedModel):
     # Academic / Professional
     qualification   = models.CharField(max_length=200, blank=True)
     degree          = models.CharField(max_length=200, blank=True)
+    expected_course_budget = models.CharField(max_length=20, choices=ExpectedCourseBudget.choices, blank=True)
+    planned_joining_time = models.CharField(max_length=20, choices=PlannedJoiningTime.choices, blank=True)
+    primary_goal = models.CharField(max_length=30, choices=PrimaryGoal.choices, blank=True)
+    other_institutes_considering = models.CharField(max_length=300, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True)
+    competitor_status = models.CharField(max_length=40, choices=CompetitorStatus.choices, blank=True)
+    follow_up_priority = models.CharField(max_length=10, choices=FollowUpPriority.choices, blank=True)
+    conversion_probability = models.CharField(max_length=3, choices=ConversionProbability.choices, blank=True)
     profession      = models.CharField(max_length=200, blank=True)
     year_of_passing = models.PositiveSmallIntegerField(null=True, blank=True)
     college_company = models.CharField(max_length=300, blank=True)
@@ -1051,6 +1126,8 @@ class Enrollment(TimeStampedModel):
                                         related_name='enrollments_created')
     created_by      = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                         related_name='enrollments_entered')
+    counselor       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                        related_name='counseled_enrollments')
 
     # Personal
     name             = models.CharField(max_length=200)
@@ -1061,6 +1138,14 @@ class Enrollment(TimeStampedModel):
     pincode          = models.CharField(max_length=10, blank=True)
     qualification    = models.CharField(max_length=200, blank=True)
     degree           = models.CharField(max_length=200, blank=True)
+    expected_course_budget = models.CharField(max_length=20, choices=Lead.ExpectedCourseBudget.choices, blank=True)
+    planned_joining_time = models.CharField(max_length=20, choices=Lead.PlannedJoiningTime.choices, blank=True)
+    primary_goal = models.CharField(max_length=30, choices=Lead.PrimaryGoal.choices, blank=True)
+    other_institutes_considering = models.CharField(max_length=300, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=Lead.CounselorStatus.choices, blank=True)
+    competitor_status = models.CharField(max_length=40, choices=Lead.CompetitorStatus.choices, blank=True)
+    follow_up_priority = models.CharField(max_length=10, choices=Lead.FollowUpPriority.choices, blank=True)
+    conversion_probability = models.CharField(max_length=3, choices=Lead.ConversionProbability.choices, blank=True)
     source           = models.CharField(max_length=20, choices=WalkIn.Source.choices, blank=True)
     preferred_timing = models.CharField(max_length=30, choices=WalkIn.PreferredTiming.choices, blank=True)
     demo_class       = models.BooleanField(default=False)

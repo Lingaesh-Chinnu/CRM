@@ -37,14 +37,28 @@ function selectDashboardQuote() {
   return quote
 }
 
-function highlightRows(stats) {
+function branchQuery(branchId) {
+  return branchId && branchId !== 'all' ? `&branch=${branchId}` : ''
+}
+
+function highlightRows(stats, branchId) {
+  const branch = branchQuery(branchId)
   return [
+    {
+      label: 'Leads this month',
+      actual: Number(stats?.leads_this_month || 0),
+      target: stats?.lead_target,
+      note: 'New enquiries recorded this month',
+      kind: 'count',
+      to: `/leads?date_range=this_month${branch}`,
+    },
     {
       label: 'Walk-ins this month',
       actual: Number(stats?.walkins_this_month || 0),
       target: stats?.walkin_target,
       note: 'Fresh branch visits recorded this month',
       kind: 'count',
+      to: `/walkins?date_range=this_month${branch}`,
     },
     {
       label: 'Enrollments this month',
@@ -52,6 +66,7 @@ function highlightRows(stats) {
       target: stats?.enroll_target,
       note: 'Students converted into active admissions',
       kind: 'count',
+      to: `/enrollments?date_range=this_month${branch}`,
     },
     {
       label: 'Value this month',
@@ -59,6 +74,7 @@ function highlightRows(stats) {
       target: stats?.value_target,
       note: 'Enrollment value generated this month',
       kind: 'plainCurrency',
+      to: `/payments?duration=month${branch}`,
     },
   ]
 }
@@ -538,9 +554,9 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-3">
-              {highlightRows(dashboardStats).map((item) => (
-                <div key={item.label} className={`rounded-[22px] border border-white/10 bg-white/6 p-5 backdrop-blur transition ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
+            <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {highlightRows(dashboardStats, isSuperAdmin ? dashboardBranch : '').map((item) => (
+                <Link key={item.label} to={item.to} className={`rounded-[22px] border border-white/10 bg-white/6 p-5 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/10 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
                   <p className="mt-3 text-2xl font-black tracking-tight text-white">
                     {displayValue(item.actual, item.kind)}
@@ -561,7 +577,7 @@ export default function DashboardPage() {
                     </p>
                   )}
                   <p className="mt-2 text-sm text-slate-300">{item.note}</p>
-                </div>
+                </Link>
               ))}
             </div>
           </div>
@@ -650,24 +666,24 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-2xl bg-slate-50 p-5">
+              <Link to={`/leads?date_range=this_month${branchQuery(isSuperAdmin ? summaryBranch : '')}`} className="rounded-2xl bg-slate-50 p-5 transition hover:bg-slate-100">
                 <p className="text-sm font-semibold text-slate-500">Total leads</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
                   {actionBoardStats?.leads_this_month || 0}
                 </p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-5">
+              </Link>
+              <Link to={`/walkins?date_range=this_month${branchQuery(isSuperAdmin ? summaryBranch : '')}`} className="rounded-2xl bg-slate-50 p-5 transition hover:bg-slate-100">
                 <p className="text-sm font-semibold text-slate-500">Total walk-ins</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
                   {actionBoardStats?.walkins_this_month || 0}
                 </p>
-              </div>
-              <div className="rounded-2xl bg-slate-50 p-5">
+              </Link>
+              <Link to={`/enrollments?date_range=this_month${branchQuery(isSuperAdmin ? summaryBranch : '')}`} className="rounded-2xl bg-slate-50 p-5 transition hover:bg-slate-100">
                 <p className="text-sm font-semibold text-slate-500">Total enrollments</p>
                 <p className="mt-2 text-3xl font-black tracking-tight text-slate-950">
                   {actionBoardStats?.enroll_this_month || 0}
                 </p>
-              </div>
+              </Link>
             </div>
           </div>
         </article>

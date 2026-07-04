@@ -103,6 +103,16 @@ from serializers import (
 
 ENROLLMENT_COUNT_STATUSES = tuple(Enrollment.FINAL_STATUSES)
 ENROLLMENT_VALUE_STATUSES = (Enrollment.Status.ENROLLED, Enrollment.Status.ACTIVE)
+QUALIFICATION_KPI_FIELDS = (
+    'expected_course_budget',
+    'planned_joining_time',
+    'primary_goal',
+    'other_institutes_considering',
+    'counselor_status',
+    'competitor_status',
+    'follow_up_priority',
+    'conversion_probability',
+)
 
 
 def official_enrollment_queryset(queryset):
@@ -965,7 +975,7 @@ def notify_admin_decision(change_request, approved):
 def current_counselor_for_record(record):
     if isinstance(record, Lead):
         return record.assigned_to or record.created_by
-    return record.enrolled_by or record.created_by
+    return getattr(record, 'counselor', None) or record.created_by or record.enrolled_by
 
 
 def create_counselor_change_request(record, record_type, requested_counselor, requested_by, reason):
@@ -1015,10 +1025,9 @@ def apply_counselor_change(change_request, admin_user, force=False):
         record.save(update_fields=['assigned_to', 'created_by', 'updated_at'])
     else:
         record = Enrollment.objects.select_for_update().get(pk=change_request.enrollment_id)
-        old_counselor = record.enrolled_by or record.created_by
-        record.enrolled_by = change_request.requested_counselor
-        record.created_by = change_request.requested_counselor
-        record.save(update_fields=['enrolled_by', 'created_by', 'updated_at'])
+        old_counselor = record.counselor or record.created_by or record.enrolled_by
+        record.counselor = change_request.requested_counselor
+        record.save(update_fields=['counselor', 'updated_at'])
         EnrollmentCounselorChangeHistory.objects.create(
             enrollment=record,
             old_counselor=old_counselor,
@@ -1385,6 +1394,17 @@ def pending_duration_bounds(request):
         return week_start, week_start + timedelta(days=6)
     if duration == 'month':
         return today.replace(day=1), today
+    if duration == 'this_month':
+        start = today.replace(day=1)
+        return start, start.replace(day=monthrange(start.year, start.month)[1])
+    if duration == 'last_month':
+        current_start = today.replace(day=1)
+        end = current_start - timedelta(days=1)
+        return end.replace(day=1), end
+    if duration == 'last_3_months':
+        return today - timedelta(days=90), today
+    if duration == 'last_6_months':
+        return today - timedelta(days=180), today
     if duration == 'custom':
         return (
             parse_date(request.query_params.get('date_from') or '') or None,
@@ -2171,6 +2191,31 @@ def previous_month_bounds(start_date):
 
 
 def date_range_from_request(request):
+    quick_range = (
+        request.query_params.get('date_range')
+        or request.query_params.get('duration')
+        or request.query_params.get('range')
+        or ''
+    )
+    quick_range = str(quick_range).strip().lower()
+    today = timezone.localdate()
+    if quick_range and quick_range != 'custom':
+        if quick_range == 'today':
+            return today, today
+        if quick_range == 'yesterday':
+            yesterday = today - timedelta(days=1)
+            return yesterday, yesterday
+        if quick_range == 'this_month':
+            start = today.replace(day=1)
+            return start, start.replace(day=monthrange(start.year, start.month)[1])
+        if quick_range == 'last_month':
+            current_start = today.replace(day=1)
+            end = current_start - timedelta(days=1)
+            return end.replace(day=1), end
+        if quick_range in ('last_3_months', 'last3months'):
+            return today - timedelta(days=90), today
+        if quick_range in ('last_6_months', 'last6months'):
+            return today - timedelta(days=180), today
     start_date = parse_date(str(request.query_params.get('date_from') or '').strip())
     end_date = parse_date(str(request.query_params.get('date_to') or '').strip())
     if start_date and end_date:
@@ -2209,6 +2254,16 @@ def reporting_enrollment_queryset(queryset):
     return enrollment_value_queryset(visible_candidate_queryset(queryset))
 
 
+def enrollment_counselor_filter_q(user_id, prefix=''):
+    base = f'{prefix}__' if prefix else ''
+    return (
+        Q(**{f'{base}counselor_id': user_id})
+        | Q(**{f'{base}counselor__isnull': True, f'{base}walkin__assigned_to_id': user_id})
+        | Q(**{f'{base}counselor__isnull': True, f'{base}lead__assigned_to_id': user_id})
+        | Q(**{f'{base}counselor__isnull': True, f'{base}created_by_id': user_id})
+    )
+
+
 def reporting_scope(branch=None, user_id=None, course=None, source=None):
     leads = visible_candidate_queryset(Lead.objects.all())
     walkins = visible_candidate_queryset(WalkIn.objects.all())
@@ -2223,7 +2278,7 @@ def reporting_scope(branch=None, user_id=None, course=None, source=None):
     if user_id:
         leads = leads.filter(assigned_to_id=user_id)
         walkins = walkins.filter(assigned_to_id=user_id)
-        enrollments = enrollments.filter(enrolled_by_id=user_id)
+        enrollments = enrollments.filter(enrollment_counselor_filter_q(user_id))
         followups = followups.filter(updated_by_id=user_id)
     if course:
         leads = leads.filter(course_id=course)
@@ -2634,7 +2689,7 @@ def user_scope(user):
     return {
         'leads': Lead.objects.filter(assigned_to=user, is_deleted=False),
         'walkins': WalkIn.objects.filter(assigned_to=user, is_deleted=False),
-        'enrollments': reporting_enrollment_queryset(Enrollment.objects.filter(enrolled_by=user)),
+        'enrollments': reporting_enrollment_queryset(Enrollment.objects.filter(enrollment_counselor_filter_q(user.id))),
         'followups': FollowUp.objects.filter(updated_by=user),
     }
 
@@ -2963,7 +3018,12 @@ class AdminAnalyticsDashboardView(APIView):
             unassigned_scope = reporting_scope(branch=branch_filter, course=course_filter, source=source_filter)
             unassigned_scope['leads'] = unassigned_scope['leads'].filter(assigned_to__isnull=True)
             unassigned_scope['walkins'] = unassigned_scope['walkins'].filter(assigned_to__isnull=True)
-            unassigned_scope['enrollments'] = unassigned_scope['enrollments'].filter(enrolled_by__isnull=True)
+            unassigned_scope['enrollments'] = unassigned_scope['enrollments'].filter(
+                counselor__isnull=True,
+                walkin__assigned_to__isnull=True,
+                lead__assigned_to__isnull=True,
+                created_by__isnull=True,
+            )
             unassigned_metrics = performance_metrics(unassigned_scope, start_date, end_date)
             if any(unassigned_metrics.get(key) for key in ('leads', 'walkins', 'enrollments', 'revenue')):
                 counselor_rows.append({
@@ -3013,7 +3073,9 @@ class AdminAnalyticsDashboardView(APIView):
         if branch_filter:
             payments = payments.filter(enrollment__branch_id=branch_filter)
         if user_filter:
-            payments = payments.filter(enrollment__enrolled_by_id=user_filter)
+            payments = payments.filter(
+                enrollment_counselor_filter_q(user_filter, prefix='enrollment')
+            )
         if course_filter:
             payments = payments.filter(enrollment__course_id=course_filter)
         if source_filter:
@@ -3305,6 +3367,7 @@ class LeadFilter(django_filters.FilterSet):
     next_follow_up_date_to   = django_filters.DateFilter(method='filter_next_follow_up_date_to')
     created_from     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_to       = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+    date_range       = django_filters.CharFilter(method='filter_date_range')
     important_only   = django_filters.BooleanFilter(method='filter_important_only')
 
     def filter_name(self, queryset, name, value):
@@ -3358,9 +3421,13 @@ class LeadFilter(django_filters.FilterSet):
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(is_important=True) if value else queryset
 
+    def filter_date_range(self, queryset, name, value):
+        start_date, end_date = date_range_from_request(self.request)
+        return queryset.filter(created_at__date__gte=start_date, created_at__date__lte=end_date)
+
     class Meta:
         model  = Lead
-        fields = ['status', 'source', 'branch', 'assigned_to', 'course', 'important_only']
+        fields = ['status', 'source', 'branch', 'assigned_to', 'course', 'date_range', 'important_only']
 
 
 class LeadViewSet(viewsets.ModelViewSet):
@@ -3735,6 +3802,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('preferred_timing', lead.preferred_timing)
         data.setdefault('qualification', lead.qualification)
         data.setdefault('degree', lead.degree)
+        for field_name in QUALIFICATION_KPI_FIELDS:
+            data.setdefault(field_name, getattr(lead, field_name, ''))
         data.setdefault('remarks', lead.remarks)
         data.setdefault('follow_up_date', lead.next_follow_up_date)
         data.setdefault('visit_date', data.get('conversion_date') or lead.walkin_date or timezone.localdate())
@@ -3795,6 +3864,11 @@ class LeadViewSet(viewsets.ModelViewSet):
                     if existing_walkin.source in ('', WalkIn.Source.LEAD_CONVERSION) and existing_walkin.source != mapped_source:
                         existing_walkin.source = mapped_source
                         walkin_update_fields.append('source')
+                    for field_name in QUALIFICATION_KPI_FIELDS:
+                        value = data.get(field_name) or getattr(lead, field_name, '')
+                        if value and not getattr(existing_walkin, field_name, ''):
+                            setattr(existing_walkin, field_name, value)
+                            walkin_update_fields.append(field_name)
                     if walkin_update_fields:
                         existing_walkin.save(update_fields=[*walkin_update_fields, 'updated_at'])
                     walkin = existing_walkin
@@ -3814,6 +3888,14 @@ class LeadViewSet(viewsets.ModelViewSet):
                         pincode=str(data.get('pincode') or '').strip(),
                         qualification=data.get('qualification') or '',
                         degree=data.get('degree') or '',
+                        expected_course_budget=data.get('expected_course_budget') or '',
+                        planned_joining_time=data.get('planned_joining_time') or '',
+                        primary_goal=data.get('primary_goal') or '',
+                        other_institutes_considering=data.get('other_institutes_considering') or '',
+                        counselor_status=data.get('counselor_status') or '',
+                        competitor_status=data.get('competitor_status') or '',
+                        follow_up_priority=data.get('follow_up_priority') or '',
+                        conversion_probability=data.get('conversion_probability') or '',
                         year_of_passing=year_of_passing,
                         college_company=data.get('college_company') or '',
                         preferred_timing=data.get('preferred_timing') or '',
@@ -3851,6 +3933,8 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.preferred_timing = data.get('preferred_timing') or ''
                 lead.qualification = data.get('qualification') or ''
                 lead.degree = data.get('degree') or ''
+                for field_name in QUALIFICATION_KPI_FIELDS:
+                    setattr(lead, field_name, data.get(field_name) or '')
                 lead.branch = branch
                 lead.course = course
                 lead.walkin_date = data.get('visit_date')
@@ -3862,7 +3946,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 lead.converted_by = lead.converted_by or request.user
                 lead.save(update_fields=[
                     'name', 'phone', 'dob', 'email', 'location', 'pincode', 'preferred_timing', 'qualification',
-                    'degree', 'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status',
+                    'degree', *QUALIFICATION_KPI_FIELDS, 'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status',
                     'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
                 ])
                 walkin.refresh_from_db()
@@ -4039,7 +4123,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 'name', 'phone', 'dob', 'email', 'location', 'pincode',
                 'course', 'preferred_timing', 'qualification', 'degree', 'walkin_date',
                 'next_follow_up_date', 'remarks', 'status', 'assigned_to', 'follow_up_by',
-                'source', 'source_description',
+                'source', 'source_description', *QUALIFICATION_KPI_FIELDS,
             }
             if set(request.data.keys()) - allowed:
                 return Response(
@@ -4115,6 +4199,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         data.setdefault('preferred_timing', lead.preferred_timing)
         data.setdefault('qualification', lead.qualification)
         data.setdefault('degree', lead.degree)
+        for field_name in QUALIFICATION_KPI_FIELDS:
+            data.setdefault(field_name, getattr(lead, field_name, ''))
         if not request.user.is_super_admin:
             if not request.user.branch_id:
                 return Response(
@@ -4155,6 +4241,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 final_enrollment_course_id=data.get('course'),
                 enrolled_by=request.user,
                 created_by=request.user,
+                counselor=lead.assigned_to or lead.created_by or request.user,
                 name=data.get('name'),
                 phone=data.get('phone'),
                 dob=data.get('dob'),
@@ -4163,6 +4250,14 @@ class LeadViewSet(viewsets.ModelViewSet):
                 pincode=data.get('pincode'),
                 qualification=data.get('qualification', ''),
                 degree=data.get('degree', ''),
+                expected_course_budget=data.get('expected_course_budget') or '',
+                planned_joining_time=data.get('planned_joining_time') or '',
+                primary_goal=data.get('primary_goal') or '',
+                other_institutes_considering=data.get('other_institutes_considering') or '',
+                counselor_status=data.get('counselor_status') or '',
+                competitor_status=data.get('competitor_status') or '',
+                follow_up_priority=data.get('follow_up_priority') or '',
+                conversion_probability=data.get('conversion_probability') or '',
                 preferred_timing=data.get('preferred_timing'),
                 enrollment_date=data.get('enrollment_date'),
                 source=source,
@@ -5462,8 +5557,9 @@ class AdminDataImportView(APIView):
                             branch_id=payload['branch_id'],
                             course_id=payload['course_id'],
                             final_enrollment_course_id=payload['course_id'],
-                            enrolled_by_id=payload.get('assigned_to_id') or user.id,
+                            enrolled_by=user,
                             created_by=user,
+                            counselor_id=payload.get('assigned_to_id') or user.id,
                             dob=payload.get('dob') or None,
                             email=payload.get('email') or '',
                             location=payload.get('location') or '',
@@ -5920,14 +6016,14 @@ class AdminDataExportView(APIView):
                 qs = qs.filter(assigned_to_id=user_id)
             return qs.order_by('-visit_date', '-created_at')
         if export_type in ('enrollments', 'students'):
-            qs = visible_candidate_queryset(Enrollment.objects.select_related('branch', 'course', 'enrolled_by', 'created_by', 'payment'))
+            qs = visible_candidate_queryset(Enrollment.objects.select_related('branch', 'course', 'counselor', 'enrolled_by', 'created_by', 'payment'))
             qs = filter_by_date_range(qs, 'enrollment_date', start_date, end_date)
             if export_type == 'students':
                 qs = qs.filter(status__in=Enrollment.FINAL_STATUSES)
             if branch_id:
                 qs = qs.filter(branch_id=branch_id)
             if user_id:
-                qs = qs.filter(Q(enrolled_by_id=user_id) | Q(created_by_id=user_id))
+                qs = qs.filter(enrollment_counselor_filter_q(user_id))
             return qs.order_by('-enrollment_date', '-created_at')
         if export_type == 'payments':
             qs = PaymentInstallment.objects.select_related('payment', 'enrollment__branch', 'enrollment__course', 'collected_by')
@@ -5935,7 +6031,7 @@ class AdminDataExportView(APIView):
             if branch_id:
                 qs = qs.filter(enrollment__branch_id=branch_id)
             if user_id:
-                qs = qs.filter(Q(enrollment__enrolled_by_id=user_id) | Q(collected_by_id=user_id)).distinct()
+                qs = qs.filter(enrollment_counselor_filter_q(user_id, prefix='enrollment') | Q(collected_by_id=user_id)).distinct()
             return qs.order_by('-payment_date', '-id')
         if export_type == 'courses':
             qs = Course.objects.all()
@@ -6095,7 +6191,7 @@ class AdminDataExportView(APIView):
         for user in users:
             leads = filter_by_date_range(visible_candidate_queryset(Lead.objects.filter(Q(assigned_to=user) | Q(created_by=user))), 'created_at', start_date, end_date, is_datetime=True)
             walkins = filter_by_date_range(visible_candidate_queryset(WalkIn.objects.filter(assigned_to=user)), 'visit_date', start_date, end_date)
-            enrollments = filter_by_date_range(visible_candidate_queryset(Enrollment.objects.filter(Q(enrolled_by=user) | Q(created_by=user))), 'enrollment_date', start_date, end_date)
+            enrollments = filter_by_date_range(visible_candidate_queryset(Enrollment.objects.filter(enrollment_counselor_filter_q(user.id))), 'enrollment_date', start_date, end_date)
             installments = filter_by_date_range(PaymentInstallment.objects.filter(collected_by=user), 'payment_date', start_date, end_date)
             pending_leads = pending_follow_up_queryset(leads, FollowUp.RecordType.LEAD, 'next_follow_up_date', LEAD_CLOSED_FOLLOW_UP_STATUSES).exclude(next_follow_up_date__isnull=True).count()
             pending_walkins = pending_follow_up_queryset(walkins, FollowUp.RecordType.WALKIN, 'follow_up_date', WALKIN_CLOSED_FOLLOW_UP_STATUSES).exclude(follow_up_date__isnull=True).count()
@@ -6441,7 +6537,8 @@ class PendingManagementView(APIView):
 
     def base_payments(self, request):
         qs = visible_payment_queryset(Payment.objects.select_related(
-            'enrollment__branch', 'enrollment__course', 'enrollment__enrolled_by', 'enrollment__created_by',
+            'enrollment__branch', 'enrollment__course', 'enrollment__counselor',
+            'enrollment__enrolled_by', 'enrollment__created_by',
         ).prefetch_related('installments').filter(
             enrollment__status__in=Enrollment.FINAL_STATUSES,
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
@@ -6454,7 +6551,7 @@ class PendingManagementView(APIView):
             qs = qs.filter(enrollment__branch_id=request.query_params.get('branch'))
         staff_id = pending_staff_filter(request)
         if staff_id:
-            qs = qs.filter(Q(enrollment__enrolled_by_id=staff_id) | Q(enrollment__created_by_id=staff_id))
+            qs = qs.filter(enrollment_counselor_filter_q(staff_id, prefix='enrollment'))
         status_filter = request.query_params.get('status') or ''
         if status_filter:
             if status_filter == 'pending':
@@ -6518,6 +6615,7 @@ class PendingManagementView(APIView):
         summary = payment_installment_summary(payment)
         due = next((item for item in summary if Decimal(str(item.get('pending_amount') or 0)) > 0), None)
         enrollment = payment.enrollment
+        counselor = enrollment.counselor or enrollment.created_by or enrollment.enrolled_by
         return {
             'id': payment.id,
             'student_name': enrollment.name,
@@ -6531,8 +6629,8 @@ class PendingManagementView(APIView):
             'installment_label': due.get('label') if due else 'Pending Payment',
             'installment_status': due.get('status') if due else payment.status,
             'payment_status': payment.status,
-            'counselor_name': enrollment.enrolled_by.full_name if enrollment.enrolled_by else (enrollment.created_by.full_name if enrollment.created_by else ''),
-            'counselor_user': user_identity_payload(enrollment.enrolled_by or enrollment.created_by),
+            'counselor_name': counselor.full_name if counselor else '',
+            'counselor_user': user_identity_payload(counselor),
             'is_important': enrollment.is_important,
             'detail_url': f'/payments/{payment.id}',
         }
@@ -6726,6 +6824,7 @@ class WalkInFilter(django_filters.FilterSet):
     visit_date_to   = django_filters.DateFilter(field_name='visit_date', lookup_expr='lte')
     date_from = django_filters.DateFilter(method='filter_activity_date_from')
     date_to = django_filters.DateFilter(method='filter_activity_date_to')
+    date_range = django_filters.CharFilter(method='filter_date_range')
     follow_up_date_from = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='gte')
     follow_up_date_to   = django_filters.DateFilter(field_name='follow_up_date', lookup_expr='lte')
     important_only = django_filters.BooleanFilter(method='filter_important_only')
@@ -6770,9 +6869,13 @@ class WalkInFilter(django_filters.FilterSet):
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(is_important=True) if value else queryset
 
+    def filter_date_range(self, queryset, name, value):
+        start_date, end_date = date_range_from_request(self.request)
+        return queryset.filter(visit_date__gte=start_date, visit_date__lte=end_date)
+
     class Meta:
         model  = WalkIn
-        fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class', 'important_only']
+        fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class', 'date_range', 'important_only']
 
 
 class WalkInViewSet(viewsets.ModelViewSet):
@@ -7204,6 +7307,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data.setdefault('preferred_timing', walkin.preferred_timing)
         data.setdefault('qualification', walkin.qualification)
         data.setdefault('degree', walkin.degree)
+        for field_name in QUALIFICATION_KPI_FIELDS:
+            data.setdefault(field_name, getattr(walkin, field_name, ''))
         data.setdefault('demo_class',  walkin.demo_class)
         data.setdefault('interested_global_certification', walkin.interested_global_certification)
         data.setdefault('branch',      walkin.branch_id)
@@ -7237,6 +7342,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 final_enrollment_course=course,
                 enrolled_by=request.user,
                 created_by=request.user,
+                counselor=walkin.assigned_to or walkin.counseling_by or walkin.created_by or request.user,
                 status=Enrollment.Status.PENDING_RULES,
             )
             enrollment.refresh_from_db()
@@ -7959,6 +8065,7 @@ class EnrollmentFilter(django_filters.FilterSet):
     queue = django_filters.CharFilter(method='filter_queue')
     enrolled_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
     enrolled_to   = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
+    date_range = django_filters.CharFilter(method='filter_date_range')
     important_only = django_filters.BooleanFilter(method='filter_important_only')
 
     def filter_status(self, queryset, name, value):
@@ -7978,9 +8085,13 @@ class EnrollmentFilter(django_filters.FilterSet):
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(is_important=True) if value else queryset
 
+    def filter_date_range(self, queryset, name, value):
+        start_date, end_date = date_range_from_request(self.request)
+        return queryset.filter(enrollment_date__gte=start_date, enrollment_date__lte=end_date)
+
     class Meta:
         model  = Enrollment
-        fields = ['status', 'queue', 'branch', 'course', 'important_only']
+        fields = ['status', 'queue', 'branch', 'course', 'date_range', 'important_only']
 
 
 def serialize_installment_schedule(schedule):
@@ -8446,7 +8557,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     pagination_class   = None
     search_fields      = [
         'name', 'phone', 'student_number', 'email', 'source',
-        'course__name', 'enrolled_by__first_name', 'enrolled_by__last_name',
+        'course__name', 'counselor__first_name', 'counselor__last_name', 'counselor__username',
+        'enrolled_by__first_name', 'enrolled_by__last_name',
         'enrolled_by__username', 'created_by__first_name', 'created_by__last_name',
         'created_by__username',
     ]
@@ -8456,7 +8568,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = visible_candidate_queryset(Enrollment.objects.select_related(
-            'course','branch','enrolled_by','created_by','lead','walkin','walkin__lead','rules_signing'
+            'course','branch','counselor','enrolled_by','created_by','lead','walkin','walkin__lead','rules_signing'
         ).prefetch_related(
             'payment__installments',
             'course_change_history',
@@ -8575,7 +8687,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         return enrollment.payment_schedule
 
     def perform_create(self, serializer):
-        enrollment = serializer.save(enrolled_by=self.request.user, created_by=self.request.user)
+        enrollment = serializer.save(
+            enrolled_by=self.request.user,
+            created_by=self.request.user,
+            counselor=serializer.validated_data.get('counselor') or self.request.user,
+        )
         notify_admin_enrollment_created(enrollment, self.request.user)
 
     def update(self, request, *args, **kwargs):
@@ -8710,7 +8826,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                     branch=enrollment.branch,
                     candidate_name=enrollment.name,
                     candidate_phone=enrollment.phone,
-                    current_counselor=enrollment.enrolled_by or enrollment.created_by,
+                    current_counselor=enrollment.counselor or enrollment.created_by or enrollment.enrolled_by,
                     requested_counselor=counselor,
                     requested_by=request.user,
                     reason=reason,
@@ -8765,7 +8881,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 .select_for_update()
                 .get(pk=enrollment.pk)
             )
-            old_counselor = enrollment.enrolled_by or enrollment.created_by
+            old_counselor = enrollment.counselor or enrollment.created_by or enrollment.enrolled_by
             if old_counselor and old_counselor.id == counselor.id:
                 return Response({'detail': 'This counselor is already assigned.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -8776,9 +8892,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 changed_by=request.user,
                 reason=reason,
             )
-            enrollment.enrolled_by = counselor
-            enrollment.created_by = counselor
-            enrollment.save(update_fields=['enrolled_by', 'created_by', 'updated_at'])
+            enrollment.counselor = counselor
+            enrollment.save(update_fields=['counselor', 'updated_at'])
 
         enrollment.refresh_from_db()
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
@@ -9009,8 +9124,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             if enrollment.status not in Enrollment.FINAL_STATUSES:
                 enrollment.status = Enrollment.Status.ACTIVE
-                enrollment.enrolled_by = enrollment.enrolled_by or request.user
-                enrollment.save(update_fields=['status', 'enrolled_by', 'student_number', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at'])
+                enrollment.enrolled_by = request.user
+                enrollment.counselor = enrollment.counselor or enrollment.created_by or request.user
+                enrollment.save(update_fields=['status', 'enrolled_by', 'counselor', 'student_number', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at'])
             resolve_rules_signed_notifications(enrollment.id)
             payment, created = Payment.objects.get_or_create(
                 enrollment=enrollment,
@@ -9449,7 +9565,7 @@ class PaymentFilter(django_filters.FilterSet):
             ).exclude(role=User.Role.SUPER_ADMIN).exists()
             if not allowed:
                 return queryset.none()
-        return queryset.filter(Q(enrollment__enrolled_by_id=value) | Q(enrollment__created_by_id=value))
+        return queryset.filter(enrollment_counselor_filter_q(value, prefix='enrollment'))
 
     def filter_important_only(self, queryset, name, value):
         return queryset.filter(enrollment__is_important=True) if value else queryset
@@ -9841,7 +9957,9 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     search_fields      = [
         'enrollment__name', 'enrollment__student_number',
         'enrollment__phone', 'enrollment__email', 'enrollment__source',
-        'enrollment__course__name', 'enrollment__enrolled_by__first_name',
+        'enrollment__course__name', 'enrollment__counselor__first_name',
+        'enrollment__counselor__last_name', 'enrollment__counselor__username',
+        'enrollment__enrolled_by__first_name',
         'enrollment__enrolled_by__last_name', 'enrollment__enrolled_by__username',
         'enrollment__created_by__first_name', 'enrollment__created_by__last_name',
         'enrollment__created_by__username',
@@ -9864,7 +9982,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = visible_payment_queryset(Payment.objects.select_related(
-            'enrollment__branch','enrollment__course','enrollment__enrolled_by','enrollment__created_by'
+            'enrollment__branch','enrollment__course','enrollment__counselor','enrollment__enrolled_by','enrollment__created_by'
         ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
@@ -9920,35 +10038,42 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             'next_month_pending': self.pending_amount_for_month(queryset, next_month_start, next_month_end),
         }
 
+    def _summary_bounds(self):
+        duration = self.request.query_params.get('duration') or ''
+        if duration:
+            start, end = pending_duration_bounds(self.request)
+            today = timezone.localdate()
+            if duration == 'overdue':
+                return None, today - timedelta(days=1)
+            return start, end
+        if self.request.query_params.get('date_from') or self.request.query_params.get('date_to'):
+            return date_range_from_request(self.request)
+        return self._month_bounds()
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
-        month_start, month_end = self._month_bounds()
+        month_start, month_end = self._summary_bounds()
         today = timezone.localdate()
-        collection = PaymentInstallment.objects.filter(
-            payment__in=queryset,
-            payment_date__gte=month_start,
-            payment_date__lte=month_end,
-        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        partial_payments = PaymentInstallment.objects.filter(
-            payment__in=queryset,
-            payment_date__gte=month_start,
-            payment_date__lte=month_end,
-            document_type=PaymentInstallment.DocumentType.RECEIPT,
-        ).count()
-        completed_installments = PaymentInstallment.objects.filter(
-            payment__in=queryset,
-            payment_date__gte=month_start,
-            payment_date__lte=month_end,
-            document_type=PaymentInstallment.DocumentType.BILL,
-        ).count()
+        installment_queryset = PaymentInstallment.objects.filter(payment__in=queryset)
+        if month_start:
+            installment_queryset = installment_queryset.filter(payment_date__gte=month_start)
+        if month_end:
+            installment_queryset = installment_queryset.filter(payment_date__lte=month_end)
+        collection = installment_queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        partial_payments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.RECEIPT).count()
+        completed_installments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.BILL).count()
         pending = sum((payment.balance for payment in queryset), Decimal('0'))
         due_queryset = queryset.filter(
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
             next_payment_date__isnull=False,
-            next_payment_date__gte=month_start,
-            next_payment_date__lte=month_end,
         )
-        if month_start <= today <= month_end:
+        if month_start:
+            due_queryset = due_queryset.filter(next_payment_date__gte=month_start)
+        if month_end:
+            due_queryset = due_queryset.filter(next_payment_date__lte=month_end)
+        total_due = sum((payment.balance for payment in due_queryset), Decimal('0'))
+        range_includes_today = (month_start is None or month_start <= today) and (month_end is None or today <= month_end)
+        if range_includes_today:
             upcoming = due_queryset.filter(next_payment_date__gte=today).count()
             overdue = queryset.filter(
                 status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
@@ -9958,13 +10083,16 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             upcoming = due_queryset.count()
             overdue = queryset.filter(
                 status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
-                next_payment_date__lte=month_end,
+                **({'next_payment_date__lte': month_end} if month_end else {}),
             ).count()
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             'results': serializer.data,
             'summary': {
+                'total_records': queryset.count(),
                 'total_collection': collection,
+                'total_due': total_due,
+                'total_balance': pending,
                 'pending_amount': pending,
                 'partial_payments': partial_payments,
                 'completed_installments': completed_installments,
@@ -9973,7 +10101,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 **self.pending_summary(),
             },
             'filters': {
-                'month': month_start.strftime('%Y-%m'),
+                'month': month_start.strftime('%Y-%m') if month_start else '',
                 'month_start': month_start,
                 'month_end': month_end,
             },

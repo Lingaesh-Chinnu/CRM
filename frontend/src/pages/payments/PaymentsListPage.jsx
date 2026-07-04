@@ -56,6 +56,9 @@ const durationOptions = [
   { value: 'yesterday', label: 'Yesterday' },
   { value: 'last7', label: 'Last 7 Days' },
   { value: 'month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
+  { value: 'last_3_months', label: 'Last 3 Months' },
+  { value: 'last_6_months', label: 'Last 6 Months' },
   { value: 'custom', label: 'Custom Range' },
 ]
 
@@ -65,6 +68,7 @@ const smartFilters = [
   { value: 'overdue', label: 'Overdue' },
   { value: 'this_week', label: 'This Week' },
   { value: 'month', label: 'This Month' },
+  { value: 'last_month', label: 'Last Month' },
 ]
 
 function orderedInstallments(row) {
@@ -128,6 +132,10 @@ export default function PaymentsListPage() {
   const isSuperAdmin = user?.role === 'super_admin'
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState({
+    total_records: 0,
+    total_collection: 0,
+    total_due: 0,
+    total_balance: 0,
     total_pending_amount: 0,
     this_month_pending: 0,
     last_month_pending: 0,
@@ -223,6 +231,10 @@ export default function PaymentsListPage() {
       .then(({ data }) => {
         setRows(data.results || data)
         setSummary(data.summary || {
+          total_records: 0,
+          total_collection: 0,
+          total_due: 0,
+          total_balance: 0,
           total_pending_amount: 0,
           this_month_pending: 0,
           last_month_pending: 0,
@@ -517,19 +529,19 @@ export default function PaymentsListPage() {
         </div>
       </section>
 
-      {!hasCustomDateRange && <section className="grid gap-4 md:grid-cols-4">
+      <section className="grid gap-4 md:grid-cols-4">
         {[
-          ['Total Pending Amount', `Rs ${money(summary.total_pending_amount)}`],
-          ['This Month Pending', `Rs ${money(summary.this_month_pending)}`],
-          ['Last Month Pending', `Rs ${money(summary.last_month_pending)}`],
-          ['Next Month Pending', `Rs ${money(summary.next_month_pending)}`],
+          ['Total Records', money(summary.total_records)],
+          ['Total Collection', `Rs ${money(summary.total_collection)}`],
+          ['Total Due', `Rs ${money(summary.total_due)}`],
+          ['Total Balance', `Rs ${money(summary.total_balance ?? summary.pending_amount)}`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{label}</p>
             <p className="mt-3 text-2xl font-black tracking-tight text-slate-950">{value}</p>
           </div>
         ))}
-      </section>}
+      </section>
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         <div className="mb-4 flex flex-wrap gap-2">
@@ -659,6 +671,7 @@ export default function PaymentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
+                { key: 'serial', header: 'S.No', width: '64px', render: (row) => rows.findIndex((item) => item.id === row.id) + 1 },
                 {
                   key: 'student',
                   header: 'Student',
