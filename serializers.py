@@ -376,7 +376,7 @@ class CourseSerializer(serializers.ModelSerializer):
 # ============================================================
 # backend/apps/leads/serializers.py
 # ============================================================
-from crm.models import DataImportHistory, FollowUp, Lead, LeadImportHistory
+from crm.models import CandidateStatusHistory, DataImportHistory, FollowUp, Lead, LeadImportHistory
 
 
 QUALIFICATION_LABELS = {
@@ -399,6 +399,28 @@ def normalize_choice_value(value, choices):
         if normalized_text in candidates:
             return choice_value
     return value
+
+
+def status_history_rows(record_type, record_id, choices):
+    labels = dict(choices)
+    rows = CandidateStatusHistory.objects.filter(
+        record_type=record_type,
+        record_id=record_id,
+    ).select_related('changed_by').order_by('changed_at', 'id')
+    return [
+        {
+            'id': row.id,
+            'old_status': row.old_status,
+            'old_status_display': labels.get(row.old_status, row.old_status.replace('_', ' ').title() if row.old_status else ''),
+            'new_status': row.new_status,
+            'new_status_display': labels.get(row.new_status, row.new_status.replace('_', ' ').title()),
+            'remarks': row.remarks,
+            'changed_by': row.changed_by_id,
+            'changed_by_name': row.changed_by.full_name if row.changed_by else '',
+            'changed_at': row.changed_at,
+        }
+        for row in rows
+    ]
 
 
 def normalize_related_id(value, model, field_name):
@@ -686,6 +708,7 @@ class LeadDetailSerializer(serializers.ModelSerializer):
     qualification_display = serializers.SerializerMethodField()
     follow_ups       = serializers.SerializerMethodField()
     transfer_history = serializers.SerializerMethodField()
+    status_history = serializers.SerializerMethodField()
     latest_follow_up_at = serializers.SerializerMethodField()
     latest_remark = serializers.SerializerMethodField()
 
@@ -820,6 +843,13 @@ class LeadDetailSerializer(serializers.ModelSerializer):
             }
             for row in rows
         ]
+
+    def get_status_history(self, obj):
+        return status_history_rows(
+            CandidateStatusHistory.RecordType.LEAD,
+            obj.id,
+            [*Lead.Status.choices, *Lead.CounselorStatus.choices],
+        )
 
     def get_latest_follow_up_at(self, obj):
         follow_up = FollowUp.objects.filter(
@@ -1101,6 +1131,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     college_company_name = serializers.CharField(source='college_company', read_only=True)
     follow_ups = serializers.SerializerMethodField()
     branch_change_history = serializers.SerializerMethodField()
+    status_history = serializers.SerializerMethodField()
     enrollment_id = serializers.SerializerMethodField()
     is_converted_to_enrollment = serializers.SerializerMethodField()
 
@@ -1184,6 +1215,13 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             ), many=True).data
         except (OperationalError, ProgrammingError):
             return []
+
+    def get_status_history(self, obj):
+        return status_history_rows(
+            CandidateStatusHistory.RecordType.WALKIN,
+            obj.id,
+            [*WalkIn.Status.choices, *WalkIn.CounselorStatus.choices],
+        )
 
     def get_enrollment_id(self, obj):
         try:
@@ -1637,6 +1675,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     lead_created_date = serializers.SerializerMethodField()
     walkin_date = serializers.SerializerMethodField()
     first_payment_date = serializers.SerializerMethodField()
+    status_history = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1767,6 +1806,13 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         if not installments:
             return None
         return min((installment.payment_date for installment in installments if installment.payment_date), default=None)
+
+    def get_status_history(self, obj):
+        return status_history_rows(
+            CandidateStatusHistory.RecordType.ENROLLMENT,
+            obj.id,
+            [*Enrollment.Status.choices, *Lead.CounselorStatus.choices],
+        )
 
     def get_rules_signing_status(self, obj):
         return self._rules_signing_data(obj).get('status') or 'pending'

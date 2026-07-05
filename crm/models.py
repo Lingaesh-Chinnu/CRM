@@ -350,6 +350,9 @@ class Lead(TimeStampedModel):
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
         WHATSAPP          = 'whatsapp',          'WhatsApp'
+        DIRECT_WALKIN     = 'direct_walkin',     'Direct Walk-in'
+        STUDENT_REFERENCE = 'student_reference', 'Student Reference'
+        STAFF_REFERENCE   = 'staff_reference',   'Staff Reference'
         JUSTDIAL          = 'justdial',          'JustDial'
         TEAM_REFERENCE    = 'team_reference',    'Team Reference'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'
@@ -397,6 +400,8 @@ class Lead(TimeStampedModel):
     class CounselorStatus(models.TextChoices):
         NEW_LEAD = 'new_lead', 'New Lead'
         CONTACTED = 'contacted', 'Contacted'
+        NO_ANSWER = 'no_answer', 'No Answer'
+        CONTINUOUS_NO_ANSWER = 'continuous_no_answer', 'Continuous No Answer'
         WILL_WALK_IN = 'will_walk_in', 'Will Walk-in'
         WALK_IN_COMPLETED = 'walk_in_completed', 'Walk-in Completed'
         DEMO_ATTENDED = 'demo_attended', 'Demo Attended'
@@ -449,7 +454,7 @@ class Lead(TimeStampedModel):
     planned_joining_time = models.CharField(max_length=20, choices=PlannedJoiningTime.choices, blank=True)
     primary_goal = models.CharField(max_length=30, choices=PrimaryGoal.choices, blank=True)
     other_institutes_considering = models.CharField(max_length=300, blank=True)
-    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True, db_index=True)
     competitor_status = models.CharField(max_length=40, choices=CompetitorStatus.choices, blank=True)
     follow_up_priority = models.CharField(max_length=10, choices=FollowUpPriority.choices, blank=True)
     conversion_probability = models.CharField(max_length=3, choices=ConversionProbability.choices, blank=True)
@@ -468,7 +473,7 @@ class Lead(TimeStampedModel):
     deleted_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                    related_name='deleted_leads')
     status      = models.CharField(max_length=40, choices=Status.choices, default=Status.NEW, db_index=True)
-    source      = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL)
+    source      = models.CharField(max_length=20, choices=Source.choices, default=Source.MANUAL, db_index=True)
     source_description = models.TextField(blank=True)
     converted_to_type = models.CharField(max_length=20, blank=True)
     converted_record_id = models.PositiveIntegerField(null=True, blank=True)
@@ -479,6 +484,9 @@ class Lead(TimeStampedModel):
     class Meta:
         db_table = 'leads'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'assigned_to', 'source', 'created_at'], name='lead_common_filter_idx'),
+        ]
 
     def save(self, *args, **kwargs):
         if self.lead_number:
@@ -621,12 +629,16 @@ class WalkIn(TimeStampedModel):
     class Source(models.TextChoices):
         GOOGLE            = 'google',            'Google'
         JUSTDIAL          = 'justdial',          'JustDial'
-        DIRECT            = 'direct',            'Direct'
+        DIRECT            = 'direct',            'Direct Walk-in'
         INSTAGRAM         = 'instagram',         'Instagram'
         FACEBOOK          = 'facebook',          'Facebook'
         WHATSAPP          = 'whatsapp',          'WhatsApp'
+        WEBSITE           = 'website',           'Website'
+        STUDENT_REFERENCE = 'student_reference', 'Student Reference'
         FRIENDS_REFERENCE = 'friends_reference', 'Friends Reference'
+        STAFF_REFERENCE   = 'staff_reference',   'Staff Reference'
         LEAD_CONVERSION   = 'lead_conversion',   'Lead Conversion'
+        OTHERS            = 'others',            'Other'
 
     class WalkInBy(models.TextChoices):
         DIRECT            = 'Direct',            'Direct'
@@ -686,7 +698,7 @@ class WalkIn(TimeStampedModel):
     planned_joining_time = models.CharField(max_length=20, choices=PlannedJoiningTime.choices, blank=True)
     primary_goal = models.CharField(max_length=30, choices=PrimaryGoal.choices, blank=True)
     other_institutes_considering = models.CharField(max_length=300, blank=True)
-    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=CounselorStatus.choices, blank=True, db_index=True)
     competitor_status = models.CharField(max_length=40, choices=CompetitorStatus.choices, blank=True)
     follow_up_priority = models.CharField(max_length=10, choices=FollowUpPriority.choices, blank=True)
     conversion_probability = models.CharField(max_length=3, choices=ConversionProbability.choices, blank=True)
@@ -697,7 +709,7 @@ class WalkIn(TimeStampedModel):
     # Visit
     demo_class                      = models.BooleanField(default=False)
     interested_global_certification = models.BooleanField(default=False)
-    source                          = models.CharField(max_length=30, choices=Source.choices, default=Source.GOOGLE)
+    source                          = models.CharField(max_length=30, choices=Source.choices, default=Source.GOOGLE, db_index=True)
     walk_in_by                      = models.CharField(max_length=30, choices=WalkInBy.choices, blank=True)
     preferred_timing                = models.CharField(max_length=30, choices=PreferredTiming.choices, blank=True)
     follow_up_date                  = models.DateField(null=True, blank=True)
@@ -718,6 +730,9 @@ class WalkIn(TimeStampedModel):
     class Meta:
         db_table = 'walkins'
         ordering = ['-visit_date', '-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'assigned_to', 'source', 'visit_date'], name='walkin_common_filter_idx'),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.candidate_number:
@@ -900,6 +915,34 @@ class FollowUp(models.Model):
 
     def __str__(self):
         return f'{self.get_record_type_display()} #{self.record_id} follow-up'
+
+
+class CandidateStatusHistory(models.Model):
+    """Append-only status audit trail for leads, walk-ins, and enrollments."""
+
+    class RecordType(models.TextChoices):
+        LEAD = 'lead', 'Lead'
+        WALKIN = 'walkin', 'Walk-in'
+        ENROLLMENT = 'enrollment', 'Enrollment'
+
+    record_type = models.CharField(max_length=20, choices=RecordType.choices, db_index=True)
+    record_id = models.PositiveIntegerField(db_index=True)
+    old_status = models.CharField(max_length=40, blank=True)
+    new_status = models.CharField(max_length=40)
+    remarks = models.TextField(blank=True)
+    changed_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                   related_name='candidate_status_changes')
+    changed_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = 'candidate_status_history'
+        ordering = ['changed_at', 'id']
+        indexes = [
+            models.Index(fields=['record_type', 'record_id', 'changed_at'], name='cand_status_record_time_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.get_record_type_display()} #{self.record_id}: {self.old_status} -> {self.new_status}'
 
 
 def get_branch_student_id_code(branch):
@@ -1142,11 +1185,12 @@ class Enrollment(TimeStampedModel):
     planned_joining_time = models.CharField(max_length=20, choices=Lead.PlannedJoiningTime.choices, blank=True)
     primary_goal = models.CharField(max_length=30, choices=Lead.PrimaryGoal.choices, blank=True)
     other_institutes_considering = models.CharField(max_length=300, blank=True)
-    counselor_status = models.CharField(max_length=30, choices=Lead.CounselorStatus.choices, blank=True)
+    counselor_status = models.CharField(max_length=30, choices=Lead.CounselorStatus.choices, blank=True, db_index=True)
     competitor_status = models.CharField(max_length=40, choices=Lead.CompetitorStatus.choices, blank=True)
     follow_up_priority = models.CharField(max_length=10, choices=Lead.FollowUpPriority.choices, blank=True)
     conversion_probability = models.CharField(max_length=3, choices=Lead.ConversionProbability.choices, blank=True)
-    source           = models.CharField(max_length=20, choices=WalkIn.Source.choices, blank=True)
+    remarks          = models.TextField(blank=True)
+    source           = models.CharField(max_length=20, choices=WalkIn.Source.choices, blank=True, db_index=True)
     preferred_timing = models.CharField(max_length=30, choices=WalkIn.PreferredTiming.choices, blank=True)
     demo_class       = models.BooleanField(default=False)
     interested_global_certification = models.BooleanField(default=False)
@@ -1182,6 +1226,9 @@ class Enrollment(TimeStampedModel):
     class Meta:
         db_table = 'enrollments'
         ordering = ['-enrollment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'counselor', 'source', 'enrollment_date'], name='enroll_common_filter_idx'),
+        ]
 
     def save(self, *args, **kwargs):
         if self.course_id and not self.final_enrollment_course_id:

@@ -124,6 +124,8 @@ export default function ReportsPage() {
     user: '',
     course: '',
     source: '',
+    status: '',
+    search: '',
     date_range: 'this_month',
     date_from: '',
     date_to: '',
@@ -266,7 +268,7 @@ export default function ReportsPage() {
           </button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <select value={analyticsFilters.branch} onChange={(event) => updateAnalyticsFilter('branch', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
             <option value="">All branches</option>
             {(analytics?.filters?.branches || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -283,6 +285,11 @@ export default function ReportsPage() {
             <option value="">All sources</option>
             {(analytics?.filters?.sources || []).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
+          <select value={analyticsFilters.status} onChange={(event) => updateAnalyticsFilter('status', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+            <option value="">All statuses</option>
+            {(analytics?.filters?.statuses || []).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+          <input value={analyticsFilters.search} onChange={(event) => updateAnalyticsFilter('search', event.target.value)} placeholder="Search name, phone, ID, course" className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900" />
           <select value={analyticsFilters.date_range} onChange={(event) => updateAnalyticsFilter('date_range', event.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
             <option value="today">Today</option>
             <option value="yesterday">Yesterday</option>

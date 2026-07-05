@@ -9,6 +9,7 @@ import CourseChangeModal, { CourseChangeHistorySection } from '../../components/
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CounselorReassignmentPanel from '../../components/common/CounselorReassignmentPanel'
 import CandidateTimeline from '../../components/common/CandidateTimeline'
+import StatusHistory from '../../components/common/StatusHistory'
 
 const batchTimingOptions = [
   'Weekdays 10 AM - 12 PM',
@@ -19,6 +20,28 @@ const batchTimingOptions = [
   'Weekdays 5 PM - 7 PM',
   'Weekend Batch'
 ]
+
+const enrollmentStatusOptions = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'pending_rules_form', label: 'Pending Rules Form' },
+  { value: 'rules_form_sent', label: 'Rules Form Sent' },
+  { value: 'rules_form_submitted', label: 'Rules Form Submitted' },
+  { value: 'enrolled', label: 'Enrolled' },
+  { value: 'active', label: 'Active' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'inactive', label: 'Inactive' },
+  { value: 'dropped', label: 'Dropped' },
+  { value: 'on_hold', label: 'Hold' },
+  { value: 'transferred', label: 'Transferred' },
+]
+
+const competitorStatusOptions = [
+  ['not_enquired_elsewhere', 'Not Enquired Elsewhere'], ['enquired_1', 'Enquired at 1 Institute'],
+  ['enquired_2_3', 'Enquired at 2-3 Institutes'], ['enquired_more_3', 'Enquired at More Than 3 Institutes'],
+  ['fake_enquiry', 'Fake Enquiry'],
+]
+const priorityOptions = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]
+const probabilityOptions = [['90', '90%'], ['75', '75%'], ['50', '50%'], ['25', '25%'], ['10', '10%']]
 
 const SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
 const LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
@@ -271,6 +294,11 @@ export default function EnrollmentDetailPage() {
   const [splitCount, setSplitCount] = useState(2)
   const [phone, setPhone] = useState('')
   const [branch, setBranch] = useState('')
+  const [enrollmentStatus, setEnrollmentStatus] = useState('')
+  const [competitorStatus, setCompetitorStatus] = useState('')
+  const [followUpPriority, setFollowUpPriority] = useState('')
+  const [conversionProbability, setConversionProbability] = useState('')
+  const [remarks, setRemarks] = useState('')
   const [editingDetails, setEditingDetails] = useState(false)
   const [editingSchedule, setEditingSchedule] = useState(false)
   const [scheduleDraft, setScheduleDraft] = useState([])
@@ -307,6 +335,11 @@ export default function EnrollmentDetailPage() {
         setStartDate(data.start_date || '')
         setBatchTiming(data.batch_timing || '')
         setPhone(data.phone || '')
+        setEnrollmentStatus(data.status || '')
+        setCompetitorStatus(data.competitor_status || '')
+        setFollowUpPriority(data.follow_up_priority || '')
+        setConversionProbability(data.conversion_probability || '')
+        setRemarks(data.remarks || '')
         const installmentCount = Math.max((data.installment_schedule || []).length - 1, 2)
         setSplitCount(Math.min(installmentCount, 12))
         setScheduleDraft(cloneSchedule(data.installment_schedule?.length ? data.installment_schedule : buildSchedule(data, data.start_date || '', Math.min(installmentCount, 12))))
@@ -413,6 +446,11 @@ export default function EnrollmentDetailPage() {
     { field: 'phone', label: 'Phone Number', value: row.phone, draft: phone },
     { field: 'start_date', label: 'Course Start Date', value: row.start_date, draft: startDate },
     { field: 'batch_timing', label: 'Batch Timing', value: row.batch_timing, draft: batchTiming },
+    { field: 'status', label: 'Status', value: row.status, draft: enrollmentStatus, displayValue: statusLabel(row.status), displayNew: statusLabel },
+    { field: 'competitor_status', label: 'Competitor Status', value: row.competitor_status, draft: competitorStatus },
+    { field: 'follow_up_priority', label: 'Follow-up Priority', value: row.follow_up_priority, draft: followUpPriority },
+    { field: 'conversion_probability', label: 'Conversion Probability', value: row.conversion_probability, draft: conversionProbability, displayNew: (value) => value ? `${value}%` : '' },
+    { field: 'remarks', label: 'Remarks', value: row.remarks, draft: remarks },
   ]
 
   const resetDetailsEdit = () => {
@@ -420,6 +458,11 @@ export default function EnrollmentDetailPage() {
     setBranch(row.branch || '')
     setStartDate(row.start_date || '')
     setBatchTiming(row.batch_timing || '')
+    setEnrollmentStatus(row.status || '')
+    setCompetitorStatus(row.competitor_status || '')
+    setFollowUpPriority(row.follow_up_priority || '')
+    setConversionProbability(row.conversion_probability || '')
+    setRemarks(row.remarks || '')
     setPendingDetailChanges([])
     setRulesErrors({})
     setEditingDetails(false)
@@ -452,6 +495,11 @@ export default function EnrollmentDetailPage() {
         if (field === 'phone') payload.phone = phone
         if (field === 'start_date') payload.start_date = startDate || null
         if (field === 'batch_timing') payload.batch_timing = batchTiming || ''
+        if (field === 'status') payload.status = enrollmentStatus
+        if (field === 'competitor_status') payload.competitor_status = competitorStatus
+        if (field === 'follow_up_priority') payload.follow_up_priority = followUpPriority
+        if (field === 'conversion_probability') payload.conversion_probability = conversionProbability
+        if (field === 'remarks') payload.remarks = remarks
       })
       const { data } = await api.patch(`/enrollments/${id}/`, payload)
       setRow(data)
@@ -459,6 +507,11 @@ export default function EnrollmentDetailPage() {
       setPhone(data.phone || '')
       setStartDate(data.start_date || '')
       setBatchTiming(data.batch_timing || '')
+      setEnrollmentStatus(data.status || '')
+      setCompetitorStatus(data.competitor_status || '')
+      setFollowUpPriority(data.follow_up_priority || '')
+      setConversionProbability(data.conversion_probability || '')
+      setRemarks(data.remarks || '')
       setScheduleDraft(cloneSchedule(data.installment_schedule || []))
       setPendingDetailChanges([])
       setEditingDetails(false)
@@ -760,6 +813,7 @@ export default function EnrollmentDetailPage() {
       />
 
       <CandidateTimeline candidate={row} />
+      <StatusHistory rows={row.status_history || []} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
@@ -790,6 +844,13 @@ export default function EnrollmentDetailPage() {
 
       <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <h2 className="text-xl font-black tracking-tight text-slate-950">Student details</h2>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Status</p>{editingDetails ? <select value={enrollmentStatus} onChange={(event) => setEnrollmentStatus(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">{enrollmentStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select> : <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold">{statusLabel(row.status)}</p>}</div>
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Competitor Status</p>{editingDetails ? <select value={competitorStatus} onChange={(event) => setCompetitorStatus(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"><option value="">Select</option>{competitorStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold">{prettyValue(row.competitor_status)}</p>}</div>
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Follow-up Priority</p>{editingDetails ? <select value={followUpPriority} onChange={(event) => setFollowUpPriority(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"><option value="">Select</option>{priorityOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold">{prettyValue(row.follow_up_priority)}</p>}</div>
+          <div><p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Conversion Probability</p>{editingDetails ? <select value={conversionProbability} onChange={(event) => setConversionProbability(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"><option value="">Select</option>{probabilityOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select> : <p className="rounded-2xl bg-slate-50 px-4 py-3 font-semibold">{row.conversion_probability ? `${row.conversion_probability}%` : 'Not provided'}</p>}</div>
+          <div className="sm:col-span-2 xl:col-span-1"><p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Remarks</p>{editingDetails ? <textarea value={remarks} onChange={(event) => setRemarks(event.target.value)} className="min-h-[96px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" /> : <p className="min-h-[48px] rounded-2xl bg-slate-50 px-4 py-3 font-semibold">{prettyValue(row.remarks)}</p>}</div>
+        </div>
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <DetailCard label="Qualification" value={row.qualification_display || row.qualification} />
           <DetailCard label="Degree" value={row.degree} />

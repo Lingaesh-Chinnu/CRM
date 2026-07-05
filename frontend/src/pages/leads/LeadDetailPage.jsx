@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
+import StatusHistory from '../../components/common/StatusHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -78,10 +79,52 @@ const sourceOptions = [
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook', label: 'Facebook' },
   { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'direct_walkin', label: 'Direct Walk-in' },
+  { value: 'student_reference', label: 'Student Reference' },
+  { value: 'staff_reference', label: 'Staff Reference' },
   { value: 'justdial', label: 'JustDial' },
   { value: 'team_reference', label: 'Team Reference' },
   { value: 'friends_reference', label: 'Friends Reference' },
   { value: 'others', label: 'Others' },
+]
+
+const crmStatusOptions = [
+  { value: 'new_lead', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'no_answer', label: 'No Answer' },
+  { value: 'continuous_no_answer', label: 'Continuous No Answer' },
+  { value: 'na', label: 'NA' },
+  { value: 'cna', label: 'CNA' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walk_in_completed', label: 'Walk-in Completed' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'ready_to_join', label: 'Ready to Join' },
+  { value: 'joined', label: 'Joined' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'lost_to_competitor', label: 'Lost to Competitor' },
+]
+
+const competitorStatusOptions = [
+  { value: 'not_enquired_elsewhere', label: 'Not Enquired Elsewhere' },
+  { value: 'enquired_1', label: 'Enquired at 1 Institute' },
+  { value: 'enquired_2_3', label: 'Enquired at 2-3 Institutes' },
+  { value: 'enquired_more_3', label: 'Enquired at More Than 3 Institutes' },
+  { value: 'fake_enquiry', label: 'Fake Enquiry' },
+]
+
+const followUpPriorityOptions = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+
+const conversionProbabilityOptions = [
+  { value: '90', label: '90%' },
+  { value: '75', label: '75%' },
+  { value: '50', label: '50%' },
+  { value: '25', label: '25%' },
+  { value: '10', label: '10%' },
 ]
 
 function qualificationSelectOptions(value) {
@@ -126,6 +169,10 @@ function buildConversionForm(lead) {
     source: lead?.source || 'manual',
     source_description: lead?.source_description || '',
     remarks: lead?.remarks || lead?.latest_remark || '',
+    counselor_status: lead?.counselor_status || '',
+    competitor_status: lead?.competitor_status || '',
+    follow_up_priority: lead?.follow_up_priority || '',
+    conversion_probability: lead?.conversion_probability || '',
   }
 }
 
@@ -708,10 +755,8 @@ export default function LeadDetailPage() {
 
   const saveFollowUp = async (payload) => {
     const { data } = await api.post(`/leads/${id}/follow-ups/`, payload)
-    const closedStatuses = ['converted', 'converted_to_walkin', 'enrolled', 'not_interested']
     setLead((prev) => ({
       ...prev,
-      status: payload.close_follow_up ? 'not_interested' : closedStatuses.includes(prev.status) ? prev.status : 'follow_up',
       next_follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(prev.follow_ups || [])],
     }))
@@ -765,6 +810,11 @@ export default function LeadDetailPage() {
     { field: 'qualification', label: 'Qualification', value: lead.qualification, displayValue: lead.qualification_display || lead.qualification, displayNew: (value) => qualificationSelectOptions(value).find((option) => option.value === value)?.label || value },
     { field: 'degree', label: 'Degree', value: lead.degree },
     { field: 'source_description', label: 'Source Description', value: lead.source_description },
+    { field: 'counselor_status', label: 'Status', value: lead.counselor_status, displayValue: crmStatusOptions.find((option) => option.value === lead.counselor_status)?.label || '', displayNew: (value) => crmStatusOptions.find((option) => option.value === value)?.label || value },
+    { field: 'competitor_status', label: 'Competitor Status', value: lead.competitor_status, displayValue: competitorStatusOptions.find((option) => option.value === lead.competitor_status)?.label || '', displayNew: (value) => competitorStatusOptions.find((option) => option.value === value)?.label || value },
+    { field: 'follow_up_priority', label: 'Follow-up Priority', value: lead.follow_up_priority, displayValue: followUpPriorityOptions.find((option) => option.value === lead.follow_up_priority)?.label || '', displayNew: (value) => followUpPriorityOptions.find((option) => option.value === value)?.label || value },
+    { field: 'conversion_probability', label: 'Conversion Probability', value: lead.conversion_probability, displayValue: conversionProbabilityOptions.find((option) => option.value === lead.conversion_probability)?.label || '', displayNew: (value) => conversionProbabilityOptions.find((option) => option.value === value)?.label || value },
+    { field: 'remarks', label: 'Remarks', value: lead.remarks || lead.latest_remark || '' },
   ]
 
   const detailChanges = () => detailFields
@@ -929,6 +979,33 @@ export default function LeadDetailPage() {
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <DetailField label="Lead Status" value={conversionStatusLabel(lead)} />
+            <DetailField label="Status" value={crmStatusOptions.find((option) => option.value === lead.counselor_status)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={detailsForm.counselor_status || ''} onChange={(event) => updateDetail('counselor_status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Status</option>
+                {crmStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Competitor Status" value={competitorStatusOptions.find((option) => option.value === lead.competitor_status)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={detailsForm.competitor_status || ''} onChange={(event) => updateDetail('competitor_status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Competitor Status</option>
+                {competitorStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Follow-up Priority" value={followUpPriorityOptions.find((option) => option.value === lead.follow_up_priority)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={detailsForm.follow_up_priority || ''} onChange={(event) => updateDetail('follow_up_priority', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Priority</option>
+                {followUpPriorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Conversion Probability" value={conversionProbabilityOptions.find((option) => option.value === lead.conversion_probability)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={detailsForm.conversion_probability || ''} onChange={(event) => updateDetail('conversion_probability', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Probability</option>
+                {conversionProbabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Remarks" value={lead.remarks || lead.latest_remark} editing={editingDetails}>
+              <textarea value={detailsForm.remarks || ''} onChange={(event) => updateDetail('remarks', event.target.value)} className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+            </DetailField>
             <DetailField label="Name" value={lead.name} editing={editingDetails}>
               <input value={detailsForm.name || ''} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
@@ -1011,6 +1088,7 @@ export default function LeadDetailPage() {
             followUps={lead.follow_ups || []}
             onSave={saveFollowUp}
           />
+          <StatusHistory rows={lead.status_history || []} />
         </div>
         </div>
 

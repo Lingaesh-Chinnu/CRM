@@ -128,6 +128,20 @@ function monthBounds(offset = 0) {
 const thisMonthRange = monthBounds()
 const lastMonthRange = monthBounds(-1)
 
+const enrollmentSourceOptions = [
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'google', label: 'Google' },
+  { value: 'website', label: 'Website' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'direct', label: 'Direct Walk-in' },
+  { value: 'student_reference', label: 'Student Reference' },
+  { value: 'friends_reference', label: 'Friends Reference' },
+  { value: 'staff_reference', label: 'Staff Reference' },
+  { value: 'lead_conversion', label: 'Lead Conversion' },
+  { value: 'others', label: 'Other' },
+]
+
 export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   const isYetToEnroll = queue === 'yet_to_enroll'
   const [rows, setRows] = useState([])
@@ -135,10 +149,15 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   const [previousMetricRows, setPreviousMetricRows] = useState([])
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
+  const [counselors, setCounselors] = useState([])
   const [filters, setFilters] = useState({
     branch: '',
     course: '',
+    counselor: '',
     status: '',
+    source: '',
+    date_from: '',
+    date_to: '',
     search: '',
   })
   const [loading, setLoading] = useState(true)
@@ -162,19 +181,22 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
 
   useEffect(() => {
     loadEnrollments()
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, isSuperAdmin, queue])
+  }, [filters.branch, filters.course, filters.counselor, filters.status, filters.source, filters.date_from, filters.date_to, debouncedSearch, isSuperAdmin, queue])
 
   const loadFilterOptions = async () => {
     try {
-      const [branchesRes, coursesRes] = await Promise.all([
+      const [branchesRes, coursesRes, usersRes] = await Promise.all([
         api.get('/branches/'),
         api.get('/courses/'),
+        api.get('/walkins/staff-options/'),
       ])
       setBranches(normaliseListResponse(branchesRes.data))
       setCourses(normaliseListResponse(coursesRes.data))
+      setCounselors(normaliseListResponse(usersRes.data))
     } catch {
       setBranches([])
       setCourses([])
+      setCounselors([])
     }
   }
 
@@ -190,8 +212,20 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
       if (filters.course) {
         baseParams.course = filters.course
       }
+      if (filters.counselor) {
+        baseParams.counselor = filters.counselor
+      }
       if (filters.status) {
         baseParams.status = filters.status
+      }
+      if (filters.source) {
+        baseParams.source = filters.source
+      }
+      if (filters.date_from) {
+        baseParams.date_from = filters.date_from
+      }
+      if (filters.date_to) {
+        baseParams.date_to = filters.date_to
       }
       if (debouncedSearch) {
         baseParams.search = debouncedSearch
@@ -285,6 +319,64 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
             </select>
           </label>
 
+          <label className="min-w-[180px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Counselor
+            </span>
+            <select
+              value={filters.counselor}
+              onChange={(event) => setFilters((current) => ({ ...current, counselor: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              <option value="">All counselors</option>
+              {counselors.map((counselor) => (
+                <option key={counselor.id} value={counselor.id}>
+                  {counselor.name}{counselor.branch_name ? ` - ${counselor.branch_name}` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="min-w-[180px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Source
+            </span>
+            <select
+              value={filters.source}
+              onChange={(event) => setFilters((current) => ({ ...current, source: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            >
+              <option value="">All sources</option>
+              {enrollmentSourceOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              From Date
+            </span>
+            <input
+              type="date"
+              value={filters.date_from}
+              onChange={(event) => setFilters((current) => ({ ...current, date_from: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            />
+          </label>
+
+          <label className="min-w-[160px] flex-1">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              To Date
+            </span>
+            <input
+              type="date"
+              value={filters.date_to}
+              onChange={(event) => setFilters((current) => ({ ...current, date_to: event.target.value }))}
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+            />
+          </label>
+
           {!isYetToEnroll && <label className="min-w-[160px] flex-1">
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
               Status
@@ -296,7 +388,12 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
             >
               <option value="">All status</option>
               <option value="active">Active</option>
+              <option value="enrolled">Enrolled</option>
               <option value="pending">Pending</option>
+              <option value="draft">Draft</option>
+              <option value="pending_rules_form">Pending Rules Form</option>
+              <option value="rules_form_sent">Rules Form Sent</option>
+              <option value="rules_form_submitted">Rules Form Submitted</option>
               <option value="completed">Completed</option>
               <option value="on_hold">Hold</option>
               <option value="inactive">Inactive</option>

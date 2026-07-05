@@ -57,6 +57,43 @@ const leadFollowUpFilters = [
   ['next7', 'Next 7 Days Follow-ups'],
 ]
 
+const leadStatusOptions = [
+  { value: 'new_lead', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'no_answer', label: 'No Answer' },
+  { value: 'continuous_no_answer', label: 'Continuous No Answer' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walk_in_completed', label: 'Walk-in Completed' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'ready_to_join', label: 'Ready to Join' },
+  { value: 'joined', label: 'Joined' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'lost_to_competitor', label: 'Lost to Competitor' },
+  { value: 'na', label: 'NA' },
+  { value: 'cna', label: 'CNA' },
+]
+
+const leadStatusAliases = {
+  new_lead: ['new'],
+  no_answer: ['not_answering', 'call_not_attended'],
+  continuous_no_answer: ['continuously_not_answering_calls'],
+  na: ['not_answering', 'call_not_attended'],
+  cna: ['continuously_not_answering_calls'],
+  will_walk_in: ['will_walk_in', 'walk_in'],
+  walk_in_completed: ['converted_to_walkin'],
+  ready_to_join: ['will_enroll'],
+  joined: ['enrolled', 'converted'],
+  lost_to_competitor: ['joined_other_institute', 'lost'],
+}
+
+function matchesLeadStatus(lead, value) {
+  if (!value) return true
+  return lead.counselor_status === value
+    || lead.status === value
+    || (leadStatusAliases[value] || []).includes(lead.status)
+}
+
 function formatDateTimeCompact(value) {
   if (!value) return '-'
   const date = new Date(value)
@@ -169,8 +206,7 @@ export default function LeadsListPage() {
     const tomorrowValue = isoDate(addDays(today, 1))
     const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
-      const matchesStatus = !filters.status
-        || lead.status === filters.status
+      const matchesStatus = matchesLeadStatus(lead, filters.status)
         || (filters.status === 'converted' && lead.status === 'converted_to_walkin')
       const leadSource = String(lead.source || '').toLowerCase()
       const filterSource = String(filters.source || '').toLowerCase()
@@ -232,7 +268,6 @@ export default function LeadsListPage() {
     || filters.createdTo
     || filters.importantOnly
   )
-  const showCustomDateRange = filters.leadPeriod === 'custom'
   const leadSummary = [
     { label: 'Total', value: '', count: statusSummaryBaseLeads.length },
     { label: 'New Lead', value: 'new', count: statusSummaryBaseLeads.filter((lead) => lead.status === 'new' && lead.source !== 'manual').length },
@@ -252,6 +287,7 @@ export default function LeadsListPage() {
     focus,
     isSuperAdmin,
     filters.branch,
+    filters.status,
     filters.source,
     filters.followUp,
     filters.leadPeriod,
@@ -302,16 +338,17 @@ export default function LeadsListPage() {
     try {
       const params = {}
       if (statusFilter) params.status = statusFilter
+      else if (filters.status) params.status = filters.status
       if (walkinDateFrom) params.walkin_date_from = walkinDateFrom
       if (walkinDateTo) params.walkin_date_to = walkinDateTo
       if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
       if (isSuperAdmin && filters.branch) params.branch = filters.branch
       if (filters.source) params.source = filters.source
-      if (filters.followUpBy) params.follow_up_by = filters.followUpBy
+      if (filters.followUpBy) params.counselor = filters.followUpBy
       if (appliedSearch) params.search = appliedSearch
-      if (filters.createdFrom) params.created_from = filters.createdFrom
-      if (filters.createdTo) params.created_to = filters.createdTo
+      if (filters.createdFrom) params.date_from = filters.createdFrom
+      if (filters.createdTo) params.date_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
       const today = new Date()
       if (!isSuperAdmin && filters.followUp === 'today') {
@@ -348,7 +385,6 @@ export default function LeadsListPage() {
             next_follow_up_date: followUp.next_follow_up_date,
             latest_follow_up_at: followUp.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            status: ['converted', 'converted_to_walkin', 'enrolled', 'not_interested'].includes(lead.status) ? lead.status : 'follow_up',
           }
         : lead
     )))
@@ -567,6 +603,13 @@ export default function LeadsListPage() {
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Status</span>
+            <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
+              <option value="">All Statuses</option>
+              {leadStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
           {isSuperAdmin && (
             <>
               <label className="block">
@@ -584,8 +627,7 @@ export default function LeadsListPage() {
               </label>
             </>
           )}
-          {showCustomDateRange && (
-            <>
+          <>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-600">From Date</span>
                 <input
@@ -604,8 +646,7 @@ export default function LeadsListPage() {
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
                 />
               </label>
-            </>
-          )}
+          </>
           <label className="block">
             <span className="mb-2 block text-sm font-semibold text-slate-600">Follow-up By</span>
             <select

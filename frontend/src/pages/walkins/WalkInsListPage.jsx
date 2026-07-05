@@ -17,6 +17,7 @@ const emptyFilters = {
   course: '',
   status: '',
   source: '',
+  counselor: '',
   quick_filter: '',
   date_from: '',
   date_to: '',
@@ -44,6 +45,7 @@ function readFilters(searchParams, canFilterByBranch) {
     course: searchParams.get('course') || '',
     status: searchParams.get('status') || '',
     source: searchParams.get('source') || '',
+    counselor: searchParams.get('counselor') || '',
     quick_filter: searchParams.get('quick_filter') || '',
     date_from: searchParams.get('date_from') || '',
     date_to: searchParams.get('date_to') || '',
@@ -124,6 +126,37 @@ const walkInQuickFilters = [
   ['last3', 'Last 3 Months Walk-ins'],
   ['last6', 'Last 6 Months Walk-ins'],
   ['custom', 'Custom Range'],
+]
+
+const walkInStatusOptions = [
+  { value: 'new_lead', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'no_answer', label: 'No Answer' },
+  { value: 'continuous_no_answer', label: 'Continuous No Answer' },
+  { value: 'na', label: 'NA' },
+  { value: 'cna', label: 'CNA' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walk_in_completed', label: 'Walk-in Completed' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'ready_to_join', label: 'Ready to Join' },
+  { value: 'joined', label: 'Joined' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'lost_to_competitor', label: 'Lost to Competitor' },
+]
+
+const walkInSourceOptions = [
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'google', label: 'Google' },
+  { value: 'website', label: 'Website' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'facebook', label: 'Facebook' },
+  { value: 'direct', label: 'Direct Walk-in' },
+  { value: 'student_reference', label: 'Student Reference' },
+  { value: 'friends_reference', label: 'Friends Reference' },
+  { value: 'staff_reference', label: 'Staff Reference' },
+  { value: 'lead_conversion', label: 'Lead Conversion' },
+  { value: 'others', label: 'Other' },
 ]
 
 function counselorLabel(walkin) {
@@ -239,6 +272,7 @@ export default function WalkInsListPage() {
   const [otherWalkinsCount, setOtherWalkinsCount] = useState(0)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
+  const [staffUsers, setStaffUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [filters, setFilters] = useState(emptyFilters)
@@ -254,7 +288,6 @@ export default function WalkInsListPage() {
   const followUpDateFrom = canFilterByBranch ? '' : searchParams.get('follow_up_date_from') || ''
   const followUpDateTo = canFilterByBranch ? '' : searchParams.get('follow_up_date_to') || ''
   const focus = canFilterByBranch ? '' : searchParams.get('focus') || ''
-  const showCustomDateRange = filters.quick_filter === 'custom'
   const hasDateRangeFilter = Boolean(
     appliedFilters.date_from
     || appliedFilters.date_to
@@ -289,10 +322,12 @@ export default function WalkInsListPage() {
     Promise.all([
       canFilterByBranch ? api.get('/branches/') : Promise.resolve({ data: [] }),
       api.get('/courses/'),
+      api.get('/walkins/staff-options/'),
     ])
-      .then(([branchesRes, coursesRes]) => {
+      .then(([branchesRes, coursesRes, usersRes]) => {
         setBranches(branchesRes.data.results || branchesRes.data)
         setCourses(coursesRes.data.results || coursesRes.data)
+        setStaffUsers(usersRes.data.results || usersRes.data || [])
       })
       .catch((error) => {
         console.error('Failed to fetch filter options:', error)
@@ -354,6 +389,10 @@ export default function WalkInsListPage() {
       })
       return
     }
+    if (key === 'date_from' || key === 'date_to') {
+      setFilters((current) => ({ ...current, quick_filter: 'custom', [key]: value }))
+      return
+    }
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
@@ -396,7 +435,6 @@ export default function WalkInsListPage() {
             latest_remark: followUp.remarks || walkin.latest_remark,
             remarks: followUp.remarks || walkin.remarks,
             follow_up_date: followUp.next_follow_up_date,
-            status: ['converted', 'not_interested', 'transferred'].includes(walkin.status) ? walkin.status : 'follow_up',
           }
         : walkin
     ))
@@ -447,7 +485,6 @@ export default function WalkInsListPage() {
     Object.entries(filters).forEach(([key, value]) => {
       if (key === 'branch' && !canFilterByBranch) return
       if (key === 'quick_filter') return
-      if ((key === 'date_from' || key === 'date_to') && filters.quick_filter !== 'custom') return
       if (value.trim()) nextParams.set(key, value.trim())
     })
     if (filters.quick_filter) {
@@ -517,18 +554,24 @@ export default function WalkInsListPage() {
             <span className="mb-2 block text-sm font-semibold text-slate-600">Source</span>
             <select value={filters.source} onChange={(event) => updateFilter('source', event.target.value)} name="source" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
               <option value="">All sources</option>
-              <option value="google">Google</option>
-              <option value="justdial">JustDial</option>
-              <option value="direct">Direct</option>
-              <option value="instagram">Instagram</option>
-              <option value="facebook">Facebook</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="friends_reference">Friends Reference</option>
-              <option value="lead_conversion">Lead Conversion</option>
+              {walkInSourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-          {showCustomDateRange && (
-            <>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Counselor</span>
+            <select value={filters.counselor} onChange={(event) => updateFilter('counselor', event.target.value)} name="counselor" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All counselors</option>
+              {staffUsers.map((staff) => <option key={staff.id} value={staff.id}>{staff.name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Status</span>
+            <select value={filters.status} onChange={(event) => updateFilter('status', event.target.value)} name="status" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All status</option>
+              {walkInStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <>
               <label className="block">
                 <span className="mb-2 block text-sm font-semibold text-slate-600">From Date</span>
                 <input type="date" value={filters.date_from} onChange={(event) => updateFilter('date_from', event.target.value)} name="date_from" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
@@ -537,8 +580,7 @@ export default function WalkInsListPage() {
                 <span className="mb-2 block text-sm font-semibold text-slate-600">To Date</span>
                 <input type="date" value={filters.date_to} onChange={(event) => updateFilter('date_to', event.target.value)} name="date_to" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
               </label>
-            </>
-          )}
+          </>
           <div className="flex items-end">
             <ImportantFilter checked={filters.important_only === 'true'} onChange={(checked) => updateFilter('important_only', checked ? 'true' : '')} />
           </div>

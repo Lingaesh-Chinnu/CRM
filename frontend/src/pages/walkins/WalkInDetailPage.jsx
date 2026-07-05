@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import FollowUpHistory from '../../components/common/FollowUpHistory'
+import StatusHistory from '../../components/common/StatusHistory'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import { apiErrorMessage } from '../../utils/apiErrors'
@@ -84,7 +85,50 @@ const sourceOptions = [
   { value: 'instagram', label: 'Instagram' },
   { value: 'facebook', label: 'Facebook' },
   { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'website', label: 'Website' },
+  { value: 'student_reference', label: 'Student Reference' },
   { value: 'friends_reference', label: 'Friends Reference' },
+  { value: 'staff_reference', label: 'Staff Reference' },
+  { value: 'others', label: 'Other' },
+]
+
+const crmStatusOptions = [
+  { value: 'new_lead', label: 'New Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'no_answer', label: 'No Answer' },
+  { value: 'continuous_no_answer', label: 'Continuous No Answer' },
+  { value: 'na', label: 'NA' },
+  { value: 'cna', label: 'CNA' },
+  { value: 'will_walk_in', label: 'Will Walk-in' },
+  { value: 'walk_in_completed', label: 'Walk-in Completed' },
+  { value: 'demo_attended', label: 'Demo Attended' },
+  { value: 'follow_up', label: 'Follow-up' },
+  { value: 'ready_to_join', label: 'Ready to Join' },
+  { value: 'joined', label: 'Joined' },
+  { value: 'not_interested', label: 'Not Interested' },
+  { value: 'lost_to_competitor', label: 'Lost to Competitor' },
+]
+
+const competitorStatusOptions = [
+  { value: 'not_enquired_elsewhere', label: 'Not Enquired Elsewhere' },
+  { value: 'enquired_1', label: 'Enquired at 1 Institute' },
+  { value: 'enquired_2_3', label: 'Enquired at 2-3 Institutes' },
+  { value: 'enquired_more_3', label: 'Enquired at More Than 3 Institutes' },
+  { value: 'fake_enquiry', label: 'Fake Enquiry' },
+]
+
+const followUpPriorityOptions = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+]
+
+const conversionProbabilityOptions = [
+  { value: '90', label: '90%' },
+  { value: '75', label: '75%' },
+  { value: '50', label: '50%' },
+  { value: '25', label: '25%' },
+  { value: '10', label: '10%' },
 ]
 
 function qualificationSelectOptions(value) {
@@ -225,6 +269,11 @@ export default function WalkInDetailPage() {
     assigned_to: '',
     counseling_by: '',
     transfer_reason: '',
+    counselor_status: '',
+    competitor_status: '',
+    follow_up_priority: '',
+    conversion_probability: '',
+    remarks: '',
   })
   const [message, setMessage] = useState('')
   const [loadError, setLoadError] = useState('')
@@ -273,6 +322,11 @@ export default function WalkInDetailPage() {
         visit_date: data.visit_date || '',
         assigned_to: isFixedWalkInBy(data.walk_in_by) ? data.walk_in_by : data.assigned_to || '',
         counseling_by: data.counseling_by || '',
+        counselor_status: data.counselor_status || '',
+        competitor_status: data.competitor_status || '',
+        follow_up_priority: data.follow_up_priority || '',
+        conversion_probability: data.conversion_probability || '',
+        remarks: data.remarks || '',
         enrollment_date: todayInputValue(),
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? '',
       }))
@@ -402,7 +456,6 @@ export default function WalkInDetailPage() {
     const { data } = await api.post(`/walkins/${id}/follow-ups/`, payload)
     setWalkin((current) => ({
       ...current,
-      status: payload.close_follow_up ? 'not_interested' : ['converted', 'not_interested', 'transferred'].includes(current.status) ? current.status : 'follow_up',
       follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(current.follow_ups || [])],
     }))
@@ -440,6 +493,11 @@ export default function WalkInDetailPage() {
     { field: 'degree', label: 'Degree', value: walkin.degree },
     { field: 'year_of_passing', label: 'Passed Out Year', value: walkin.year_of_passing },
     { field: 'college_company', label: 'College / Company Name', value: walkin.college_company },
+    { field: 'counselor_status', label: 'Status', value: walkin.counselor_status, displayValue: crmStatusOptions.find((option) => option.value === walkin.counselor_status)?.label || '', displayNew: (value) => crmStatusOptions.find((option) => option.value === value)?.label || value },
+    { field: 'competitor_status', label: 'Competitor Status', value: walkin.competitor_status, displayValue: competitorStatusOptions.find((option) => option.value === walkin.competitor_status)?.label || '', displayNew: (value) => competitorStatusOptions.find((option) => option.value === value)?.label || value },
+    { field: 'follow_up_priority', label: 'Follow-up Priority', value: walkin.follow_up_priority, displayValue: followUpPriorityOptions.find((option) => option.value === walkin.follow_up_priority)?.label || '', displayNew: (value) => followUpPriorityOptions.find((option) => option.value === value)?.label || value },
+    { field: 'conversion_probability', label: 'Conversion Probability', value: walkin.conversion_probability, displayValue: conversionProbabilityOptions.find((option) => option.value === walkin.conversion_probability)?.label || '', displayNew: (value) => conversionProbabilityOptions.find((option) => option.value === value)?.label || value },
+    { field: 'remarks', label: 'Remarks', value: walkin.remarks || '' },
   ]
 
   const detailChanges = () => detailFields
@@ -471,6 +529,11 @@ export default function WalkInDetailPage() {
         visit_date: walkin.visit_date || '',
         assigned_to: isFixedWalkInBy(walkin.walk_in_by) ? walkin.walk_in_by : walkin.assigned_to || '',
         counseling_by: walkin.counseling_by || '',
+        counselor_status: walkin.counselor_status || '',
+        competitor_status: walkin.competitor_status || '',
+        follow_up_priority: walkin.follow_up_priority || '',
+        conversion_probability: walkin.conversion_probability || '',
+        remarks: walkin.remarks || '',
         actual_fees: matchedCourse?.actual_fees ?? matchedCourse?.final_fees ?? current.actual_fees,
       }))
     setDetailErrors({})
@@ -704,6 +767,33 @@ export default function WalkInDetailPage() {
               </select>
               {detailErrorFor('branch')}
             </DetailField>
+            <DetailField label="Status" value={crmStatusOptions.find((option) => option.value === walkin.counselor_status)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={form.counselor_status || ''} onChange={(event) => updateDetail('counselor_status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Status</option>
+                {crmStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Competitor Status" value={competitorStatusOptions.find((option) => option.value === walkin.competitor_status)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={form.competitor_status || ''} onChange={(event) => updateDetail('competitor_status', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Competitor Status</option>
+                {competitorStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Follow-up Priority" value={followUpPriorityOptions.find((option) => option.value === walkin.follow_up_priority)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={form.follow_up_priority || ''} onChange={(event) => updateDetail('follow_up_priority', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Priority</option>
+                {followUpPriorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Conversion Probability" value={conversionProbabilityOptions.find((option) => option.value === walkin.conversion_probability)?.label || 'Not provided'} editing={editingDetails}>
+              <select value={form.conversion_probability || ''} onChange={(event) => updateDetail('conversion_probability', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+                <option value="">Select Probability</option>
+                {conversionProbabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </DetailField>
+            <DetailField label="Remarks" value={walkin.remarks} editing={editingDetails}>
+              <textarea value={form.remarks || ''} onChange={(event) => updateDetail('remarks', event.target.value)} className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
+            </DetailField>
             <DetailField label="Name" value={walkin.name} editing={editingDetails}>
               <input value={form.name} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
@@ -890,6 +980,7 @@ export default function WalkInDetailPage() {
             onSave={saveFollowUp}
             readOnly={hasValidEnrollmentConversion}
           />
+          <StatusHistory rows={walkin.status_history || []} />
           <div className="mt-5 flex flex-wrap items-center gap-3">
             {message && <p className="text-sm text-slate-600">{message}</p>}
           </div>

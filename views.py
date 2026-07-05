@@ -83,6 +83,7 @@ from crm.models import (
     PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory, WalkInAssignmentChangeRequest,
+    CandidateStatusHistory,
     get_default_installment_schedule, get_enrollment_installment_schedule, get_saved_enrollment_installment_schedule,
     normalize_installment_schedule,
     enrollment_payable_fee, ENROLLMENT_PAYMENT_AMOUNT, LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE, MIN_INSTALLMENT_AMOUNT,
@@ -113,6 +114,85 @@ QUALIFICATION_KPI_FIELDS = (
     'follow_up_priority',
     'conversion_probability',
 )
+
+COMMON_SOURCE_ALIASES = {
+    'direct_walk_in': 'direct_walkin',
+    'staff_referral': 'team_reference',
+    'other': 'others',
+}
+
+LEAD_STATUS_FILTER_ALIASES = {
+    'new_lead': [Lead.Status.NEW],
+    'no_answer': [Lead.Status.NOT_ANSWERING, Lead.Status.CALL_NOT_ATTENDED],
+    'continuous_no_answer': [Lead.Status.CONTINUOUSLY_NOT_ANSWERING_CALLS],
+    'cna': [Lead.Status.CONTINUOUSLY_NOT_ANSWERING_CALLS],
+    'na': [Lead.Status.NOT_ANSWERING, Lead.Status.CALL_NOT_ATTENDED],
+    'will_walk_in': [Lead.Status.WILL_WALK_IN, Lead.Status.WALK_IN],
+    'walk_in_completed': [Lead.Status.CONVERTED_TO_WALKIN],
+    'ready_to_join': [Lead.Status.WILL_ENROLL],
+    'joined': [Lead.Status.ENROLLED, Lead.Status.CONVERTED],
+    'lost_to_competitor': [Lead.Status.JOINED_OTHER_INSTITUTE, Lead.Status.LOST],
+}
+
+WALKIN_STATUS_FILTER_ALIASES = {
+    'new_lead': [WalkIn.Status.NEW],
+    'new': [WalkIn.Status.NEW],
+    'follow_up': [WalkIn.Status.FOLLOW_UP],
+    'joined': [WalkIn.Status.CONVERTED],
+    'walk_in_completed': [WalkIn.Status.NEW, WalkIn.Status.FOLLOW_UP],
+    'not_interested': [WalkIn.Status.NOT_INTERESTED],
+    'no_answer': [],
+    'continuous_no_answer': [],
+}
+
+
+def normalize_source_filter(value, choices):
+    value = str(value or '').strip().lower()
+    if not value:
+        return ''
+    value = COMMON_SOURCE_ALIASES.get(value, value)
+    valid_values = {choice[0] for choice in choices}
+    if value == 'direct_walkin' and 'direct' in valid_values and value not in valid_values:
+        value = 'direct'
+    if value == 'team_reference' and 'staff_reference' in valid_values and value not in valid_values:
+        value = 'staff_reference'
+    return value if value in valid_values else ''
+
+
+def filter_candidate_status(queryset, value, model, aliases=None):
+    value = str(value or '').strip()
+    if not value:
+        return queryset
+    aliases = aliases or {}
+    if hasattr(model, 'CounselorStatus') and value in {choice[0] for choice in model.CounselorStatus.choices}:
+        return queryset.filter(counselor_status=value)
+    if value in aliases:
+        query = Q(status__in=aliases[value])
+        if hasattr(model, 'CounselorStatus'):
+            query |= Q(counselor_status=value)
+        return queryset.filter(query)
+    return queryset.filter(status=value)
+
+
+def create_status_history(record, record_type, old_status, new_status, user=None, remarks=''):
+    old_status = str(old_status or '')
+    new_status = str(new_status or '')
+    if not new_status or old_status == new_status:
+        return None
+    return CandidateStatusHistory.objects.create(
+        record_type=record_type,
+        record_id=record.id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by=user if getattr(user, 'is_authenticated', False) else None,
+        remarks=str(remarks or '').strip(),
+    )
+
+
+def tracked_crm_status(record):
+    if isinstance(record, Enrollment):
+        return getattr(record, 'status', '')
+    return getattr(record, 'counselor_status', '') or getattr(record, 'status', '')
 
 
 def official_enrollment_queryset(queryset):
@@ -271,6 +351,7 @@ def clear_stale_walkin_conversion(walkin):
         return False
     if valid_walkin_enrollment(walkin):
         return False
+    old_status = walkin.status
     walkin.converted_to_type = ''
     walkin.converted_record_id = None
     walkin.converted_at = None
@@ -281,11 +362,19 @@ def clear_stale_walkin_conversion(walkin):
         'status', 'converted_to_type', 'converted_record_id',
         'converted_at', 'converted_by', 'updated_at',
     ])
+    create_status_history(
+        walkin,
+        CandidateStatusHistory.RecordType.WALKIN,
+        old_status,
+        walkin.status,
+        remarks='Stale enrollment conversion cleared.',
+    )
     return True
 
 
 def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
     data = data or {}
+    old_status = walkin.status
     walkin.name = data.get('name') or walkin.name
     walkin.phone = data.get('phone') or walkin.phone
     walkin.email = data.get('email') or walkin.email
@@ -309,6 +398,14 @@ def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
         'status', 'follow_up_date', 'converted_to_type',
         'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
     ])
+    create_status_history(
+        walkin,
+        CandidateStatusHistory.RecordType.WALKIN,
+        old_status,
+        walkin.status,
+        user,
+        'Joined - No follow-up required',
+    )
     system_remark = 'Joined - No follow-up required'
     if not FollowUp.objects.filter(
         record_type=FollowUp.RecordType.WALKIN,
@@ -328,6 +425,7 @@ def mark_walkin_enrollment_converted(walkin, enrollment, user, data=None):
 
 def mark_lead_enrollment_converted(lead, enrollment, user, data=None):
     data = data or {}
+    old_status = lead.status
     lead.name = data.get('name') or lead.name
     lead.phone = data.get('phone') or lead.phone
     lead.dob = data.get('dob') or lead.dob
@@ -352,6 +450,14 @@ def mark_lead_enrollment_converted(lead, enrollment, user, data=None):
         'status', 'remarks', 'next_follow_up_date', 'converted_to_type',
         'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
     ])
+    create_status_history(
+        lead,
+        CandidateStatusHistory.RecordType.LEAD,
+        old_status,
+        lead.status,
+        user,
+        lead.remarks,
+    )
 
 
 def app_url(path):
@@ -2264,7 +2370,27 @@ def enrollment_counselor_filter_q(user_id, prefix=''):
     )
 
 
-def reporting_scope(branch=None, user_id=None, course=None, source=None):
+def candidate_search_query(model, value):
+    """Return the common free-text search used by lists and aggregate reports."""
+    value = str(value or '').strip()
+    if not value:
+        return Q()
+    query = Q(name__icontains=value) | Q(phone__icontains=value) | Q(email__icontains=value)
+    query |= Q(course__name__icontains=value) | Q(branch__name__icontains=value)
+    if model is Lead:
+        query |= Q(lead_number__icontains=value) | Q(source_description__icontains=value)
+        query |= Q(assigned_to__first_name__icontains=value) | Q(assigned_to__last_name__icontains=value) | Q(assigned_to__username__icontains=value)
+    elif model is WalkIn:
+        query |= Q(candidate_number__icontains=value)
+        query |= Q(assigned_to__first_name__icontains=value) | Q(assigned_to__last_name__icontains=value) | Q(assigned_to__username__icontains=value)
+        query |= Q(counseling_by__first_name__icontains=value) | Q(counseling_by__last_name__icontains=value) | Q(counseling_by__username__icontains=value)
+    else:
+        query |= Q(student_number__icontains=value)
+        query |= Q(counselor__first_name__icontains=value) | Q(counselor__last_name__icontains=value) | Q(counselor__username__icontains=value)
+    return query
+
+
+def reporting_scope(branch=None, user_id=None, course=None, source=None, status_value=None, search=None):
     leads = visible_candidate_queryset(Lead.objects.all())
     walkins = visible_candidate_queryset(WalkIn.objects.all())
     enrollments = reporting_enrollment_queryset(Enrollment.objects.all())
@@ -2285,9 +2411,32 @@ def reporting_scope(branch=None, user_id=None, course=None, source=None):
         walkins = walkins.filter(course_id=course)
         enrollments = enrollments.filter(course_id=course)
     if source:
-        leads = leads.filter(source=source)
-        walkins = walkins.filter(source=source)
-        enrollments = enrollments.filter(source=source)
+        lead_source = normalize_source_filter(source, Lead.Source.choices)
+        walkin_source = normalize_source_filter(source, WalkIn.Source.choices)
+        enrollment_source = normalize_source_filter(source, Enrollment._meta.get_field('source').choices)
+        leads = leads.filter(source=lead_source) if lead_source else leads.none()
+        walkins = walkins.filter(source=walkin_source) if walkin_source else walkins.none()
+        enrollments = enrollments.filter(source=enrollment_source) if enrollment_source else enrollments.none()
+    if status_value:
+        leads = filter_candidate_status(leads, status_value, Lead, LEAD_STATUS_FILTER_ALIASES)
+        walkins = filter_candidate_status(walkins, status_value, WalkIn, WALKIN_STATUS_FILTER_ALIASES)
+        if status_value == Enrollment.Status.ACTIVE:
+            enrollments = enrollments.filter(status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.ENROLLED])
+        elif status_value == 'pending':
+            enrollments = enrollments.filter(status__in=[Enrollment.Status.DRAFT, Enrollment.Status.PENDING_RULES, Enrollment.Status.RULES_SENT, Enrollment.Status.RULES_SUBMITTED])
+        elif status_value in {choice[0] for choice in Enrollment.Status.choices}:
+            enrollments = enrollments.filter(status=status_value)
+        else:
+            enrollments = enrollments.none()
+    if search:
+        leads = leads.filter(candidate_search_query(Lead, search)).distinct()
+        walkins = walkins.filter(candidate_search_query(WalkIn, search)).distinct()
+        enrollments = enrollments.filter(candidate_search_query(Enrollment, search)).distinct()
+    if source or status_value or search:
+        followups = followups.filter(
+            Q(record_type=FollowUp.RecordType.LEAD, record_id__in=leads.values('id'))
+            | Q(record_type=FollowUp.RecordType.WALKIN, record_id__in=walkins.values('id'))
+        )
 
     return {
         'leads': leads,
@@ -2297,8 +2446,8 @@ def reporting_scope(branch=None, user_id=None, course=None, source=None):
     }
 
 
-def scoped_metrics(branch=None, user_id=None, course=None, source=None, start_date=None, end_date=None):
-    scope = reporting_scope(branch=branch, user_id=user_id, course=course, source=source)
+def scoped_metrics(branch=None, user_id=None, course=None, source=None, status_value=None, search=None, start_date=None, end_date=None):
+    scope = reporting_scope(branch=branch, user_id=user_id, course=course, source=source, status_value=status_value, search=search)
     if not start_date or not end_date:
         start_date, end_date = month_bounds_for()
     return performance_metrics(scope, start_date, end_date)
@@ -2966,7 +3115,9 @@ class AdminAnalyticsDashboardView(APIView):
         user_id = request.query_params.get('user')
         course = request.query_params.get('course')
         source = request.query_params.get('source')
-        return start_date, end_date, reporting_scope(branch=branch, user_id=user_id, course=course, source=source)
+        status_value = request.query_params.get('status')
+        search = request.query_params.get('search')
+        return start_date, end_date, reporting_scope(branch=branch, user_id=user_id, course=course, source=source, status_value=status_value, search=search)
 
     def get(self, request):
         start_date, end_date, scope = self._filtered_scope(request)
@@ -2993,6 +3144,8 @@ class AdminAnalyticsDashboardView(APIView):
         user_filter = request.query_params.get('user')
         course_filter = request.query_params.get('course')
         source_filter = request.query_params.get('source')
+        status_filter = request.query_params.get('status')
+        search_filter = request.query_params.get('search')
         users = User.objects.filter(is_active=True).exclude(role=User.Role.SUPER_ADMIN).select_related('branch')
         if branch_filter:
             users = users.filter(branch_id=branch_filter)
@@ -3005,6 +3158,8 @@ class AdminAnalyticsDashboardView(APIView):
                 user_id=user.id,
                 course=course_filter,
                 source=source_filter,
+                status_value=status_filter,
+                search=search_filter,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -3015,7 +3170,7 @@ class AdminAnalyticsDashboardView(APIView):
                 **row_metrics,
             })
         if not user_filter:
-            unassigned_scope = reporting_scope(branch=branch_filter, course=course_filter, source=source_filter)
+            unassigned_scope = reporting_scope(branch=branch_filter, course=course_filter, source=source_filter, status_value=status_filter, search=search_filter)
             unassigned_scope['leads'] = unassigned_scope['leads'].filter(assigned_to__isnull=True)
             unassigned_scope['walkins'] = unassigned_scope['walkins'].filter(assigned_to__isnull=True)
             unassigned_scope['enrollments'] = unassigned_scope['enrollments'].filter(
@@ -3043,6 +3198,8 @@ class AdminAnalyticsDashboardView(APIView):
                 user_id=user_filter,
                 course=course_filter,
                 source=source_filter,
+                status_value=status_filter,
+                search=search_filter,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -3052,7 +3209,7 @@ class AdminAnalyticsDashboardView(APIView):
                 **row_metrics,
             })
         if not branch_filter:
-            unassigned_branch_scope = reporting_scope(user_id=user_filter, course=course_filter, source=source_filter)
+            unassigned_branch_scope = reporting_scope(user_id=user_filter, course=course_filter, source=source_filter, status_value=status_filter, search=search_filter)
             unassigned_branch_scope['leads'] = unassigned_branch_scope['leads'].filter(branch__isnull=True)
             unassigned_branch_scope['walkins'] = unassigned_branch_scope['walkins'].filter(branch__isnull=True)
             unassigned_branch_scope['enrollments'] = unassigned_branch_scope['enrollments'].filter(branch__isnull=True)
@@ -3079,7 +3236,23 @@ class AdminAnalyticsDashboardView(APIView):
         if course_filter:
             payments = payments.filter(enrollment__course_id=course_filter)
         if source_filter:
-            payments = payments.filter(enrollment__source=source_filter)
+            normalized_payment_source = normalize_source_filter(source_filter, Enrollment._meta.get_field('source').choices)
+            payments = payments.filter(enrollment__source=normalized_payment_source) if normalized_payment_source else payments.none()
+        if status_filter:
+            if status_filter == Enrollment.Status.ACTIVE:
+                payments = payments.filter(enrollment__status__in=[Enrollment.Status.ACTIVE, Enrollment.Status.ENROLLED])
+            elif status_filter == 'pending':
+                payments = payments.filter(enrollment__status__in=[Enrollment.Status.DRAFT, Enrollment.Status.PENDING_RULES, Enrollment.Status.RULES_SENT, Enrollment.Status.RULES_SUBMITTED])
+            elif status_filter in {choice[0] for choice in Enrollment.Status.choices}:
+                payments = payments.filter(enrollment__status=status_filter)
+            else:
+                payments = payments.none()
+        if search_filter:
+            payments = payments.filter(
+                Q(enrollment__name__icontains=search_filter) | Q(enrollment__phone__icontains=search_filter) | Q(enrollment__student_number__icontains=search_filter) |
+                Q(enrollment__course__name__icontains=search_filter) | Q(enrollment__branch__name__icontains=search_filter) |
+                Q(enrollment__counselor__first_name__icontains=search_filter) | Q(enrollment__counselor__last_name__icontains=search_filter)
+            ).distinct()
         collection = PaymentInstallment.objects.filter(
             payment__in=payments,
             payment_date__gte=start_date,
@@ -3123,6 +3296,10 @@ class AdminAnalyticsDashboardView(APIView):
                 ],
                 'courses': [{'id': item.id, 'name': item.name} for item in Course.objects.filter(is_active=True).order_by('name')],
                 'sources': [{'value': value, 'label': label} for value, label in Lead.Source.choices],
+                'statuses': [
+                    {'value': value, 'label': label}
+                    for value, label in [*Lead.CounselorStatus.choices, *Enrollment.Status.choices]
+                ],
             },
             'insights': insights,
             'payment_summary': {
@@ -3361,12 +3538,15 @@ class LeadFilter(django_filters.FilterSet):
     source = django_filters.CharFilter(method='filter_source')
     follow_up_by = django_filters.NumberFilter(field_name='assigned_to')
     assigned_user = django_filters.NumberFilter(field_name='assigned_to')
+    counselor = django_filters.NumberFilter(field_name='assigned_to')
     walkin_date_from = django_filters.DateFilter(field_name='walkin_date', lookup_expr='gte')
     walkin_date_to   = django_filters.DateFilter(field_name='walkin_date', lookup_expr='lte')
     next_follow_up_date_from = django_filters.DateFilter(method='filter_next_follow_up_date_from')
     next_follow_up_date_to   = django_filters.DateFilter(method='filter_next_follow_up_date_to')
     created_from     = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
     created_to       = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+    date_from        = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
+    date_to          = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
     date_range       = django_filters.CharFilter(method='filter_date_range')
     important_only   = django_filters.BooleanFilter(method='filter_important_only')
 
@@ -3392,12 +3572,15 @@ class LeadFilter(django_filters.FilterSet):
             if 'imported_via_csv' in missing_model_columns(Lead, ['imported_via_csv']):
                 return queryset.none()
             return queryset.filter(imported_via_csv=True)
-        return queryset.filter(source__iexact=value)
+        normalized = normalize_source_filter(value, Lead.Source.choices)
+        return queryset.filter(source__iexact=normalized) if normalized else queryset.none()
 
     def filter_status(self, queryset, name, value):
         value = (value or '').strip()
         if not value:
             return queryset
+        if value in {choice[0] for choice in Lead.CounselorStatus.choices} or value in LEAD_STATUS_FILTER_ALIASES:
+            return filter_candidate_status(queryset, value, Lead, LEAD_STATUS_FILTER_ALIASES)
         enrollment_lookup = Q(enrollments__isnull=False) | Q(walkin__enrollment__isnull=False)
         walkin_lookup = Q(walkin__isnull=False)
         if value in (Lead.Status.ENROLLED, Lead.Status.CONVERTED):
@@ -3427,7 +3610,7 @@ class LeadFilter(django_filters.FilterSet):
 
     class Meta:
         model  = Lead
-        fields = ['status', 'source', 'branch', 'assigned_to', 'course', 'date_range', 'important_only']
+        fields = ['status', 'source', 'branch', 'assigned_to', 'counselor', 'course', 'date_range', 'important_only']
 
 
 class LeadViewSet(viewsets.ModelViewSet):
@@ -3508,6 +3691,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         return qs
 
     def _reconcile_lead_lifecycle_status(self, lead):
+        old_status = lead.status
         next_status = effective_lead_status(lead)
         if next_status not in (Lead.Status.ENROLLED, Lead.Status.CONVERTED_TO_WALKIN) or lead.status == next_status:
             return lead
@@ -3522,6 +3706,13 @@ class LeadViewSet(viewsets.ModelViewSet):
             'status', 'next_follow_up_date', 'remarks',
             'converted_to_type', 'updated_at',
         ])
+        create_status_history(
+            lead,
+            CandidateStatusHistory.RecordType.LEAD,
+            old_status,
+            lead.status,
+            remarks=lead.remarks,
+        )
         return lead
 
     @action(detail=True, methods=['post'], url_path='toggle-important')
@@ -3841,6 +4032,7 @@ class LeadViewSet(viewsets.ModelViewSet):
         try:
             with transaction.atomic():
                 lead = Lead.objects.select_for_update().get(pk=lead.pk)
+                old_status = lead.status
                 if lead.converted_to_type == 'enrollment' or lead.enrollments.exists():
                     return None, None, Response(
                         {'detail': 'This record has already been converted.'},
@@ -3949,6 +4141,14 @@ class LeadViewSet(viewsets.ModelViewSet):
                     'degree', *QUALIFICATION_KPI_FIELDS, 'branch', 'course', 'walkin_date', 'next_follow_up_date', 'status',
                     'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at',
                 ])
+                create_status_history(
+                    lead,
+                    CandidateStatusHistory.RecordType.LEAD,
+                    old_status,
+                    lead.status,
+                    request.user,
+                    lead.remarks,
+                )
                 walkin.refresh_from_db()
         except IntegrityError:
             return None, None, Response(
@@ -4114,6 +4314,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         # Staff can update candidate details and follow-up fields only.
         lead = self.get_object()
+        old_status = tracked_crm_status(lead)
         old_next_follow_up_date = lead.next_follow_up_date
         data = request.data.copy()
         if not request.user.is_super_admin:
@@ -4142,16 +4343,26 @@ class LeadViewSet(viewsets.ModelViewSet):
             if isinstance(result, Response):
                 return result
             return Response(self.get_serializer(converted_lead).data)
-        self.perform_update(serializer)
-        lead.refresh_from_db()
-        self._reconcile_lead_lifecycle_status(lead)
+        with transaction.atomic():
+            self.perform_update(serializer)
+            lead.refresh_from_db()
+            create_status_history(
+                lead,
+                CandidateStatusHistory.RecordType.LEAD,
+                old_status,
+                tracked_crm_status(lead),
+                request.user,
+                lead.remarks,
+            )
+            self._reconcile_lead_lifecycle_status(lead)
+            lead.refresh_from_db()
+            if (
+                old_next_follow_up_date != lead.next_follow_up_date
+                or lead.status in LEAD_CLOSED_FOLLOW_UP_STATUSES
+            ):
+                clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         lead.refresh_from_db()
         response = Response(self.get_serializer(lead).data)
-        if (
-            old_next_follow_up_date != lead.next_follow_up_date
-            or lead.status in LEAD_CLOSED_FOLLOW_UP_STATUSES
-        ):
-            clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return response
 
     @action(detail=True, methods=['post'], url_path='convert-to-walkin')
@@ -4291,11 +4502,8 @@ class LeadViewSet(viewsets.ModelViewSet):
         lead.remarks = response.data.get('remarks') or lead.remarks
         close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
         if close_follow_up:
-            lead.status = Lead.Status.NOT_INTERESTED
             lead.next_follow_up_date = None
-        elif lead.status not in LEAD_CLOSED_FOLLOW_UP_STATUSES:
-            lead.status = Lead.Status.FOLLOW_UP
-        lead.save(update_fields=['next_follow_up_date', 'remarks', 'status', 'updated_at'])
+        lead.save(update_fields=['next_follow_up_date', 'remarks', 'updated_at'])
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return response
 
@@ -6819,7 +7027,9 @@ class WalkInFilter(django_filters.FilterSet):
     branch = django_filters.ModelChoiceFilter(queryset=Branch.objects.all(), method='filter_branch')
     created_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_created_by')
     assigned_to = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
+    counselor = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_counselor')
     follow_up_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
+    status = django_filters.CharFilter(method='filter_status')
     visit_date_from = django_filters.DateFilter(field_name='visit_date', lookup_expr='gte')
     visit_date_to   = django_filters.DateFilter(field_name='visit_date', lookup_expr='lte')
     date_from = django_filters.DateFilter(method='filter_activity_date_from')
@@ -6847,14 +7057,23 @@ class WalkInFilter(django_filters.FilterSet):
                 return queryset.none()
         return queryset.filter(assigned_to=value)
 
+    def filter_counselor(self, queryset, name, value):
+        if not value:
+            return queryset
+        if not self.request or not self.request.user.is_super_admin:
+            if value.branch_id != self.request.user.branch_id:
+                return queryset.none()
+        return queryset.filter(Q(counseling_by=value) | Q(assigned_to=value))
+
     def filter_source(self, queryset, name, value):
         value = (value or '').strip()
         if not value:
             return queryset
-        valid_sources = {choice[0] for choice in WalkIn.Source.choices}
-        if value in valid_sources:
-            return queryset.filter(source=value)
-        return queryset.none()
+        normalized = normalize_source_filter(value, WalkIn.Source.choices)
+        return queryset.filter(source=normalized) if normalized else queryset.none()
+
+    def filter_status(self, queryset, name, value):
+        return filter_candidate_status(queryset, value, WalkIn, WALKIN_STATUS_FILTER_ALIASES)
 
     def filter_activity_date_from(self, queryset, name, value):
         if not value:
@@ -6875,7 +7094,7 @@ class WalkInFilter(django_filters.FilterSet):
 
     class Meta:
         model  = WalkIn
-        fields = ['status', 'branch', 'created_by', 'assigned_to', 'course', 'source', 'demo_class', 'date_range', 'important_only']
+        fields = ['status', 'branch', 'created_by', 'assigned_to', 'counselor', 'course', 'source', 'demo_class', 'date_range', 'important_only']
 
 
 class WalkInViewSet(viewsets.ModelViewSet):
@@ -7089,6 +7308,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
         walkin = self.get_object()
+        old_status = tracked_crm_status(walkin)
         old_follow_up_date = walkin.follow_up_date
         data = request.data.copy()
         branch_changed = False
@@ -7169,22 +7389,32 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
         serializer = self.get_serializer(walkin, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        if branch_changed:
-            WalkInBranchChangeHistory.objects.create(
-                walkin=walkin,
-                old_branch=old_branch,
-                new_branch=new_branch,
-                changed_by=request.user,
-                reason='Updated from walk-in detail edit.',
+        with transaction.atomic():
+            self.perform_update(serializer)
+            walkin.refresh_from_db()
+            create_status_history(
+                walkin,
+                CandidateStatusHistory.RecordType.WALKIN,
+                old_status,
+                tracked_crm_status(walkin),
+                request.user,
+                walkin.remarks,
             )
+            if branch_changed:
+                WalkInBranchChangeHistory.objects.create(
+                    walkin=walkin,
+                    old_branch=old_branch,
+                    new_branch=new_branch,
+                    changed_by=request.user,
+                    reason='Updated from walk-in detail edit.',
+                )
+            mark_public_walkin_notifications_read(walkin.id)
+            if (
+                old_follow_up_date != walkin.follow_up_date
+                or walkin.status in WALKIN_CLOSED_FOLLOW_UP_STATUSES
+            ):
+                clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         walkin.refresh_from_db()
-        mark_public_walkin_notifications_read(walkin.id)
-        if (
-            old_follow_up_date != walkin.follow_up_date
-            or walkin.status in WALKIN_CLOSED_FOLLOW_UP_STATUSES
-        ):
-            clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='request-assignment-change')
@@ -7268,11 +7498,8 @@ class WalkInViewSet(viewsets.ModelViewSet):
         walkin.follow_up_date = response.data['next_follow_up_date']
         close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
         if close_follow_up:
-            walkin.status = WalkIn.Status.NOT_INTERESTED
             walkin.follow_up_date = None
-        elif walkin.status not in WALKIN_CLOSED_FOLLOW_UP_STATUSES:
-            walkin.status = WalkIn.Status.FOLLOW_UP
-        walkin.save(update_fields=['follow_up_date', 'status', 'updated_at'])
+        walkin.save(update_fields=['follow_up_date', 'updated_at'])
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         return response
 
@@ -7852,8 +8079,16 @@ class PublicRulesSigningView(APIView):
             )
             return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
         if enrollment.status != Enrollment.Status.ENROLLED:
+            old_status = enrollment.status
             enrollment.status = Enrollment.Status.RULES_SUBMITTED
             enrollment.save(update_fields=['status', 'updated_at'])
+            create_status_history(
+                enrollment,
+                CandidateStatusHistory.RecordType.ENROLLMENT,
+                old_status,
+                enrollment.status,
+                remarks='Rules form submitted.',
+            )
         notify_rules_signed(enrollment, signing.submitted_at)
         return Response({
             'detail': 'Rules & Regulation form submitted successfully.',
@@ -8065,6 +8300,10 @@ class EnrollmentFilter(django_filters.FilterSet):
     queue = django_filters.CharFilter(method='filter_queue')
     enrolled_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
     enrolled_to   = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
+    date_from = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='gte')
+    date_to = django_filters.DateFilter(field_name='enrollment_date', lookup_expr='lte')
+    counselor = django_filters.NumberFilter(method='filter_counselor')
+    source = django_filters.CharFilter(method='filter_source')
     date_range = django_filters.CharFilter(method='filter_date_range')
     important_only = django_filters.BooleanFilter(method='filter_important_only')
 
@@ -8074,6 +8313,15 @@ class EnrollmentFilter(django_filters.FilterSet):
         if value == 'pending':
             return queryset.filter(status__in=[Enrollment.Status.DRAFT, Enrollment.Status.PENDING_RULES, Enrollment.Status.RULES_SENT, Enrollment.Status.RULES_SUBMITTED])
         return queryset.filter(status=value) if value else queryset
+
+    def filter_counselor(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(enrollment_counselor_filter_q(value))
+
+    def filter_source(self, queryset, name, value):
+        normalized = normalize_source_filter(value, Enrollment._meta.get_field('source').choices)
+        return queryset.filter(source=normalized) if normalized else (queryset if not value else queryset.none())
 
     def filter_queue(self, queryset, name, value):
         if value == 'yet_to_enroll':
@@ -8091,7 +8339,7 @@ class EnrollmentFilter(django_filters.FilterSet):
 
     class Meta:
         model  = Enrollment
-        fields = ['status', 'queue', 'branch', 'course', 'date_range', 'important_only']
+        fields = ['status', 'queue', 'branch', 'course', 'counselor', 'source', 'date_range', 'important_only']
 
 
 def serialize_installment_schedule(schedule):
@@ -8410,6 +8658,7 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
     effective_date = effective_date or timezone.localdate()
     old_course = enrollment.course
     old_fee = enrollment_payable_fee(enrollment)
+    old_status = enrollment.status
     previous_payment_schedule = enrollment.payment_schedule or []
     previous_schedule_locked = enrollment.payment_schedule_locked
     logger.info(
@@ -8501,6 +8750,14 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
             'payment_schedule', 'payment_schedule_locked',
             'payment_schedule_finalized_at', 'status', 'updated_at',
         ])
+        create_status_history(
+            enrollment,
+            CandidateStatusHistory.RecordType.ENROLLMENT,
+            old_status,
+            enrollment.status,
+            user,
+            reason or 'Course or fee changed.',
+        )
         logger.info(
             'Course change payment schedule saved context=%s',
             course_change_log_context(
@@ -8527,6 +8784,14 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
             'payment_schedule', 'payment_schedule_locked',
             'payment_schedule_finalized_at', 'status', 'updated_at',
         ])
+        create_status_history(
+            enrollment,
+            CandidateStatusHistory.RecordType.ENROLLMENT,
+            old_status,
+            enrollment.status,
+            user,
+            reason or 'Course or fee changed.',
+        )
         logger.info(
             'Course change has no payment record to rebuild context=%s',
             course_change_log_context(
@@ -8698,10 +8963,21 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if 'branch' in request.data and not request.user.is_super_admin:
             return Response({'detail': 'Only admin can change an enrollment branch.'}, status=status.HTTP_403_FORBIDDEN)
         enrollment = self.get_object()
-        response = super().update(request, *args, **kwargs)
+        old_status = tracked_crm_status(enrollment)
+        with transaction.atomic():
+            response = super().update(request, *args, **kwargs)
+            enrollment.refresh_from_db()
+            create_status_history(
+                enrollment,
+                CandidateStatusHistory.RecordType.ENROLLMENT,
+                old_status,
+                tracked_crm_status(enrollment),
+                request.user,
+                getattr(enrollment, 'remarks', ''),
+            )
+            if enrollment.status in Enrollment.FINAL_STATUSES:
+                resolve_rules_signed_notifications(enrollment.id)
         enrollment.refresh_from_db()
-        if enrollment.status in Enrollment.FINAL_STATUSES:
-            resolve_rules_signed_notifications(enrollment.id)
         return response
 
     @action(detail=True, methods=['post'], url_path='change-course')
@@ -8980,6 +9256,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
 
             enrollment.payment_schedule_locked = False
             enrollment.payment_schedule_finalized_at = None
+            old_status = enrollment.status
             enrollment.status = Enrollment.Status.PENDING_RULES
             enrollment.save(update_fields=[
                 'payment_schedule_locked',
@@ -8987,6 +9264,14 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 'status',
                 'updated_at',
             ])
+            create_status_history(
+                enrollment,
+                CandidateStatusHistory.RecordType.ENROLLMENT,
+                old_status,
+                enrollment.status,
+                request.user,
+                reason,
+            )
 
         enrollment.refresh_from_db()
         return Response({
@@ -9101,8 +9386,17 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         signing.sent_by = request.user
         signing.save(update_fields=['status', 'sent_at', 'sent_by', 'updated_at'])
         if enrollment.status != Enrollment.Status.ENROLLED:
+            old_status = enrollment.status
             enrollment.status = Enrollment.Status.RULES_SENT
             enrollment.save(update_fields=['status', 'updated_at'])
+            create_status_history(
+                enrollment,
+                CandidateStatusHistory.RecordType.ENROLLMENT,
+                old_status,
+                enrollment.status,
+                request.user,
+                'Rules form sent.',
+            )
         self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
             'detail': 'Rules & Regulations link generated successfully.',
@@ -9123,10 +9417,19 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Rules & Regulation form must be signed before enrollment can proceed.'}, status=400)
         with transaction.atomic():
             if enrollment.status not in Enrollment.FINAL_STATUSES:
+                old_status = enrollment.status
                 enrollment.status = Enrollment.Status.ACTIVE
                 enrollment.enrolled_by = request.user
                 enrollment.counselor = enrollment.counselor or enrollment.created_by or request.user
                 enrollment.save(update_fields=['status', 'enrolled_by', 'counselor', 'student_number', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at'])
+                create_status_history(
+                    enrollment,
+                    CandidateStatusHistory.RecordType.ENROLLMENT,
+                    old_status,
+                    enrollment.status,
+                    request.user,
+                    'Student enrollment confirmed.',
+                )
             resolve_rules_signed_notifications(enrollment.id)
             payment, created = Payment.objects.get_or_create(
                 enrollment=enrollment,

@@ -9,10 +9,126 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
+
+
+@override_settings(ALLOWED_HOSTS=['testserver'], SECURE_SSL_REDIRECT=False)
+class CommonCandidateFilterAndStatusTests(APITestCase):
+    def setUp(self):
+        self.branch = Branch.objects.create(name='Gandhipuram', city='Coimbatore')
+        self.other_branch = Branch.objects.create(name='Hopes', city='Coimbatore')
+        self.course = Course.objects.create(name='Advanced Python', actual_fees=42900)
+        self.admin = User.objects.create_superuser(username='filter-admin', email='filter-admin@example.com', password='pass12345')
+        self.counselor = User.objects.create_user(username='pavi', first_name='Pavi', email='pavi@example.com', password='pass12345', branch=self.branch, role=User.Role.STAFF)
+        self.other_counselor = User.objects.create_user(username='other', email='other@example.com', password='pass12345', branch=self.other_branch, role=User.Role.STAFF)
+        self.client.force_authenticate(user=self.admin)
+        self.today = timezone.localdate()
+
+        self.lead = Lead.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, created_by=self.counselor,
+            name='Instagram Filter Match', phone='9000011101', source=Lead.Source.INSTAGRAM,
+            status=Lead.Status.FOLLOW_UP, counselor_status=Lead.CounselorStatus.FOLLOW_UP,
+        )
+        Lead.objects.create(
+            branch=self.other_branch, course=self.course, assigned_to=self.other_counselor, created_by=self.other_counselor,
+            name='Instagram Filter Other', phone='9000011102', source=Lead.Source.INSTAGRAM,
+            status=Lead.Status.FOLLOW_UP, counselor_status=Lead.CounselorStatus.FOLLOW_UP,
+        )
+        self.walkin = WalkIn.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, counseling_by=self.counselor,
+            created_by=self.counselor, name='Instagram Filter Match', phone='9000011201',
+            source=WalkIn.Source.INSTAGRAM, status=WalkIn.Status.FOLLOW_UP,
+            counselor_status=Lead.CounselorStatus.FOLLOW_UP, visit_date=self.today,
+        )
+        WalkIn.objects.create(
+            branch=self.other_branch, course=self.course, assigned_to=self.other_counselor,
+            created_by=self.other_counselor, name='Instagram Filter Other', phone='9000011202',
+            source=WalkIn.Source.INSTAGRAM, status=WalkIn.Status.FOLLOW_UP,
+            counselor_status=Lead.CounselorStatus.FOLLOW_UP, visit_date=self.today,
+        )
+        self.enrollment = Enrollment.objects.create(
+            branch=self.branch, course=self.course, counselor=self.counselor, created_by=self.counselor,
+            name='Instagram Filter Match', phone='9000011301', source=WalkIn.Source.INSTAGRAM,
+            status=Enrollment.Status.ACTIVE, actual_fees=42900, discount_amount=0, final_fees=42900,
+            enrollment_date=self.today,
+        )
+        Enrollment.objects.create(
+            branch=self.other_branch, course=self.course, counselor=self.other_counselor, created_by=self.other_counselor,
+            name='Instagram Filter Other', phone='9000011302', source=WalkIn.Source.INSTAGRAM,
+            status=Enrollment.Status.ACTIVE, actual_fees=42900, discount_amount=0, final_fees=42900,
+            enrollment_date=self.today,
+        )
+
+    def ids(self, response):
+        rows = response.data.get('results', response.data) if isinstance(response.data, dict) else response.data
+        return [row['id'] for row in rows]
+
+    def test_all_common_filters_combine_for_each_operational_list(self):
+        common = {
+            'branch': self.branch.id, 'counselor': self.counselor.id, 'source': 'instagram',
+            'date_from': self.today.isoformat(), 'date_to': self.today.isoformat(), 'search': 'Filter Match',
+        }
+        lead_response = self.client.get('/api/leads/', {**common, 'status': 'follow_up'})
+        walkin_response = self.client.get('/api/walkins/', {**common, 'status': 'follow_up'})
+        enrollment_response = self.client.get('/api/enrollments/', {**common, 'status': 'active'})
+
+        self.assertEqual(lead_response.status_code, 200)
+        self.assertEqual(walkin_response.status_code, 200)
+        self.assertEqual(enrollment_response.status_code, 200)
+        self.assertEqual(self.ids(lead_response), [self.lead.id])
+        self.assertEqual(self.ids(walkin_response), [self.walkin.id])
+        self.assertEqual(self.ids(enrollment_response), [self.enrollment.id])
+
+    def test_report_uses_the_same_combined_scope_filters(self):
+        response = self.client.get('/api/reports/analytics-dashboard/', {
+            'branch': self.branch.id, 'user': self.counselor.id, 'source': 'instagram',
+            'status': 'follow_up', 'search': 'Filter Match',
+            'date_from': self.today.isoformat(), 'date_to': self.today.isoformat(),
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['metrics']['leads'], 1)
+        self.assertEqual(response.data['metrics']['walkins'], 1)
+        self.assertEqual(response.data['metrics']['enrollments'], 0)
+
+    def test_full_edit_records_history_and_quick_follow_up_does_not_change_status(self):
+        edit_response = self.client.patch(f'/api/leads/{self.lead.id}/', {
+            'counselor_status': Lead.CounselorStatus.READY_TO_JOIN,
+            'competitor_status': Lead.CompetitorStatus.NOT_ENQUIRED_ELSEWHERE,
+            'follow_up_priority': Lead.FollowUpPriority.HIGH,
+            'conversion_probability': Lead.ConversionProbability.P90,
+            'remarks': 'Ready after counseling.',
+        }, format='json')
+        self.assertEqual(edit_response.status_code, 200)
+        history = CandidateStatusHistory.objects.get(record_type=CandidateStatusHistory.RecordType.LEAD, record_id=self.lead.id)
+        self.assertEqual(history.old_status, Lead.CounselorStatus.FOLLOW_UP)
+        self.assertEqual(history.new_status, Lead.CounselorStatus.READY_TO_JOIN)
+        self.assertEqual(history.remarks, 'Ready after counseling.')
+
+        followup_response = self.client.post(f'/api/leads/{self.lead.id}/follow-ups/', {
+            'follow_up_date': self.today.isoformat(),
+            'next_follow_up_date': (self.today + timedelta(days=2)).isoformat(),
+            'remarks': 'Call again.',
+            'close_follow_up': True,
+        }, format='json')
+        self.assertEqual(followup_response.status_code, 201)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.counselor_status, Lead.CounselorStatus.READY_TO_JOIN)
+        self.assertEqual(CandidateStatusHistory.objects.filter(record_type=CandidateStatusHistory.RecordType.LEAD, record_id=self.lead.id).count(), 1)
+
+    def test_full_edit_rolls_back_when_status_history_write_fails(self):
+        self.client.raise_request_exception = False
+        with mock.patch('views.create_status_history', side_effect=RuntimeError('history unavailable')):
+            response = self.client.patch(f'/api/leads/{self.lead.id}/', {
+                'counselor_status': Lead.CounselorStatus.READY_TO_JOIN,
+                'remarks': 'This update must roll back.',
+            }, format='json')
+        self.assertEqual(response.status_code, 500)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.counselor_status, Lead.CounselorStatus.FOLLOW_UP)
+        self.assertNotEqual(self.lead.remarks, 'This update must roll back.')
 
 
 @override_settings(
