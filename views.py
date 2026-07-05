@@ -12135,15 +12135,25 @@ class UserRatingReportView(APIView):
                 rating = calculate_user_monthly_rating(user, year, month)
                 ratings.append(UserMonthlyRatingSerializer(rating).data)
             current_rating = ratings[0] if ratings else None
+            previous_rating = ratings[1] if len(ratings) > 1 else None
+            current_score = current_rating['score'] if current_rating else 0
+            previous_score = previous_rating['score'] if previous_rating else 0
+            score_trend = current_score - previous_score
             rows.append({
                 'user_id': user.id,
                 'username': user.username,
                 'full_name': user.full_name,
                 'counselor_name': user.full_name or user.username,
                 'branch_name': user.branch.name if user.branch else None,
-                'score': current_rating['score'] if current_rating else 0,
+                'current_month_score': current_score,
+                'score': current_score,
                 'stars': current_rating['stars'] if current_rating else 1,
                 'star_display': current_rating['star_display'] if current_rating else 'â­â˜†â˜†â˜†â˜†',
+                'percentage': current_score,
+                'previous_month_score': previous_score,
+                'previous_month_stars': previous_rating['stars'] if previous_rating else 1,
+                'trend': score_trend,
+                'trend_direction': 'up' if score_trend > 0 else 'down' if score_trend < 0 else 'flat',
                 'ratings': ratings,
             })
         rows.sort(key=lambda row: (-row['score'], row['counselor_name'].lower()))

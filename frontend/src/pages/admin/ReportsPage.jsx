@@ -19,6 +19,12 @@ function monthLabel(value) {
   return date.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
 }
 
+function trendLabel(value) {
+  const numeric = Number(value || 0)
+  if (numeric === 0) return '0%'
+  return `${numeric > 0 ? '+' : ''}${numeric}%`
+}
+
 function localIso(date) {
   const offset = date.getTimezoneOffset()
   return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 10)
@@ -503,30 +509,47 @@ export default function ReportsPage() {
           <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">Ranked counselor performance</h2>
         </div>
         <div className="overflow-x-auto">
-          <div className="grid min-w-[1100px] grid-cols-[0.55fr_1.6fr_0.9fr_1fr_1fr_1fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          <div className="grid min-w-[1300px] grid-cols-[0.45fr_1.5fr_0.9fr_0.8fr_0.8fr_0.95fr_0.8fr_1.5fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
             <div>Rank</div>
             <div>User</div>
-            <div>KPI Rating</div>
-            {ratingMonths.map((item) => <div key={`${item.year}-${item.month}`}>{monthLabel(item)}</div>)}
+            <div>Current Score</div>
+            <div>Stars</div>
+            <div>Percentage</div>
+            <div>Previous Score</div>
+            <div>Trend</div>
+            <div>History</div>
           </div>
           <div className="divide-y divide-slate-200">
             {ratingRows.map((row) => (
-              <div key={row.user_id} className="grid min-w-[1100px] grid-cols-[0.55fr_1.6fr_0.9fr_1fr_1fr_1fr] gap-4 px-6 py-5 text-sm text-slate-700">
+              <div key={row.user_id} className="grid min-w-[1300px] grid-cols-[0.45fr_1.5fr_0.9fr_0.8fr_0.8fr_0.95fr_0.8fr_1.5fr] gap-4 px-6 py-5 text-sm text-slate-700">
                 <div className="font-bold text-slate-950">#{row.rank}</div>
                 <div>
                   <p className="font-bold text-slate-950">{row.full_name}</p>
                   <p className="text-slate-500">{row.username}{row.branch_name ? ` | ${row.branch_name}` : ''}</p>
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-950">{starDisplay(row.stars)}</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-500">{row.score}%</p>
+                  <p className="font-semibold text-slate-950">{row.current_month_score ?? row.score}%</p>
                 </div>
-                {row.ratings.map((rating) => (
-                  <div key={`${row.user_id}-${rating.year}-${rating.month}`}>
-                    <p className="font-semibold text-slate-950">{starDisplay(rating.stars)}</p>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">{rating.score}%</p>
-                  </div>
-                ))}
+                <div>
+                  <p className="font-semibold text-slate-950">{starDisplay(row.stars)}</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-950">{row.percentage ?? row.score}%</p>
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-950">{row.previous_month_score ?? 0}%</p>
+                </div>
+                <div>
+                  <p className={`font-semibold ${Number(row.trend || 0) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{trendLabel(row.trend)}</p>
+                </div>
+                <div className="space-y-2">
+                  {(row.ratings || []).map((rating) => (
+                    <div key={`${row.user_id}-${rating.year}-${rating.month}`} className="flex items-center justify-between gap-3">
+                      <span className="text-xs font-semibold text-slate-500">{monthLabel(rating)}</span>
+                      <span className="font-semibold text-slate-950">{starDisplay(rating.stars)} {rating.score}%</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>

@@ -9,7 +9,7 @@ from datetime import timedelta
 import base64
 import io
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
@@ -458,7 +458,7 @@ class LeadImportValidationTests(APITestCase):
     SECURE_SSL_REDIRECT=False,
 )
 class MonthlyRatingResetTests(APITestCase):
-    def test_current_month_rating_uses_kpi_scores(self):
+    def test_current_month_rating_starts_at_100_without_activity(self):
         branch = Branch.objects.create(name='Rating Branch', city='Coimbatore')
         staff = User.objects.create_user(
             username='rating-staff',
@@ -481,13 +481,45 @@ class MonthlyRatingResetTests(APITestCase):
 
         rating = calculate_user_monthly_rating(staff, today.year, today.month)
 
-        self.assertEqual(rating.score, 20)
-        self.assertEqual(rating.stars, 1)
+        self.assertEqual(rating.score, 100)
+        self.assertEqual(rating.stars, 5)
         self.assertEqual(rating.breakdown['no_pending_followups']['score'], 20)
-        self.assertEqual(rating.breakdown['same_day_enrollment']['score'], 0)
-        self.assertEqual(rating.breakdown['same_day_collection']['score'], 0)
-        self.assertEqual(rating.breakdown['lead_to_walkin_conversion']['score'], 0)
-        self.assertEqual(rating.breakdown['walkin_to_enrollment_conversion']['score'], 0)
+        self.assertEqual(rating.breakdown['same_day_enrollment']['score'], 15)
+        self.assertEqual(rating.breakdown['same_day_collection']['score'], 15)
+        self.assertEqual(rating.breakdown['lead_to_walkin_conversion']['score'], 20)
+        self.assertEqual(rating.breakdown['walkin_to_enrollment_conversion']['score'], 20)
+        self.assertEqual(rating.breakdown['crm_usage_time']['score'], 10)
+        self.assertEqual(rating.breakdown['total_deduction'], 0)
+
+    def test_previous_month_rating_is_not_recalculated_or_overwritten(self):
+        branch = Branch.objects.create(name='History Rating Branch', city='Coimbatore')
+        staff = User.objects.create_user(
+            username='history-rating-staff',
+            email='history-rating-staff@example.com',
+            password='pass12345',
+            branch=branch,
+        )
+        today = timezone.localdate()
+        previous_month = today.month - 1 or 12
+        previous_year = today.year if today.month > 1 else today.year - 1
+        historical_rating = UserMonthlyRating.objects.create(
+            user=staff,
+            year=previous_year,
+            month=previous_month,
+            score=86,
+            stars=4,
+            breakdown={'archived': True},
+        )
+
+        from views import calculate_user_monthly_rating
+
+        rating = calculate_user_monthly_rating(staff, previous_year, previous_month)
+        historical_rating.refresh_from_db()
+
+        self.assertEqual(rating.id, historical_rating.id)
+        self.assertEqual(historical_rating.score, 86)
+        self.assertEqual(historical_rating.stars, 4)
+        self.assertEqual(historical_rating.breakdown, {'archived': True})
 
 
 @override_settings(
