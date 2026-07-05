@@ -45,34 +45,34 @@ function highlightRows(stats, branchId) {
   const branch = branchQuery(branchId)
   return [
     {
-      label: 'Leads this month',
+      label: 'Leads This Month',
       actual: Number(stats?.leads_this_month || 0),
       target: stats?.lead_target,
-      note: 'New enquiries recorded this month',
+      showTarget: false,
       kind: 'count',
       to: `/leads?date_range=this_month${branch}`,
     },
     {
-      label: 'Walk-ins this month',
+      label: 'Walk-ins This Month',
       actual: Number(stats?.walkins_this_month || 0),
       target: stats?.walkin_target,
-      note: 'Fresh branch visits recorded this month',
+      showTarget: true,
       kind: 'count',
       to: `/walkins?date_range=this_month${branch}`,
     },
     {
-      label: 'Enrollments this month',
+      label: 'Enrollments This Month',
       actual: Number(stats?.enroll_this_month || 0),
       target: stats?.enroll_target,
-      note: 'Students converted into active admissions',
+      showTarget: true,
       kind: 'count',
       to: `/enrollments?date_range=this_month${branch}`,
     },
     {
-      label: 'Value this month',
+      label: 'Value This Month',
       actual: Number(stats?.value_this_month || 0),
       target: stats?.value_target,
-      note: 'Enrollment value generated this month',
+      showTarget: true,
       kind: 'plainCurrency',
       to: `/payments?duration=month${branch}`,
     },
@@ -554,29 +554,28 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-8 grid gap-4 sm:grid-cols-2">
               {highlightRows(dashboardStats, isSuperAdmin ? dashboardBranch : '').map((item) => (
                 <Link key={item.label} to={item.to} className={`rounded-[22px] border border-white/10 bg-white/6 p-5 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white/10 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
                   <p className="mt-3 text-2xl font-black tracking-tight text-white">
                     {displayValue(item.actual, item.kind)}
-                    {targetIsSet(item.target) && (
+                    {item.showTarget && targetIsSet(item.target) && (
                       <span className="text-slate-400"> / {displayValue(item.target, item.kind)}</span>
                     )}
                   </p>
-                  {targetIsSet(item.target) ? (
+                  {item.showTarget && targetIsSet(item.target) ? (
                     <div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
                       <div
                         className="h-full rounded-full bg-cyan-300"
                         style={{ width: `${progressPercent(item.actual, item.target)}%` }}
                       />
                     </div>
-                  ) : (
+                  ) : item.showTarget ? (
                     <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
                       Target not set
                     </p>
-                  )}
-                  <p className="mt-2 text-sm text-slate-300">{item.note}</p>
+                  ) : null}
                 </Link>
               ))}
             </div>
