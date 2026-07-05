@@ -998,7 +998,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'branch_name','status','visit_date','follow_up_date','remarks','demo_class','assigned_name',
                   'assigned_to','assigned_user','counseling_by','counseling_by_name','counseling_user',
                   'created_by','created_by_name','converted_by_name',
-                  'preferred_timing','preferred_timing_display','source','source_display',
+                  'preferred_timing','preferred_timing_display','source','source_display','source_description',
                   'walk_in_by','walk_in_by_display','converted_to_type',
                   'converted_record_id','converted_at','enrollment_id',
                   'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
@@ -1008,6 +1008,7 @@ class WalkInListSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         defaults = {
             'preferred_timing': '',
+            'source_description': '',
             'walk_in_by': '',
             'counseling_by_id': None,
             'converted_to_type': '',
@@ -1159,6 +1160,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
             'follow_up_priority': '',
             'conversion_probability': '',
             'preferred_timing': '',
+            'source_description': '',
             'interested_global_certification': False,
             'walk_in_by': '',
             'counseling_by_id': None,

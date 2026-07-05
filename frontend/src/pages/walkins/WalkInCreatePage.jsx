@@ -34,6 +34,7 @@ const initialForm = {
   follow_up_date: '',
   assigned_to: '',
   source: '',
+  source_description: '',
   remarks: '',
 }
 
@@ -194,6 +195,7 @@ export default function WalkInCreatePage() {
         competitor_status: form.competitor_status,
         follow_up_priority: form.follow_up_priority,
         conversion_probability: form.conversion_probability,
+        source_description: form.source_description,
         remarks: form.remarks,
       })
       navigate(`/walkins/${data.id}`)
@@ -457,6 +459,15 @@ export default function WalkInCreatePage() {
               <option value="">Select source</option>
               {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel>Source Description</FieldLabel>
+            <textarea
+              value={form.source_description}
+              onChange={(event) => updateForm('source_description', event.target.value)}
+              placeholder="Add optional details about how this walk-in heard about IIE"
+              className="min-h-[110px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+            />
           </div>
           <div className="md:col-span-2">
             <FieldLabel>Remarks</FieldLabel>

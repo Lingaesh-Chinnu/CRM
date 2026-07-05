@@ -1198,6 +1198,73 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(patch_response.data['source'], WalkIn.Source.WHATSAPP)
         self.assertEqual(patch_response.data['source_display'], 'WhatsApp')
 
+    def test_walkin_source_description_create_edit_and_source_change_preserve_value(self):
+        self.client.force_authenticate(self.staff)
+        create_response = self.client.post('/api/walkins/', {
+            **self.payload,
+            'phone': '9000000198',
+            'source': WalkIn.Source.INSTAGRAM,
+            'source_description': 'Instagram campaign - July intake',
+            'walk_in_by': '',
+            'assigned_to': self.staff.id,
+        }, format='json')
+
+        self.assertEqual(create_response.status_code, 201, create_response.data)
+        walkin = WalkIn.objects.get(phone='9000000198')
+        self.assertEqual(walkin.source_description, 'Instagram campaign - July intake')
+        self.assertEqual(create_response.data['source_description'], 'Instagram campaign - July intake')
+
+        source_response = self.client.patch(f'/api/walkins/{walkin.id}/', {
+            'source': WalkIn.Source.WHATSAPP,
+        }, format='json')
+        self.assertEqual(source_response.status_code, 200)
+        walkin.refresh_from_db()
+        self.assertEqual(walkin.source, WalkIn.Source.WHATSAPP)
+        self.assertEqual(walkin.source_description, 'Instagram campaign - July intake')
+
+        edit_response = self.client.patch(f'/api/walkins/{walkin.id}/', {
+            'source_description': 'WhatsApp follow-up from the same campaign',
+        }, format='json')
+        self.assertEqual(edit_response.status_code, 200)
+        self.assertEqual(edit_response.data['source_description'], 'WhatsApp follow-up from the same campaign')
+
+        existing = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            created_by=self.staff,
+            name='Existing Walk-in',
+            phone='9000000199',
+            source=WalkIn.Source.DIRECT,
+        )
+        detail_response = self.client.get(f'/api/walkins/{existing.id}/')
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['source_description'], '')
+
+    def test_lead_conversion_copies_walkin_description_without_changing_lead_description(self):
+        self.client.force_authenticate(self.staff)
+        lead = Lead.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            created_by=self.staff,
+            name='Conversion Source Candidate',
+            phone='9000000197',
+            source=Lead.Source.INSTAGRAM,
+            source_description='Original lead campaign detail',
+        )
+
+        response = self.client.post(f'/api/leads/{lead.id}/convert-to-walkin/', {
+            'visit_date': timezone.localdate().isoformat(),
+            'source_description': 'Counselor-entered walk-in source detail',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        lead.refresh_from_db()
+        walkin = WalkIn.objects.get(lead=lead)
+        self.assertEqual(walkin.source_description, 'Counselor-entered walk-in source detail')
+        self.assertEqual(lead.source_description, 'Original lead campaign detail')
+
     def test_public_walkin_repeat_phone_updates_existing_record(self):
         first = self.client.post('/api/public/walkin/', self.payload, format='json')
         payload = {**self.payload, 'name': 'Candidate Updated', 'phone': '9876543210'}

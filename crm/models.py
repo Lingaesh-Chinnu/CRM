@@ -710,6 +710,7 @@ class WalkIn(TimeStampedModel):
     demo_class                      = models.BooleanField(default=False)
     interested_global_certification = models.BooleanField(default=False)
     source                          = models.CharField(max_length=30, choices=Source.choices, default=Source.GOOGLE, db_index=True)
+    source_description              = models.TextField(blank=True)
     walk_in_by                      = models.CharField(max_length=30, choices=WalkInBy.choices, blank=True)
     preferred_timing                = models.CharField(max_length=30, choices=PreferredTiming.choices, blank=True)
     follow_up_date                  = models.DateField(null=True, blank=True)

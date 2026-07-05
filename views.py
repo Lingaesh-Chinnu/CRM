@@ -4056,6 +4056,11 @@ class LeadViewSet(viewsets.ModelViewSet):
                     if existing_walkin.source in ('', WalkIn.Source.LEAD_CONVERSION) and existing_walkin.source != mapped_source:
                         existing_walkin.source = mapped_source
                         walkin_update_fields.append('source')
+                    if 'source_description' in data:
+                        source_description = str(data.get('source_description') or '').strip()
+                        if existing_walkin.source_description != source_description:
+                            existing_walkin.source_description = source_description
+                            walkin_update_fields.append('source_description')
                     for field_name in QUALIFICATION_KPI_FIELDS:
                         value = data.get(field_name) or getattr(lead, field_name, '')
                         if value and not getattr(existing_walkin, field_name, ''):
@@ -4095,6 +4100,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                         follow_up_date=data.get('follow_up_date') or None,
                         remarks=str(data.get('remarks') or '').strip(),
                         source=self._lead_source_to_walkin_source(lead.source),
+                        source_description=str(data.get('source_description') or '').strip(),
                         demo_class=data.get('demo_class', False),
                         interested_global_certification=data.get('interested_global_certification', False),
                         is_important=lead.is_important,
@@ -7104,7 +7110,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
     filterset_class    = WalkInFilter
     pagination_class   = None
     search_fields      = [
-        'name', 'phone', 'candidate_number', 'email', 'source',
+        'name', 'phone', 'candidate_number', 'email', 'source', 'source_description',
         'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
         'assigned_to__username', 'created_by__first_name', 'created_by__last_name',
         'created_by__username',
@@ -7129,7 +7135,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         missing_columns = missing_model_columns(WalkIn, [
             'qualification', 'degree', 'profession', 'year_of_passing',
             'college_company', 'preferred_timing', 'interested_global_certification',
-            'walk_in_by', 'follow_up_date', 'converted_to_type',
+            'source_description', 'walk_in_by', 'follow_up_date', 'converted_to_type',
             'converted_record_id', 'converted_at', 'converted_by', 'counseling_by',
         ])
         if missing_columns:

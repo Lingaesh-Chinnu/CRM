@@ -256,6 +256,7 @@ export default function WalkInDetailPage() {
     course: '',
     preferred_timing: '',
     source: '',
+    source_description: '',
     qualification: '',
     degree: '',
     year_of_passing: '',
@@ -315,6 +316,7 @@ export default function WalkInDetailPage() {
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
         source: data.source || '',
+        source_description: data.source_description || '',
         qualification: data.qualification || '',
         degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
@@ -486,6 +488,7 @@ export default function WalkInDetailPage() {
     { field: 'dob', label: 'Date of Birth', value: walkin.dob },
     { field: 'preferred_timing', label: 'Preferred Timing', value: walkin.preferred_timing, displayValue: walkin.preferred_timing_display, displayNew: (value) => value === 'weekday_morning' ? 'Weekdays (Morning)' : value === 'weekday_evening' ? 'Weekdays (Evening)' : value === 'weekends' ? 'Weekends' : value },
     { field: 'source', label: 'Source', value: walkin.source, displayValue: walkin.source_display, displayNew: sourceLabel },
+    { field: 'source_description', label: 'Source Description', value: walkin.source_description || '' },
     { field: 'pincode', label: 'Pincode', value: walkin.pincode },
     { field: 'location', label: 'Address', value: walkin.location },
     { field: 'email', label: 'Email', value: walkin.email },
@@ -522,6 +525,7 @@ export default function WalkInDetailPage() {
       course: walkin.course || '',
       preferred_timing: walkin.preferred_timing || '',
       source: walkin.source || '',
+      source_description: walkin.source_description || '',
       qualification: walkin.qualification || '',
       degree: walkin.degree || '',
       year_of_passing: walkin.year_of_passing || '',
@@ -547,7 +551,7 @@ export default function WalkInDetailPage() {
       setMessage('No changes to update.')
       return
     }
-    const missing = changes.filter(({ field }) => !String(form[field] || '').trim())
+    const missing = changes.filter(({ field }) => field !== 'source_description' && !String(form[field] || '').trim())
     const missingLabels = missing.map(({ label }) => label)
 
     if (missing.length > 0) {
@@ -586,6 +590,7 @@ export default function WalkInDetailPage() {
         course: data.course || '',
         preferred_timing: data.preferred_timing || '',
         source: data.source || '',
+        source_description: data.source_description || '',
         qualification: data.qualification || '',
         degree: data.degree || '',
         year_of_passing: data.year_of_passing || '',
@@ -880,6 +885,14 @@ export default function WalkInDetailPage() {
                 {sourceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
               {detailErrorFor('source')}
+            </DetailField>
+            <DetailField label="Source Description" value={walkin.source_description || 'Not provided'} editing={editingDetails}>
+              <textarea
+                value={form.source_description || ''}
+                onChange={(event) => updateDetail('source_description', event.target.value)}
+                placeholder="Add optional source details"
+                className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+              />
             </DetailField>
             <div className="rounded-2xl bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Walk-In By</p>
