@@ -790,15 +790,6 @@ export default function WalkInDetailPage() {
                 {followUpPriorityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </DetailField>
-            <DetailField label="Conversion Probability" value={conversionProbabilityOptions.find((option) => option.value === walkin.conversion_probability)?.label || 'Not provided'} editing={editingDetails}>
-              <select value={form.conversion_probability || ''} onChange={(event) => updateDetail('conversion_probability', event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
-                <option value="">Select Probability</option>
-                {conversionProbabilityOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </DetailField>
-            <DetailField label="Remarks" value={walkin.remarks} editing={editingDetails}>
-              <textarea value={form.remarks || ''} onChange={(event) => updateDetail('remarks', event.target.value)} className="min-h-[90px] w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
-            </DetailField>
             <DetailField label="Name" value={walkin.name} editing={editingDetails}>
               <input value={form.name} onChange={(event) => updateDetail('name', event.target.value)} placeholder="Enter Name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('name')}
