@@ -18,6 +18,10 @@ const emptyFilters = {
   status: '',
   source: '',
   counselor: '',
+  expected_course_budget: '',
+  planned_joining_time: '',
+  primary_goal: '',
+  other_institutes_considering: '',
   quick_filter: '',
   date_from: '',
   date_to: '',
@@ -46,6 +50,10 @@ function readFilters(searchParams, canFilterByBranch) {
     status: searchParams.get('status') || '',
     source: searchParams.get('source') || '',
     counselor: searchParams.get('counselor') || '',
+    expected_course_budget: searchParams.get('expected_course_budget') || '',
+    planned_joining_time: searchParams.get('planned_joining_time') || '',
+    primary_goal: searchParams.get('primary_goal') || '',
+    other_institutes_considering: searchParams.get('other_institutes_considering') || '',
     quick_filter: searchParams.get('quick_filter') || '',
     date_from: searchParams.get('date_from') || '',
     date_to: searchParams.get('date_to') || '',
@@ -157,6 +165,27 @@ const walkInSourceOptions = [
   { value: 'staff_reference', label: 'Staff Reference' },
   { value: 'lead_conversion', label: 'Lead Conversion' },
   { value: 'others', label: 'Other' },
+]
+
+const budgetOptions = [
+  { value: '15000_25000', label: '₹15,000 – ₹25,000' },
+  { value: '26000_36000', label: '₹26,000 – ₹36,000' },
+  { value: '37000_47000', label: '₹37,000 – ₹47,000' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const joiningOptions = [
+  { value: 'immediately', label: 'Immediately' },
+  { value: 'within_1_week', label: 'Within 1 week' },
+  { value: 'within_1_month', label: 'Within 1 month' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const goalOptions = [
+  { value: 'get_job', label: 'Get a job' },
+  { value: 'career_switch', label: 'Career switch' },
+  { value: 'salary_hike', label: 'Salary hike' },
+  { value: 'internship_skill', label: 'Internship / Skill enhancement' },
 ]
 
 function counselorLabel(walkin) {
@@ -570,6 +599,31 @@ export default function WalkInsListPage() {
               <option value="">All status</option>
               {walkInStatusOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Expected Budget</span>
+            <select value={filters.expected_course_budget} onChange={(event) => updateFilter('expected_course_budget', event.target.value)} name="expected_course_budget" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All budgets</option>
+              {budgetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Joining Plan</span>
+            <select value={filters.planned_joining_time} onChange={(event) => updateFilter('planned_joining_time', event.target.value)} name="planned_joining_time" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All plans</option>
+              {joiningOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Primary Goal</span>
+            <select value={filters.primary_goal} onChange={(event) => updateFilter('primary_goal', event.target.value)} name="primary_goal" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white">
+              <option value="">All goals</option>
+              {goalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-semibold text-slate-600">Other Institutes</span>
+            <input value={filters.other_institutes_considering} onChange={(event) => updateFilter('other_institutes_considering', event.target.value)} name="other_institutes_considering" placeholder="Search institutes" className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white" />
           </label>
           <>
               <label className="block">

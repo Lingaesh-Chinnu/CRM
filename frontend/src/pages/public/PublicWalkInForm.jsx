@@ -16,6 +16,10 @@ const initialForm = {
   year_of_passing: '',
   college_company: '',
   preferred_timing: '',
+  expected_course_budget: '',
+  planned_joining_time: '',
+  primary_goal: '',
+  other_institutes_considering: '',
   demo_class: '',
   interested_global_certification: '',
   source: '',
@@ -28,6 +32,43 @@ const fallbackQualificationOptions = [
   { value: 'working_professional', label: 'Working Professional' },
   { value: 'housewife', label: 'Housewife' },
 ]
+
+const fallbackBudgetOptions = [
+  { value: '15000_25000', label: '₹15,000 – ₹25,000' },
+  { value: '26000_36000', label: '₹26,000 – ₹36,000' },
+  { value: '37000_47000', label: '₹37,000 – ₹47,000' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const fallbackJoiningOptions = [
+  { value: 'immediately', label: 'Immediately' },
+  { value: 'within_1_week', label: 'Within 1 week' },
+  { value: 'within_1_month', label: 'Within 1 month' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const fallbackGoalOptions = [
+  { value: 'get_job', label: 'Get a job' },
+  { value: 'career_switch', label: 'Career switch' },
+  { value: 'salary_hike', label: 'Salary hike' },
+  { value: 'internship_skill', label: 'Internship / Skill enhancement' },
+]
+
+function publicOptionLabel(option) {
+  const labels = {
+    '15000_25000': '₹15,000 – ₹25,000',
+    '26000_36000': '₹26,000 – ₹36,000',
+    '37000_47000': '₹37,000 – ₹47,000',
+    not_decided: 'Not decided',
+    within_1_week: 'Within 1 week',
+    within_1_month: 'Within 1 month',
+    get_job: 'Get a job',
+    career_switch: 'Career switch',
+    salary_hike: 'Salary hike',
+    internship_skill: 'Internship / Skill enhancement',
+  }
+  return { ...option, label: labels[option.value] || option.label }
+}
 
 function FieldLabel({ children }) {
   return (
@@ -99,6 +140,9 @@ export default function PublicWalkInForm() {
   const [courses, setCourses] = useState([])
   const [timings, setTimings] = useState([])
   const [qualifications, setQualifications] = useState(fallbackQualificationOptions)
+  const [budgetOptions, setBudgetOptions] = useState(fallbackBudgetOptions)
+  const [joiningOptions, setJoiningOptions] = useState(fallbackJoiningOptions)
+  const [goalOptions, setGoalOptions] = useState(fallbackGoalOptions)
   const [sources, setSources] = useState([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
@@ -112,6 +156,9 @@ export default function PublicWalkInForm() {
       setCourses(data.courses || [])
       setTimings(data.preferred_timing_options || [])
       setQualifications(data.qualification_options || fallbackQualificationOptions)
+      setBudgetOptions((data.expected_course_budget_options || fallbackBudgetOptions).map(publicOptionLabel))
+      setJoiningOptions((data.planned_joining_time_options || fallbackJoiningOptions).map(publicOptionLabel))
+      setGoalOptions((data.primary_goal_options || fallbackGoalOptions).map(publicOptionLabel))
       setSources(data.source_options || [])
       if (branchFromLink && (data.branches || []).some((branch) => String(branch.id) === branchFromLink)) {
         setForm((current) => ({ ...current, branch: branchFromLink }))
@@ -141,6 +188,10 @@ export default function PublicWalkInForm() {
       ['year_of_passing', 'Passed Out Year'],
       ['college_company', 'College / Company Name'],
       ['course', 'Course Interested'],
+      ['expected_course_budget', 'Expected Course Fee Budget'],
+      ['planned_joining_time', 'When are you planning to join?'],
+      ['primary_goal', 'Primary goal'],
+      ['other_institutes_considering', 'Other institutes considering'],
       ['preferred_timing', 'Preferred Timing'],
       ['demo_class', 'Demo class required'],
       ['interested_global_certification', 'Global Certification interest'],
@@ -392,6 +443,67 @@ export default function PublicWalkInForm() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <FieldLabel>Expected Course Fee Budget</FieldLabel>
+                <select
+                  value={form.expected_course_budget}
+                  onChange={(event) => updateField('expected_course_budget', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                >
+                  <option value="">Select budget</option>
+                  {budgetOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <FieldLabel>When are you planning to join?</FieldLabel>
+                <select
+                  value={form.planned_joining_time}
+                  onChange={(event) => updateField('planned_joining_time', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                >
+                  <option value="">Select joining time</option>
+                  {joiningOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <FieldLabel>What is your primary goal?</FieldLabel>
+                <select
+                  value={form.primary_goal}
+                  onChange={(event) => updateField('primary_goal', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                >
+                  <option value="">Select goal</option>
+                  {goalOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <FieldLabel>Which other institute(s) are you considering?</FieldLabel>
+                <input
+                  value={form.other_institutes_considering}
+                  onChange={(event) => updateField('other_institutes_considering', event.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                  required
+                />
               </div>
 
               <div>

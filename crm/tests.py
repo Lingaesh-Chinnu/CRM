@@ -838,6 +838,10 @@ class PublicWalkInFormTests(APITestCase):
             'qualification': WalkIn.Qualification.COLLEGE_STUDENT,
             'year_of_passing': 2026,
             'college_company': 'IIE College',
+            'expected_course_budget': WalkIn.ExpectedCourseBudget.RANGE_15000_25000,
+            'planned_joining_time': WalkIn.PlannedJoiningTime.IMMEDIATELY,
+            'primary_goal': WalkIn.PrimaryGoal.GET_JOB,
+            'other_institutes_considering': 'ABC Institute',
             'preferred_timing': WalkIn.PreferredTiming.WEEKDAY_MORNING,
             'demo_class': True,
             'interested_global_certification': True,
@@ -856,7 +860,27 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(walkin.qualification, WalkIn.Qualification.COLLEGE_STUDENT)
         self.assertEqual(walkin.year_of_passing, 2026)
         self.assertEqual(walkin.college_company, 'IIE College')
+        self.assertEqual(walkin.expected_course_budget, WalkIn.ExpectedCourseBudget.RANGE_15000_25000)
+        self.assertEqual(walkin.planned_joining_time, WalkIn.PlannedJoiningTime.IMMEDIATELY)
+        self.assertEqual(walkin.primary_goal, WalkIn.PrimaryGoal.GET_JOB)
+        self.assertEqual(walkin.other_institutes_considering, 'ABC Institute')
         self.assertTrue(walkin.interested_global_certification)
+
+    def test_public_walkin_requires_student_qualification_questions(self):
+        required_fields = [
+            'expected_course_budget',
+            'planned_joining_time',
+            'primary_goal',
+            'other_institutes_considering',
+        ]
+        payload = {**self.payload, **{field: '' for field in required_fields}}
+
+        response = self.client.post('/api/public/walkin/', payload, format='json')
+
+        self.assertEqual(response.status_code, 400)
+        for field in required_fields:
+            self.assertIn(field, response.data)
+        self.assertFalse(WalkIn.objects.filter(phone='9876543210').exists())
 
     def test_walkin_by_and_counseling_by_have_separate_branch_rules(self):
         self.client.force_authenticate(self.admin)

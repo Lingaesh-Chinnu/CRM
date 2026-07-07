@@ -23,10 +23,6 @@ const initialForm = {
   transfer_to: '',
   qualification: '',
   degree: '',
-  expected_course_budget: '',
-  planned_joining_time: '',
-  primary_goal: '',
-  other_institutes_considering: '',
   counselor_status: 'new_lead',
   competitor_status: '',
   follow_up_priority: '',
@@ -41,27 +37,6 @@ const qualificationOptions = [
   { value: 'graduate', label: 'Graduate' },
   { value: 'working_professional', label: 'Working Professional' },
   { value: 'housewife', label: 'Housewife' },
-]
-
-const budgetOptions = [
-  { value: '15000_25000', label: 'Rs 15,000-Rs 25,000' },
-  { value: '26000_36000', label: 'Rs 26,000-Rs 36,000' },
-  { value: '37000_47000', label: 'Rs 37,000-Rs 47,000' },
-  { value: 'not_decided', label: 'Not Decided' },
-]
-
-const joiningOptions = [
-  { value: 'immediately', label: 'Immediately' },
-  { value: 'within_1_week', label: 'Within 1 Week' },
-  { value: 'within_1_month', label: 'Within 1 Month' },
-  { value: 'not_decided', label: 'Not Decided' },
-]
-
-const goalOptions = [
-  { value: 'get_job', label: 'Get a Job' },
-  { value: 'career_switch', label: 'Career Switch' },
-  { value: 'salary_hike', label: 'Salary Hike' },
-  { value: 'internship_skill', label: 'Internship / Skill Enhancement' },
 ]
 
 const counselorStatusOptions = [
@@ -146,10 +121,6 @@ export default function LeadCreatePage() {
       transfer_to: form.transfer_to ? Number(form.transfer_to) : null,
       qualification: form.qualification.trim(),
       degree: form.degree.trim(),
-      expected_course_budget: form.expected_course_budget,
-      planned_joining_time: form.planned_joining_time,
-      primary_goal: form.primary_goal,
-      other_institutes_considering: form.other_institutes_considering.trim(),
       counselor_status: form.counselor_status,
       competitor_status: form.competitor_status,
       follow_up_priority: form.follow_up_priority,
@@ -312,35 +283,6 @@ export default function LeadCreatePage() {
               onChange={(e) => setForm({ ...form, degree: e.target.value })}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
             />
-          </div>
-
-          <div>
-            <FieldLabel>Expected Course Budget</FieldLabel>
-            <select value={form.expected_course_budget} onChange={(e) => setForm({ ...form, expected_course_budget: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <option value="">Select budget</option>
-              {budgetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <FieldLabel>Planned Joining Time</FieldLabel>
-            <select value={form.planned_joining_time} onChange={(e) => setForm({ ...form, planned_joining_time: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <option value="">Select joining time</option>
-              {joiningOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <FieldLabel>Primary Goal</FieldLabel>
-            <select value={form.primary_goal} onChange={(e) => setForm({ ...form, primary_goal: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <option value="">Select goal</option>
-              {goalOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </div>
-
-          <div>
-            <FieldLabel>Other Institutes Considering</FieldLabel>
-            <input value={form.other_institutes_considering} onChange={(e) => setForm({ ...form, other_institutes_considering: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" />
           </div>
 
           <div>

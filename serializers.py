@@ -1332,6 +1332,8 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
         fields = [
             'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode', 'course',
             'qualification', 'degree', 'year_of_passing', 'college_company',
+            'expected_course_budget', 'planned_joining_time', 'primary_goal',
+            'other_institutes_considering',
             'preferred_timing', 'demo_class', 'interested_global_certification',
             'source', 'visit_date'
         ]
@@ -1344,6 +1346,8 @@ class PublicWalkInCreateSerializer(serializers.ModelSerializer):
         required_fields = [
             'branch', 'name', 'dob', 'phone', 'email', 'location', 'pincode',
             'course', 'qualification', 'year_of_passing', 'college_company',
+            'expected_course_budget', 'planned_joining_time', 'primary_goal',
+            'other_institutes_considering',
             'preferred_timing', 'source', 'visit_date',
         ]
         missing = [

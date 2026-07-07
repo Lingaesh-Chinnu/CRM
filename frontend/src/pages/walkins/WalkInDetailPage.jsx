@@ -131,6 +131,27 @@ const conversionProbabilityOptions = [
   { value: '10', label: '10%' },
 ]
 
+const budgetOptions = [
+  { value: '15000_25000', label: '₹15,000 – ₹25,000' },
+  { value: '26000_36000', label: '₹26,000 – ₹36,000' },
+  { value: '37000_47000', label: '₹37,000 – ₹47,000' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const joiningOptions = [
+  { value: 'immediately', label: 'Immediately' },
+  { value: 'within_1_week', label: 'Within 1 week' },
+  { value: 'within_1_month', label: 'Within 1 month' },
+  { value: 'not_decided', label: 'Not decided' },
+]
+
+const goalOptions = [
+  { value: 'get_job', label: 'Get a job' },
+  { value: 'career_switch', label: 'Career switch' },
+  { value: 'salary_hike', label: 'Salary hike' },
+  { value: 'internship_skill', label: 'Internship / Skill enhancement' },
+]
+
 function qualificationSelectOptions(value) {
   if (!value || qualificationOptions.some((option) => option.value === value)) return qualificationOptions
   return [{ value, label: value }, ...qualificationOptions]
@@ -138,6 +159,10 @@ function qualificationSelectOptions(value) {
 
 function sourceLabel(value) {
   return sourceOptions.find((option) => option.value === value)?.label || value
+}
+
+function optionLabel(options, value) {
+  return options.find((option) => option.value === value)?.label || value
 }
 
 function uniqueStaffUsers(rows) {
@@ -978,6 +1003,10 @@ export default function WalkInDetailPage() {
               <input value={form.college_company} onChange={(event) => updateDetail('college_company', event.target.value)} placeholder="College, school, or company name" className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm" />
               {detailErrorFor('college_company')}
             </DetailField>
+            <DetailField label="Expected Course Fee Budget" value={optionLabel(budgetOptions, walkin.expected_course_budget)} />
+            <DetailField label="Planning to Join" value={optionLabel(joiningOptions, walkin.planned_joining_time)} />
+            <DetailField label="Primary Goal" value={optionLabel(goalOptions, walkin.primary_goal)} />
+            <DetailField label="Other Institutes Considering" value={walkin.other_institutes_considering} />
           </div>
           <FollowUpHistory
             followUps={walkin.follow_ups || []}

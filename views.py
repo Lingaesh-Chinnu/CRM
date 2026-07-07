@@ -4998,6 +4998,10 @@ ADMIN_IMPORT_SPECS = {
             {'field': 'qualification', 'label': 'Qualification'},
             {'field': 'degree', 'label': 'Degree'},
             {'field': 'preferred_timing', 'label': 'Preferred Timing'},
+            {'field': 'expected_course_budget', 'label': 'Expected Course Fee Budget'},
+            {'field': 'planned_joining_time', 'label': 'Planning to Join'},
+            {'field': 'primary_goal', 'label': 'Primary Goal'},
+            {'field': 'other_institutes_considering', 'label': 'Other Institutes Considering'},
             {'field': 'walkin_date', 'label': 'Walkin Date'},
         ],
     },
@@ -5021,6 +5025,10 @@ ADMIN_IMPORT_SPECS = {
             {'field': 'qualification', 'label': 'Qualification'},
             {'field': 'degree', 'label': 'Degree'},
             {'field': 'preferred_timing', 'label': 'Preferred Timing'},
+            {'field': 'expected_course_budget', 'label': 'Expected Course Fee Budget'},
+            {'field': 'planned_joining_time', 'label': 'Planning to Join'},
+            {'field': 'primary_goal', 'label': 'Primary Goal'},
+            {'field': 'other_institutes_considering', 'label': 'Other Institutes Considering'},
             {'field': 'demo_class', 'label': 'Demo Class'},
             {'field': 'status', 'label': 'Status'},
         ],
@@ -6317,6 +6325,10 @@ class AdminDataExportView(APIView):
                 'qualification': self.export_attr(record, 'qualification'),
                 'degree': self.export_attr(record, 'degree'),
                 'preferred_timing': self.export_display_value(record, 'preferred_timing'),
+                'expected_course_budget': self.export_display_value(record, 'expected_course_budget'),
+                'planned_joining_time': self.export_display_value(record, 'planned_joining_time'),
+                'primary_goal': self.export_display_value(record, 'primary_goal'),
+                'other_institutes_considering': self.export_attr(record, 'other_institutes_considering'),
                 'walkin_date': self.export_attr(record, 'walkin_date'),
             }
             return values.get(field, '')
@@ -6338,6 +6350,10 @@ class AdminDataExportView(APIView):
                 'qualification': self.export_display_value(record, 'qualification'),
                 'degree': self.export_attr(record, 'degree'),
                 'preferred_timing': self.export_display_value(record, 'preferred_timing'),
+                'expected_course_budget': self.export_display_value(record, 'expected_course_budget'),
+                'planned_joining_time': self.export_display_value(record, 'planned_joining_time'),
+                'primary_goal': self.export_display_value(record, 'primary_goal'),
+                'other_institutes_considering': self.export_attr(record, 'other_institutes_considering'),
                 'demo_class': 'Yes' if self.export_attr(record, 'demo_class') else 'No',
                 'status': self.export_display_value(record, 'status'),
             }
@@ -7036,6 +7052,10 @@ class WalkInFilter(django_filters.FilterSet):
     counselor = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_counselor')
     follow_up_by = django_filters.ModelChoiceFilter(queryset=User.objects.all(), method='filter_assigned_to')
     status = django_filters.CharFilter(method='filter_status')
+    expected_course_budget = django_filters.CharFilter(field_name='expected_course_budget')
+    planned_joining_time = django_filters.CharFilter(field_name='planned_joining_time')
+    primary_goal = django_filters.CharFilter(field_name='primary_goal')
+    other_institutes_considering = django_filters.CharFilter(field_name='other_institutes_considering', lookup_expr='icontains')
     visit_date_from = django_filters.DateFilter(field_name='visit_date', lookup_expr='gte')
     visit_date_to   = django_filters.DateFilter(field_name='visit_date', lookup_expr='lte')
     date_from = django_filters.DateFilter(method='filter_activity_date_from')
@@ -7100,7 +7120,12 @@ class WalkInFilter(django_filters.FilterSet):
 
     class Meta:
         model  = WalkIn
-        fields = ['status', 'branch', 'created_by', 'assigned_to', 'counselor', 'course', 'source', 'demo_class', 'date_range', 'important_only']
+        fields = [
+            'status', 'branch', 'created_by', 'assigned_to', 'counselor',
+            'course', 'source', 'demo_class', 'expected_course_budget',
+            'planned_joining_time', 'primary_goal', 'other_institutes_considering',
+            'date_range', 'important_only',
+        ]
 
 
 class WalkInViewSet(viewsets.ModelViewSet):
@@ -7814,6 +7839,18 @@ class PublicWalkInFormView(APIView):
             'qualification_options': [
                 {'value': value, 'label': label}
                 for value, label in WalkIn.Qualification.choices
+            ],
+            'expected_course_budget_options': [
+                {'value': value, 'label': label}
+                for value, label in WalkIn.ExpectedCourseBudget.choices
+            ],
+            'planned_joining_time_options': [
+                {'value': value, 'label': label}
+                for value, label in WalkIn.PlannedJoiningTime.choices
+            ],
+            'primary_goal_options': [
+                {'value': value, 'label': label}
+                for value, label in WalkIn.PrimaryGoal.choices
             ],
             'source_options': [
                 {'value': value, 'label': label}
@@ -12242,6 +12279,27 @@ class DashboardSummaryView(APIView):
         counted_enroll_qs = value_enroll_qs
         enroll_this_month = dashboard_monthly_enroll_qs.count()
         conversion_rate = bounded_ratio(enroll_this_month, walkins_this_month)
+        current_month_walkin_qs = walkin_qs.filter(visit_date__year=year, visit_date__month=month)
+
+        def choice_breakdown(queryset, field_name, choices):
+            label_by_value = dict(choices)
+            return [
+                {
+                    'value': row[field_name] or '',
+                    'label': label_by_value.get(row[field_name], row[field_name] or 'Not Provided'),
+                    'count': row['count'],
+                }
+                for row in queryset.values(field_name).annotate(count=Count('id')).order_by('-count', field_name)
+            ]
+
+        other_institute_breakdown = [
+            {
+                'value': row['other_institutes_considering'] or '',
+                'label': row['other_institutes_considering'] or 'Not Provided',
+                'count': row['count'],
+            }
+            for row in current_month_walkin_qs.values('other_institutes_considering').annotate(count=Count('id')).order_by('-count', 'other_institutes_considering')[:10]
+        ]
 
         return Response({
             'total_leads':        lead_qs.count(),
@@ -12281,6 +12339,12 @@ class DashboardSummaryView(APIView):
             'selected_branch_id':  selected_branch.id if selected_branch else None,
             'selected_branch_name': selected_branch.name if selected_branch else 'All Branches',
             'performance_scope': 'branch' if user.is_super_admin else 'user',
+            'student_qualification_analytics': {
+                'expected_course_budget': choice_breakdown(current_month_walkin_qs, 'expected_course_budget', WalkIn.ExpectedCourseBudget.choices),
+                'planned_joining_time': choice_breakdown(current_month_walkin_qs, 'planned_joining_time', WalkIn.PlannedJoiningTime.choices),
+                'primary_goal': choice_breakdown(current_month_walkin_qs, 'primary_goal', WalkIn.PrimaryGoal.choices),
+                'other_institutes_considering': other_institute_breakdown,
+            },
         })
 
 
