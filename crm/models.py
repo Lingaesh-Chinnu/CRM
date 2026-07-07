@@ -486,6 +486,11 @@ class Lead(TimeStampedModel):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['branch', 'assigned_to', 'source', 'created_at'], name='lead_common_filter_idx'),
+            models.Index(fields=['phone'], name='lead_phone_idx'),
+            models.Index(fields=['branch', 'status', 'created_at'], name='lead_branch_status_created_idx'),
+            models.Index(fields=['branch', 'source', 'created_at'], name='lead_branch_source_created_idx'),
+            models.Index(fields=['next_follow_up_date'], name='lead_next_follow_idx'),
+            models.Index(fields=['walkin_date'], name='lead_walkin_date_idx'),
         ]
 
     def save(self, *args, **kwargs):
@@ -733,6 +738,10 @@ class WalkIn(TimeStampedModel):
         ordering = ['-visit_date', '-created_at']
         indexes = [
             models.Index(fields=['branch', 'assigned_to', 'source', 'visit_date'], name='walkin_common_filter_idx'),
+            models.Index(fields=['phone'], name='walkin_phone_idx'),
+            models.Index(fields=['branch', 'status', 'visit_date'], name='walkin_branch_status_visit_idx'),
+            models.Index(fields=['branch', 'source', 'visit_date'], name='walkin_branch_source_visit_idx'),
+            models.Index(fields=['follow_up_date'], name='walkin_follow_up_idx'),
         ]
 
     def save(self, *args, **kwargs):
@@ -1229,6 +1238,10 @@ class Enrollment(TimeStampedModel):
         ordering = ['-enrollment_date', '-created_at']
         indexes = [
             models.Index(fields=['branch', 'counselor', 'source', 'enrollment_date'], name='enroll_common_filter_idx'),
+            models.Index(fields=['phone'], name='enrollment_phone_idx'),
+            models.Index(fields=['branch', 'status', 'enrollment_date'], name='enroll_branch_status_date_idx'),
+            models.Index(fields=['counselor', 'enrollment_date'], name='enroll_counselor_date_idx'),
+            models.Index(fields=['source', 'enrollment_date'], name='enroll_source_date_idx'),
         ]
 
     def save(self, *args, **kwargs):
@@ -1480,6 +1493,9 @@ class Payment(TimeStampedModel):
 
     class Meta:
         db_table = 'payments'
+        indexes = [
+            models.Index(fields=['status', 'next_payment_date'], name='payment_status_next_idx'),
+        ]
 
     @property
     def balance(self):
@@ -1573,6 +1589,10 @@ class PaymentInstallment(models.Model):
     class Meta:
         db_table = 'payment_installments'
         ordering = ['-payment_date']
+        indexes = [
+            models.Index(fields=['payment_date'], name='pay_inst_payment_date_idx'),
+            models.Index(fields=['enrollment', 'payment_date'], name='pay_inst_enroll_date_idx'),
+        ]
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
@@ -1785,6 +1805,10 @@ class AdminReceipt(TimeStampedModel):
     class Meta:
         db_table = 'admin_receipts'
         ordering = ['-payment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['phone'], name='adminreceipt_phone_idx'),
+            models.Index(fields=['payment_date'], name='adminreceipt_payment_date_idx'),
+        ]
 
     def __str__(self):
         return f'{self.receipt_number} - {self.name}'

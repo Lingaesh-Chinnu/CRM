@@ -31,6 +31,7 @@ class IsSuperAdminOrReadOnly(BasePermission):
 # backend/apps/accounts/views.py
 # ============================================================
 from rest_framework import viewsets, status, generics, mixins
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
@@ -1558,6 +1559,20 @@ class CRMSearchFilter(SearchFilter):
                     term_query |= Q(**{field: int(term)})
             queryset = queryset.filter(term_query)
         return queryset.distinct()
+
+
+class FastPageNumberPagination(PageNumberPagination):
+    page_size = 100
+    page_size_query_param = 'page_size'
+    max_page_size = 250
+
+
+def list_limit_from_request(request, default=100, maximum=250):
+    try:
+        raw = int(request.query_params.get('limit') or request.query_params.get('page_size') or default)
+    except (TypeError, ValueError):
+        raw = default
+    return max(1, min(raw, maximum))
 
 
 def apply_text_search(queryset, search, fields, id_fields=None):
@@ -3623,7 +3638,7 @@ class LeadViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStaffOrAdmin]
     filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = LeadFilter
-    pagination_class   = None
+    pagination_class   = FastPageNumberPagination
     search_fields      = [
         'name', 'phone', 'lead_number', 'email', 'source', 'source_description',
         'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
@@ -7133,7 +7148,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStaffOrAdmin]
     filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = WalkInFilter
-    pagination_class   = None
+    pagination_class   = FastPageNumberPagination
     search_fields      = [
         'name', 'phone', 'candidate_number', 'email', 'source', 'source_description',
         'course__name', 'assigned_to__first_name', 'assigned_to__last_name',
@@ -7237,13 +7252,19 @@ class WalkInViewSet(viewsets.ModelViewSet):
         current_month_walkins = queryset.filter(**current_month_filter)
         other_walkins = queryset.exclude(**current_month_filter)
 
-        current_serializer = self.get_serializer(current_month_walkins, many=True)
-        other_serializer = self.get_serializer(other_walkins, many=True)
+        limit = list_limit_from_request(self.request)
+        current_count = current_month_walkins.count()
+        other_count = other_walkins.count()
+        current_serializer = self.get_serializer(current_month_walkins[:limit], many=True)
+        other_serializer = self.get_serializer(other_walkins[:limit], many=True)
         return Response({
             'current_month_walkins': current_serializer.data,
             'other_walkins': other_serializer.data,
-            'current_month_count': current_month_walkins.count(),
-            'other_walkins_count': other_walkins.count(),
+            'current_month_count': current_count,
+            'other_walkins_count': other_count,
+            'limit': limit,
+            'current_month_has_more': current_count > limit,
+            'other_walkins_has_more': other_count > limit,
         })
 
     @action(detail=False, methods=['get'], url_path='sectioned')
@@ -8862,7 +8883,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStaffOrAdmin]
     filter_backends    = [DjangoFilterBackend, CRMSearchFilter, OrderingFilter]
     filterset_class    = EnrollmentFilter
-    pagination_class   = None
+    pagination_class   = FastPageNumberPagination
     search_fields      = [
         'name', 'phone', 'student_number', 'email', 'source',
         'course__name', 'counselor__first_name', 'counselor__last_name', 'counselor__username',
@@ -10299,7 +10320,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class   = PaymentSerializer
     filter_backends    = [DjangoFilterBackend, CRMSearchFilter]
     filterset_class    = PaymentFilter
-    pagination_class   = None
+    pagination_class   = FastPageNumberPagination
     search_fields      = [
         'enrollment__name', 'enrollment__student_number',
         'enrollment__phone', 'enrollment__email', 'enrollment__source',
@@ -10329,7 +10350,12 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         qs = visible_payment_queryset(Payment.objects.select_related(
             'enrollment__branch','enrollment__course','enrollment__counselor','enrollment__enrolled_by','enrollment__created_by'
-        ).prefetch_related('installments').filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
+        ).prefetch_related(
+            'installments',
+            'reason_requests__admin_user',
+            'reason_requests__branch_staff',
+            'reason_requests__messages__sender',
+        ).filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
         if not self.request.user.is_super_admin:
             qs = qs.filter(enrollment__branch=self.request.user.branch)
         elif self.request.query_params.get('branch'):
@@ -10365,7 +10391,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             next_payment_date__gte=month_start,
             next_payment_date__lte=month_end,
         ).distinct()
-        return sum((payment.balance for payment in month_queryset), Decimal('0'))
+        totals = month_queryset.aggregate(total=Sum('total_fees'), paid=Sum('paid_amount'))
+        return (totals['total'] or Decimal('0')) - (totals['paid'] or Decimal('0'))
 
     def pending_summary(self):
         today = timezone.localdate()
@@ -10377,8 +10404,9 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         next_month_start = next_month_seed.replace(day=1)
         next_month_end = next_month_start.replace(day=monthrange(next_month_start.year, next_month_start.month)[1])
         queryset = self.get_summary_queryset()
+        totals = queryset.aggregate(total=Sum('total_fees'), paid=Sum('paid_amount'))
         return {
-            'total_pending_amount': sum((payment.balance for payment in queryset), Decimal('0')),
+            'total_pending_amount': (totals['total'] or Decimal('0')) - (totals['paid'] or Decimal('0')),
             'this_month_pending': self.pending_amount_for_month(queryset, this_month_start, this_month_end),
             'last_month_pending': self.pending_amount_for_month(queryset, last_month_start, last_month_end),
             'next_month_pending': self.pending_amount_for_month(queryset, next_month_start, next_month_end),
@@ -10398,6 +10426,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
+        total_records = queryset.count()
         month_start, month_end = self._summary_bounds()
         today = timezone.localdate()
         installment_queryset = PaymentInstallment.objects.filter(payment__in=queryset)
@@ -10408,7 +10437,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         collection = installment_queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0')
         partial_payments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.RECEIPT).count()
         completed_installments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.BILL).count()
-        pending = sum((payment.balance for payment in queryset), Decimal('0'))
+        totals = queryset.aggregate(total=Sum('total_fees'), paid=Sum('paid_amount'))
+        pending = (totals['total'] or Decimal('0')) - (totals['paid'] or Decimal('0'))
         due_queryset = queryset.filter(
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
             next_payment_date__isnull=False,
@@ -10417,7 +10447,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             due_queryset = due_queryset.filter(next_payment_date__gte=month_start)
         if month_end:
             due_queryset = due_queryset.filter(next_payment_date__lte=month_end)
-        total_due = sum((payment.balance for payment in due_queryset), Decimal('0'))
+        due_totals = due_queryset.aggregate(total=Sum('total_fees'), paid=Sum('paid_amount'))
+        total_due = (due_totals['total'] or Decimal('0')) - (due_totals['paid'] or Decimal('0'))
         range_includes_today = (month_start is None or month_start <= today) and (month_end is None or today <= month_end)
         if range_includes_today:
             upcoming = due_queryset.filter(next_payment_date__gte=today).count()
@@ -10431,11 +10462,17 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
                 **({'next_payment_date__lte': month_end} if month_end else {}),
             ).count()
-        serializer = self.get_serializer(queryset, many=True)
-        return Response({
+        page = self.paginate_queryset(queryset)
+        rows = page if page is not None else queryset
+        serializer = self.get_serializer(rows, many=True)
+        response_data = {
             'results': serializer.data,
+            'count': total_records,
+            'next': self.paginator.get_next_link() if page is not None else None,
+            'previous': self.paginator.get_previous_link() if page is not None else None,
+            'page_size': self.paginator.get_page_size(request) if page is not None else None,
             'summary': {
-                'total_records': queryset.count(),
+                'total_records': total_records,
                 'total_collection': collection,
                 'total_due': total_due,
                 'total_balance': pending,
@@ -10451,6 +10488,9 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 'month_start': month_start,
                 'month_end': month_end,
             },
+        }
+        return Response({
+            **response_data,
         })
 
     def destroy(self, request, *args, **kwargs):

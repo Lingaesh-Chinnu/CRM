@@ -22,6 +22,12 @@ const refreshApi = axios.create({
   },
 })
 
+function retryDelay(ms = 700) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
+}
+
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
@@ -39,6 +45,24 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config
+
+    const canRetryRequest = (
+      originalRequest
+      && !originalRequest._networkRetry
+      && String(originalRequest.method || 'get').toLowerCase() === 'get'
+      && error.code !== 'ERR_CANCELED'
+      && (
+        !error.response
+        || error.code === 'ECONNABORTED'
+        || error.message?.toLowerCase().includes('timeout')
+      )
+    )
+
+    if (canRetryRequest) {
+      originalRequest._networkRetry = true
+      await retryDelay()
+      return api(originalRequest)
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true

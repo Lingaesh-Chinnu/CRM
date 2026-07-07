@@ -2128,7 +2128,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         read_only_fields = ['paid_amount','balance','status']
 
     def to_representation(self, instance):
-        instance.recalculate_from_installments(save=True)
+        view = self.context.get('view')
+        instance.recalculate_from_installments(save=getattr(view, 'action', '') != 'list')
         return super().to_representation(instance)
 
     def get_branch_name(self, obj):
@@ -2157,6 +2158,16 @@ class PaymentSerializer(serializers.ModelSerializer):
         return payment_installment_summary(obj)
 
     def get_active_reason_requests(self, obj):
+        prefetched = getattr(obj, '_prefetched_objects_cache', {}).get('reason_requests')
+        if prefetched is not None:
+            requests = [
+                request for request in prefetched
+                if request.status in [
+                    PaymentReasonRequest.Status.PENDING_RESPONSE,
+                    PaymentReasonRequest.Status.PENDING_ADMIN_APPROVAL,
+                ]
+            ]
+            return PaymentReasonRequestSerializer(requests, many=True).data
         requests = obj.reason_requests.filter(
             status__in=[
                 PaymentReasonRequest.Status.PENDING_RESPONSE,
@@ -2171,6 +2182,13 @@ class PaymentSerializer(serializers.ModelSerializer):
         return PaymentReasonRequestSerializer(requests, many=True).data
 
     def get_latest_reason_request(self, obj):
+        prefetched = getattr(obj, '_prefetched_objects_cache', {}).get('reason_requests')
+        if prefetched is not None:
+            reason_request = next(
+                iter(sorted(prefetched, key=lambda item: item.created_at, reverse=True)),
+                None,
+            )
+            return PaymentReasonRequestSerializer(reason_request).data if reason_request else None
         reason_request = obj.reason_requests.select_related(
             'admin_user',
             'branch_staff',
