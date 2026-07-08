@@ -118,6 +118,53 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
         self.assertEqual(self.lead.counselor_status, Lead.CounselorStatus.READY_TO_JOIN)
         self.assertEqual(CandidateStatusHistory.objects.filter(record_type=CandidateStatusHistory.RecordType.LEAD, record_id=self.lead.id).count(), 1)
 
+    def test_lead_follow_up_moves_new_lead_to_follow_up_status(self):
+        lead = Lead.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, created_by=self.counselor,
+            name='New Follow Up Lead', phone='9000011191', source=Lead.Source.INSTAGRAM,
+            status=Lead.Status.NEW, counselor_status=Lead.CounselorStatus.NEW_LEAD,
+        )
+
+        response = self.client.post(f'/api/leads/{lead.id}/follow-ups/', {
+            'follow_up_date': self.today.isoformat(),
+            'next_follow_up_date': (self.today + timedelta(days=2)).isoformat(),
+            'remarks': 'First follow-up done.',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead.refresh_from_db()
+        self.assertEqual(lead.status, Lead.Status.FOLLOW_UP)
+        self.assertEqual(lead.counselor_status, Lead.CounselorStatus.FOLLOW_UP)
+        self.assertEqual(lead.next_follow_up_date, self.today + timedelta(days=2))
+        self.assertEqual(FollowUp.objects.filter(record_type=FollowUp.RecordType.LEAD, record_id=lead.id).count(), 1)
+        history = CandidateStatusHistory.objects.get(
+            record_type=CandidateStatusHistory.RecordType.LEAD,
+            record_id=lead.id,
+        )
+        self.assertEqual(history.old_status, Lead.CounselorStatus.NEW_LEAD)
+        self.assertEqual(history.new_status, Lead.CounselorStatus.FOLLOW_UP)
+
+    def test_lead_follow_up_close_marks_not_interested(self):
+        lead = Lead.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, created_by=self.counselor,
+            name='Close Follow Up Lead', phone='9000011192', source=Lead.Source.INSTAGRAM,
+            status=Lead.Status.NEW, counselor_status=Lead.CounselorStatus.NEW_LEAD,
+        )
+
+        response = self.client.post(f'/api/leads/{lead.id}/follow-ups/', {
+            'follow_up_date': self.today.isoformat(),
+            'next_follow_up_date': None,
+            'remarks': 'No longer interested.',
+            'close_follow_up': True,
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201)
+        lead.refresh_from_db()
+        self.assertEqual(lead.status, Lead.Status.NOT_INTERESTED)
+        self.assertEqual(lead.counselor_status, Lead.CounselorStatus.NOT_INTERESTED)
+        self.assertIsNone(lead.next_follow_up_date)
+        self.assertEqual(FollowUp.objects.filter(record_type=FollowUp.RecordType.LEAD, record_id=lead.id).count(), 1)
+
     def test_full_edit_rolls_back_when_status_history_write_fails(self):
         self.client.raise_request_exception = False
         with mock.patch('views.create_status_history', side_effect=RuntimeError('history unavailable')):

@@ -3536,6 +3536,9 @@ import csv
 def create_follow_up_entry(record, record_type, request):
     data = request.data.copy()
     data.pop('close_follow_up', None)
+    data.pop('status', None)
+    data.pop('lead_status', None)
+    data.pop('counselor_status', None)
     serializer = FollowUpSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     follow_up = serializer.save(
@@ -3544,6 +3547,82 @@ def create_follow_up_entry(record, record_type, request):
         updated_by=request.user,
     )
     return Response(FollowUpSerializer(follow_up).data, status=status.HTTP_201_CREATED)
+
+
+def requested_lead_follow_up_status(request):
+    raw_status = (
+        request.data.get('status')
+        or request.data.get('lead_status')
+        or ''
+    )
+    raw_status = str(raw_status or '').strip()
+    valid_statuses = {choice[0] for choice in Lead.Status.choices}
+    if raw_status in valid_statuses:
+        return raw_status
+
+    normalized_status = re.sub(r'[^a-z0-9]+', '_', raw_status.lower()).strip('_')
+    status_aliases = {
+        'followup': Lead.Status.FOLLOW_UP,
+        'follow_up': Lead.Status.FOLLOW_UP,
+        'interested': Lead.Status.INTERESTED,
+        'not_interested': Lead.Status.NOT_INTERESTED,
+        'closed_not_interested': Lead.Status.NOT_INTERESTED,
+        'joined': Lead.Status.CONVERTED,
+        'converted': Lead.Status.CONVERTED,
+    }
+    return status_aliases.get(normalized_status)
+
+
+def requested_lead_follow_up_counselor_status(request):
+    raw_status = str(request.data.get('counselor_status') or '').strip()
+    valid_statuses = {choice[0] for choice in Lead.CounselorStatus.choices}
+    return raw_status if raw_status in valid_statuses else None
+
+
+def apply_lead_follow_up_status(lead, request, response_data):
+    old_status = tracked_crm_status(lead)
+    close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
+    requested_status = requested_lead_follow_up_status(request)
+    requested_counselor_status = requested_lead_follow_up_counselor_status(request)
+    closed_statuses = set(LEAD_CLOSED_FOLLOW_UP_STATUSES)
+
+    update_fields = ['next_follow_up_date', 'remarks', 'updated_at']
+    lead.next_follow_up_date = response_data['next_follow_up_date']
+    lead.remarks = response_data.get('remarks') or lead.remarks
+
+    if close_follow_up:
+        lead.next_follow_up_date = None
+        requested_status = Lead.Status.NOT_INTERESTED
+        requested_counselor_status = Lead.CounselorStatus.NOT_INTERESTED
+
+    if requested_status:
+        lead.status = requested_status
+        if 'status' not in update_fields:
+            update_fields.append('status')
+    elif lead.status == Lead.Status.NEW:
+        lead.status = Lead.Status.FOLLOW_UP
+        update_fields.append('status')
+
+    if requested_counselor_status:
+        lead.counselor_status = requested_counselor_status
+        update_fields.append('counselor_status')
+    elif lead.counselor_status in ('', Lead.CounselorStatus.NEW_LEAD):
+        lead.counselor_status = Lead.CounselorStatus.FOLLOW_UP
+        update_fields.append('counselor_status')
+
+    if lead.status in closed_statuses and lead.next_follow_up_date is not None:
+        lead.next_follow_up_date = None
+
+    lead.save(update_fields=list(dict.fromkeys(update_fields)))
+    create_status_history(
+        lead,
+        CandidateStatusHistory.RecordType.LEAD,
+        old_status,
+        tracked_crm_status(lead),
+        request.user,
+        lead.remarks,
+    )
+    return lead
 
 
 class LeadFilter(django_filters.FilterSet):
@@ -4515,16 +4594,11 @@ class LeadViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='follow-ups')
     def add_follow_up(self, request, pk=None):
         lead = self.get_object()
-        response = create_follow_up_entry(lead, FollowUp.RecordType.LEAD, request)
-        if response.status_code >= 400:
-            return response
-
-        lead.next_follow_up_date = response.data['next_follow_up_date']
-        lead.remarks = response.data.get('remarks') or lead.remarks
-        close_follow_up = request.data.get('close_follow_up') in (True, 'true', '1', 1)
-        if close_follow_up:
-            lead.next_follow_up_date = None
-        lead.save(update_fields=['next_follow_up_date', 'remarks', 'updated_at'])
+        with transaction.atomic():
+            response = create_follow_up_entry(lead, FollowUp.RecordType.LEAD, request)
+            if response.status_code >= 400:
+                return response
+            apply_lead_follow_up_status(lead, request, response.data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return response
 
