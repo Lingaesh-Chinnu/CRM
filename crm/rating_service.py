@@ -54,6 +54,11 @@ WALKIN_CLOSED_FOLLOW_UP_STATUSES = (
     WalkIn.Status.NOT_INTERESTED,
     WalkIn.Status.TRANSFERRED,
 )
+CLOSED_COUNSELOR_FOLLOW_UP_STATUSES = (
+    Lead.CounselorStatus.JOINED,
+    Lead.CounselorStatus.NOT_INTERESTED,
+    Lead.CounselorStatus.LOST_TO_COMPETITOR,
+)
 
 
 def month_window(year=None, month=None):
@@ -147,7 +152,10 @@ def _pending_follow_up_count(user, start, end):
             next_follow_up_date__gte=start,
             next_follow_up_date__lte=end,
         )
-    ).exclude(status__in=LEAD_CLOSED_FOLLOW_UP_STATUSES).annotate(
+    ).exclude(
+        Q(status__in=LEAD_CLOSED_FOLLOW_UP_STATUSES)
+        | Q(counselor_status__in=CLOSED_COUNSELOR_FOLLOW_UP_STATUSES)
+    ).annotate(
         has_completed_current_due=Exists(
             FollowUp.objects.filter(
                 record_type=FollowUp.RecordType.LEAD,
@@ -163,7 +171,10 @@ def _pending_follow_up_count(user, start, end):
             follow_up_date__gte=start,
             follow_up_date__lte=end,
         )
-    ).exclude(status__in=WALKIN_CLOSED_FOLLOW_UP_STATUSES).annotate(
+    ).exclude(
+        Q(status__in=WALKIN_CLOSED_FOLLOW_UP_STATUSES)
+        | Q(counselor_status__in=CLOSED_COUNSELOR_FOLLOW_UP_STATUSES)
+    ).annotate(
         has_completed_current_due=Exists(
             FollowUp.objects.filter(
                 record_type=FollowUp.RecordType.WALKIN,

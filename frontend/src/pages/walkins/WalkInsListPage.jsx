@@ -29,6 +29,7 @@ const emptyFilters = {
 }
 
 function statusLabel(walkin) {
+  if (walkin?.status_display) return walkin.status_display
   if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Enrolled'
   const status = walkin?.status
   if (!status) return 'Unknown'
@@ -37,8 +38,8 @@ function statusLabel(walkin) {
 
 function statusTone(walkin) {
   if (walkin?.enrollment_id || walkin?.status === 'converted') return 'green'
-  if (walkin?.status === 'not_interested') return 'red'
-  if (walkin?.status === 'follow_up' || walkin?.status === 'demo_attended') return 'amber'
+  if (['not_interested', 'lost_to_competitor'].includes(walkin?.status)) return 'red'
+  if (['follow_up', 'demo_attended', 'ready_to_join'].includes(walkin?.status)) return 'amber'
   return 'slate'
 }
 
@@ -461,6 +462,9 @@ export default function WalkInsListPage() {
       walkin.id === walkinId
         ? {
             ...walkin,
+            status: followUp.walkin_status || followUp.status || walkin.status,
+            status_display: followUp.status_display || walkin.status_display,
+            counselor_status: followUp.counselor_status || walkin.counselor_status,
             latest_remark: followUp.remarks || walkin.latest_remark,
             remarks: followUp.remarks || walkin.remarks,
             follow_up_date: followUp.next_follow_up_date,

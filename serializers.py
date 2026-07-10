@@ -974,6 +974,28 @@ class DataImportHistorySerializer(serializers.ModelSerializer):
 from crm.models import WalkIn, WalkInAssignmentChangeRequest, WalkInBranchChangeHistory
 
 
+def effective_walkin_status(obj):
+    try:
+        if getattr(obj, 'enrollment', None):
+            return WalkIn.Status.CONVERTED
+    except Exception:
+        pass
+    if safe_deferred_value(obj, 'converted_to_type', '') == 'enrollment':
+        record_id = safe_deferred_value(obj, 'converted_record_id', None)
+        if record_id and Enrollment.objects.filter(pk=record_id, walkin_id=obj.id).exists():
+            return WalkIn.Status.CONVERTED
+    stored_status = safe_deferred_value(obj, 'status', WalkIn.Status.NEW) or WalkIn.Status.NEW
+    if stored_status == WalkIn.Status.CONVERTED:
+        return WalkIn.Status.CONVERTED
+    return safe_deferred_value(obj, 'counselor_status', '') or stored_status
+
+
+def effective_walkin_status_display(obj):
+    status = effective_walkin_status(obj)
+    labels = {**dict(WalkIn.Status.choices), **dict(WalkIn.CounselorStatus.choices)}
+    return labels.get(status, str(status).replace('_', ' ').title())
+
+
 class WalkInListSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name',  read_only=True)
     branch_name  = serializers.CharField(source='branch.name',  read_only=True)
@@ -991,11 +1013,12 @@ class WalkInListSerializer(serializers.ModelSerializer):
     remarks = serializers.SerializerMethodField()
     latest_remark = serializers.SerializerMethodField()
     latest_follow_up_at = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
         fields = ['id','candidate_number','name','phone','email','course_name',
-                  'branch_name','status','visit_date','follow_up_date','remarks','demo_class','assigned_name',
+                  'branch_name','status','status_display','visit_date','follow_up_date','remarks','demo_class','assigned_name',
                   'assigned_to','assigned_user','counseling_by','counseling_by_name','counseling_user',
                   'created_by','created_by_name','converted_by_name',
                   'preferred_timing','preferred_timing_display','source','source_display','source_description',
@@ -1028,7 +1051,13 @@ class WalkInListSerializer(serializers.ModelSerializer):
         for field_name, default in defaults.items():
             if field_name in deferred:
                 instance.__dict__[field_name] = default
-        return super().to_representation(instance)
+        data = super().to_representation(instance)
+        data['status'] = effective_walkin_status(instance)
+        data['status_display'] = effective_walkin_status_display(instance)
+        return data
+
+    def get_status_display(self, obj):
+        return effective_walkin_status_display(obj)
 
     def get_assigned_name(self, obj):
         try:
@@ -1135,6 +1164,7 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     status_history = serializers.SerializerMethodField()
     enrollment_id = serializers.SerializerMethodField()
     is_converted_to_enrollment = serializers.SerializerMethodField()
+    status_display = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -1174,7 +1204,13 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
         for field_name, default in defaults.items():
             if field_name in deferred:
                 instance.__dict__[field_name] = default
-        return super().to_representation(instance)
+        data = super().to_representation(instance)
+        data['status'] = effective_walkin_status(instance)
+        data['status_display'] = effective_walkin_status_display(instance)
+        return data
+
+    def get_status_display(self, obj):
+        return effective_walkin_status_display(obj)
 
     def get_follow_ups(self, obj):
         follow_ups = FollowUp.objects.filter(

@@ -99,7 +99,7 @@ from serializers import (
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
     CounselorChangeRequestSerializer, WalkInAssignmentChangeRequestSerializer, payment_installment_summary,
-    user_identity_payload,
+    effective_walkin_status, effective_walkin_status_display, user_identity_payload,
 )
 
 
@@ -1414,6 +1414,12 @@ WALKIN_CLOSED_FOLLOW_UP_STATUSES = [
     WalkIn.Status.TRANSFERRED,
 ]
 
+CLOSED_COUNSELOR_FOLLOW_UP_STATUSES = [
+    Lead.CounselorStatus.JOINED,
+    Lead.CounselorStatus.NOT_INTERESTED,
+    Lead.CounselorStatus.LOST_TO_COMPETITOR,
+]
+
 
 def automated_lead_status_display(lead):
     status_value = effective_lead_status(lead)
@@ -1427,9 +1433,15 @@ def automated_lead_status_display(lead):
 
 
 def automated_walkin_status_display(walkin):
-    if walkin.converted_to_type == 'enrollment' or walkin.status == WalkIn.Status.CONVERTED:
-        return 'Enrolled'
-    return walkin.get_status_display()
+    return effective_walkin_status_display(walkin)
+
+
+def add_walkin_status_to_follow_up_response(response, walkin):
+    response.data['walkin_status'] = effective_walkin_status(walkin)
+    response.data['status'] = response.data['walkin_status']
+    response.data['status_display'] = effective_walkin_status_display(walkin)
+    response.data['counselor_status'] = walkin.counselor_status or ''
+    return response
 
 
 def pending_follow_up_queryset(queryset, record_type, due_lookup, closed_statuses):
@@ -1438,8 +1450,11 @@ def pending_follow_up_queryset(queryset, record_type, due_lookup, closed_statuse
         record_id=OuterRef('pk'),
         follow_up_date=OuterRef(due_lookup),
     )
+    closed_query = Q(status__in=closed_statuses)
+    if any(field.name == 'counselor_status' for field in queryset.model._meta.fields):
+        closed_query |= Q(counselor_status__in=CLOSED_COUNSELOR_FOLLOW_UP_STATUSES)
     return queryset.exclude(
-        status__in=closed_statuses,
+        closed_query,
     ).annotate(
         has_completed_current_due=Exists(completed_current_due),
     ).exclude(
@@ -2596,11 +2611,11 @@ def performance_metrics(scope, start_date, end_date):
         Lead.Status.CONVERTED_TO_WALKIN,
         Lead.Status.LOST,
         Lead.Status.DROPPED,
-    ])
+    ]).exclude(counselor_status__in=CLOSED_COUNSELOR_FOLLOW_UP_STATUSES)
     pending_walkins = scope['walkins'].filter(follow_up_date__lt=timezone.localdate()).exclude(status__in=[
         WalkIn.Status.CONVERTED,
         WalkIn.Status.NOT_INTERESTED,
-    ])
+    ]).exclude(counselor_status__in=CLOSED_COUNSELOR_FOLLOW_UP_STATUSES)
     leads_count = leads.count()
     walkins_count = walkins.count()
     direct_walkins_count = walkins.filter(walk_in_by=WalkIn.WalkInBy.DIRECT, assigned_to__isnull=True).count()
@@ -6927,7 +6942,7 @@ class PendingManagementView(APIView):
             'phone': walkin.phone,
             'course_name': walkin.course.name if walkin.course else '',
             'branch_name': walkin.branch.name if walkin.branch else '',
-            'status': walkin.status,
+            'status': effective_walkin_status(walkin),
             'status_display': automated_walkin_status_display(walkin),
             'due_date': walkin.follow_up_date,
             'remarks': latest_remark if latest_remark not in (None, '') else walkin.remarks,
@@ -7635,6 +7650,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
         if close_follow_up:
             walkin.follow_up_date = None
         walkin.save(update_fields=['follow_up_date', 'updated_at'])
+        add_walkin_status_to_follow_up_response(response, walkin)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         return response
 

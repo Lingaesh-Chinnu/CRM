@@ -93,6 +93,46 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
         self.assertEqual(response.data['metrics']['walkins'], 1)
         self.assertEqual(response.data['metrics']['enrollments'], 0)
 
+    def test_walkin_list_detail_and_filter_use_counselor_status(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, counseling_by=self.counselor,
+            created_by=self.counselor, name='Ready Walkin', phone='9000011299',
+            source=WalkIn.Source.INSTAGRAM, status=WalkIn.Status.NEW,
+            counselor_status=Lead.CounselorStatus.READY_TO_JOIN, visit_date=self.today,
+        )
+
+        list_response = self.client.get('/api/walkins/', {'search': 'Ready Walkin'})
+        detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
+        filter_response = self.client.get('/api/walkins/', {'status': Lead.CounselorStatus.READY_TO_JOIN})
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(detail_response.status_code, 200)
+        rows = list_response.data.get('results', list_response.data) if isinstance(list_response.data, dict) else list_response.data
+        row = next(item for item in rows if item['id'] == walkin.id)
+        self.assertEqual(row['status'], Lead.CounselorStatus.READY_TO_JOIN)
+        self.assertEqual(row['status_display'], 'Ready to Join')
+        self.assertEqual(detail_response.data['status'], Lead.CounselorStatus.READY_TO_JOIN)
+        self.assertEqual(detail_response.data['status_display'], 'Ready to Join')
+        self.assertIn(walkin.id, self.ids(filter_response))
+
+    def test_dashboard_pending_counts_respect_walkin_counselor_closed_status(self):
+        WalkIn.objects.create(
+            branch=self.branch, course=self.course, assigned_to=self.counselor, counseling_by=self.counselor,
+            created_by=self.counselor, name='Closed Pending Walkin', phone='9000011298',
+            source=WalkIn.Source.INSTAGRAM, status=WalkIn.Status.NEW,
+            counselor_status=Lead.CounselorStatus.NOT_INTERESTED,
+            visit_date=self.today, follow_up_date=self.today - timedelta(days=1),
+        )
+
+        response = self.client.get('/api/reports/analytics-dashboard/', {
+            'branch': self.branch.id,
+            'date_from': self.today.isoformat(),
+            'date_to': self.today.isoformat(),
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['metrics']['pending_followups'], 0)
+
     def test_full_edit_records_history_and_closed_follow_up_marks_not_interested(self):
         edit_response = self.client.patch(f'/api/leads/{self.lead.id}/', {
             'counselor_status': Lead.CounselorStatus.READY_TO_JOIN,
