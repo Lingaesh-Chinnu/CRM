@@ -93,7 +93,7 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
         self.assertEqual(response.data['metrics']['walkins'], 1)
         self.assertEqual(response.data['metrics']['enrollments'], 0)
 
-    def test_full_edit_records_history_and_quick_follow_up_does_not_change_status(self):
+    def test_full_edit_records_history_and_closed_follow_up_marks_not_interested(self):
         edit_response = self.client.patch(f'/api/leads/{self.lead.id}/', {
             'counselor_status': Lead.CounselorStatus.READY_TO_JOIN,
             'competitor_status': Lead.CompetitorStatus.NOT_ENQUIRED_ELSEWHERE,
@@ -114,9 +114,13 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
             'close_follow_up': True,
         }, format='json')
         self.assertEqual(followup_response.status_code, 201)
+        self.assertEqual(followup_response.data['lead_status'], Lead.Status.NOT_INTERESTED)
+        self.assertEqual(followup_response.data['status'], Lead.Status.NOT_INTERESTED)
+        self.assertEqual(followup_response.data['counselor_status'], Lead.CounselorStatus.NOT_INTERESTED)
         self.lead.refresh_from_db()
-        self.assertEqual(self.lead.counselor_status, Lead.CounselorStatus.READY_TO_JOIN)
-        self.assertEqual(CandidateStatusHistory.objects.filter(record_type=CandidateStatusHistory.RecordType.LEAD, record_id=self.lead.id).count(), 1)
+        self.assertEqual(self.lead.status, Lead.Status.NOT_INTERESTED)
+        self.assertEqual(self.lead.counselor_status, Lead.CounselorStatus.NOT_INTERESTED)
+        self.assertEqual(CandidateStatusHistory.objects.filter(record_type=CandidateStatusHistory.RecordType.LEAD, record_id=self.lead.id).count(), 2)
 
     def test_lead_follow_up_moves_new_lead_to_follow_up_status(self):
         lead = Lead.objects.create(
@@ -132,6 +136,9 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
         }, format='json')
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['lead_status'], Lead.Status.FOLLOW_UP)
+        self.assertEqual(response.data['status'], Lead.Status.FOLLOW_UP)
+        self.assertEqual(response.data['counselor_status'], Lead.CounselorStatus.FOLLOW_UP)
         lead.refresh_from_db()
         self.assertEqual(lead.status, Lead.Status.FOLLOW_UP)
         self.assertEqual(lead.counselor_status, Lead.CounselorStatus.FOLLOW_UP)

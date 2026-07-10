@@ -3527,7 +3527,7 @@ from crm.models import FollowUp, Lead, LeadImportHistory
 from serializers import (
     FollowUpSerializer, LeadListSerializer, LeadDetailSerializer,
     LeadStaffUpdateSerializer, LeadImportHistorySerializer, LeadInboxSerializer,
-    effective_lead_status,
+    effective_lead_status, effective_lead_status_display,
 )
 import django_filters
 import csv
@@ -3623,6 +3623,14 @@ def apply_lead_follow_up_status(lead, request, response_data):
         lead.remarks,
     )
     return lead
+
+
+def add_lead_status_to_follow_up_response(response, lead):
+    response.data['lead_status'] = effective_lead_status(lead)
+    response.data['status'] = response.data['lead_status']
+    response.data['status_display'] = effective_lead_status_display(lead)
+    response.data['counselor_status'] = lead.counselor_status or ''
+    return response
 
 
 class LeadFilter(django_filters.FilterSet):
@@ -4598,7 +4606,8 @@ class LeadViewSet(viewsets.ModelViewSet):
             response = create_follow_up_entry(lead, FollowUp.RecordType.LEAD, request)
             if response.status_code >= 400:
                 return response
-            apply_lead_follow_up_status(lead, request, response.data)
+            lead = apply_lead_follow_up_status(lead, request, response.data)
+            add_lead_status_to_follow_up_response(response, lead)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.LEAD, lead.id)
         return response
 

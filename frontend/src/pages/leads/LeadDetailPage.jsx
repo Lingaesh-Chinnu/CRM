@@ -757,6 +757,10 @@ export default function LeadDetailPage() {
     const { data } = await api.post(`/leads/${id}/follow-ups/`, payload)
     setLead((prev) => ({
       ...prev,
+      status: data.lead_status || data.status || prev.status,
+      lead_status: data.lead_status || data.status || prev.lead_status,
+      status_display: data.status_display || prev.status_display,
+      counselor_status: data.counselor_status || prev.counselor_status,
       next_follow_up_date: data.next_follow_up_date,
       follow_ups: [data, ...(prev.follow_ups || [])],
     }))

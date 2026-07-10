@@ -380,6 +380,10 @@ export default function LeadsListPage() {
       lead.id === leadId
         ? {
             ...lead,
+            status: followUp.lead_status || followUp.status || lead.status,
+            lead_status: followUp.lead_status || followUp.status || lead.lead_status,
+            status_display: followUp.status_display || lead.status_display,
+            counselor_status: followUp.counselor_status || lead.counselor_status,
             remarks: followUp.remarks || lead.remarks,
             latest_remark: followUp.remarks || lead.latest_remark || lead.remarks,
             next_follow_up_date: followUp.next_follow_up_date,
