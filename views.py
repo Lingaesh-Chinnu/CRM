@@ -8000,10 +8000,24 @@ class PublicWalkInFormView(APIView):
         if not course:
             errors['course'] = 'Please select a valid active course.'
         if errors:
+            logger.warning(
+                'Public walk-in validation failed before serializer: phone=%s branch_id=%s course_id=%s errors=%s',
+                phone,
+                branch_id,
+                course_id,
+                errors,
+            )
             return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
         serializer = PublicWalkInCreateSerializer(data=data)
         if not serializer.is_valid():
+            logger.warning(
+                'Public walk-in serializer validation failed: phone=%s branch_id=%s course_id=%s errors=%s',
+                phone,
+                branch_id,
+                course_id,
+                serializer.errors,
+            )
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         try:
@@ -8049,10 +8063,7 @@ class PublicWalkInFormView(APIView):
                 exc.__class__.__name__,
             )
             return Response(
-                {
-                    'detail': 'We could not submit your enquiry right now. Please try again or contact the selected branch.',
-                    'error': exc.__class__.__name__,
-                },
+                {'detail': 'Something went wrong. Please try again.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

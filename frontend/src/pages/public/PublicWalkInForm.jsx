@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
 import brandLogo from '../../assets/brand-logo.png'
 
@@ -111,14 +111,15 @@ function RadioGroup({ name, value, onChange }) {
 
 function formatSubmitError(error) {
   const data = error.response?.data
+  if (!error.response || error.response.status >= 500) {
+    return 'Something went wrong. Please try again.'
+  }
   if (!data) {
-    return error.request
-      ? 'Could not reach the server. Please check your connection and try again.'
-      : 'Failed to submit walk-in form.'
+    return 'Something went wrong. Please try again.'
   }
   if (typeof data === 'string') {
     return data.includes('<!doctype html') || data.includes('<html')
-      ? 'The server could not process this submission right now. Please try again or contact the selected branch.'
+      ? 'Something went wrong. Please try again.'
       : data
   }
   if (data.detail) return data.detail
@@ -131,7 +132,7 @@ function formatSubmitError(error) {
       })
       .join(' ')
   }
-  return 'Failed to submit walk-in form.'
+  return 'Something went wrong. Please try again.'
 }
 
 export default function PublicWalkInForm() {
@@ -147,7 +148,7 @@ export default function PublicWalkInForm() {
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
-  const [successOpen, setSuccessOpen] = useState(false)
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     api.get('/public/walkin/').then(({ data }) => {
@@ -164,6 +165,7 @@ export default function PublicWalkInForm() {
         setForm((current) => ({ ...current, branch: branchFromLink }))
       }
     }).catch((error) => {
+      console.error('Public walk-in form options failed', error)
       setMessage(formatSubmitError(error))
     })
   }, [])
@@ -174,7 +176,7 @@ export default function PublicWalkInForm() {
 
   const submit = async (event) => {
     event.preventDefault()
-    if (saving || redirecting) return
+    if (submittingRef.current || saving || redirecting) return
 
     const requiredFields = [
       ['branch', 'Branch'],
@@ -205,11 +207,12 @@ export default function PublicWalkInForm() {
       return
     }
 
+    submittingRef.current = true
     setSaving(true)
     setMessage('')
 
     try {
-      await api.post('/public/walkin/', {
+      const { data } = await api.post('/public/walkin/', {
         ...form,
         branch: Number(form.branch),
         course: Number(form.course),
@@ -218,16 +221,16 @@ export default function PublicWalkInForm() {
         dob: form.dob || null,
         visit_date: new Date().toISOString().slice(0, 10),
       })
-      setSuccessOpen(true)
+      if (!data?.id && !data?.candidate_number) {
+        throw new Error('Public walk-in save response did not include a record identifier.')
+      }
       setRedirecting(true)
-      setForm(initialForm)
-      window.setTimeout(() => {
-        window.location.href = 'https://www.indrainstitute.com'
-      }, 3000)
+      window.location.assign('https://www.indrainstitute.com/')
     } catch (error) {
+      console.error('Public walk-in form submission failed', error)
+      submittingRef.current = false
       setRedirecting(false)
       setMessage(formatSubmitError(error))
-    } finally {
       setSaving(false)
     }
   }
@@ -235,7 +238,7 @@ export default function PublicWalkInForm() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-10 sm:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.22),transparent_30%)]" />
-      {successOpen && (
+      {false && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-labelledby="walkin-success-title" className="w-full max-w-md rounded-[28px] bg-white p-7 text-center shadow-[0_30px_80px_-35px_rgba(15,23,42,1)]">
             <h2 id="walkin-success-title" className="text-2xl font-black tracking-tight text-slate-950">
@@ -296,7 +299,7 @@ export default function PublicWalkInForm() {
               </div>
             </div>
 
-            <form onSubmit={submit} className="mt-8 grid gap-5 md:grid-cols-2">
+            <form onSubmit={submit} className="mt-8 grid gap-5 md:grid-cols-2" aria-busy={saving || redirecting}>
               <div>
                 <FieldLabel>Branch</FieldLabel>
                 <select
@@ -565,9 +568,13 @@ export default function PublicWalkInForm() {
               )}
 
               <button
+                type="submit"
                 disabled={saving || redirecting}
-                className="md:col-span-2 rounded-2xl bg-slate-950 px-4 py-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-3 md:col-span-2 rounded-2xl bg-slate-950 px-4 py-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
+                {(saving || redirecting) && (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/35 border-t-white" aria-hidden="true" />
+                )}
                 {saving ? 'Submitting...' : redirecting ? 'Redirecting...' : 'Submit Walk-in'}
               </button>
             </form>

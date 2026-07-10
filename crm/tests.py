@@ -1430,6 +1430,7 @@ class PublicWalkInFormTests(APITestCase):
             response = self.client.post('/api/public/walkin/', self.payload, format='json')
 
         self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data['detail'], 'Something went wrong. Please try again.')
         self.assertFalse(WalkIn.objects.exists())
         self.assertFalse(Notification.objects.filter(title='New public walk-in submitted').exists())
 
