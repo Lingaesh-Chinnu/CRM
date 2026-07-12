@@ -71,32 +71,21 @@ function formatDate(value) {
   })
 }
 
-function formatDateTimeCompact(dateValue, timeValue = dateValue) {
+function formatDateCompact(dateValue) {
   if (!dateValue) return null
   const date = new Date(dateValue)
-  const time = timeValue ? new Date(timeValue) : null
-  return {
-    date: date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-    }),
-    time: time && !Number.isNaN(time.getTime())
-      ? time.toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        })
-      : '-',
-  }
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  })
 }
 
-function CompactStamp({ dateValue, timeValue }) {
-  const stamp = formatDateTimeCompact(dateValue, timeValue)
-  if (!stamp) return <span className="text-xs text-slate-400">-</span>
+function CompactStamp({ dateValue }) {
+  const date = formatDateCompact(dateValue)
+  if (!date) return <span className="text-xs text-slate-400">-</span>
   return (
     <div className="leading-tight">
-      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
-      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{date}</p>
     </div>
   )
 }
@@ -242,7 +231,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                 header: 'Walk-in Date',
                 width: '66px',
                 className: 'flex items-center',
-                render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} timeValue={walkin.created_at || walkin.visit_date} />,
+                render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} />,
               },
               {
                 key: 'name',

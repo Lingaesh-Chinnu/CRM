@@ -94,29 +94,21 @@ function matchesLeadStatus(lead, value) {
     || (leadStatusAliases[value] || []).includes(lead.status)
 }
 
-function formatDateTimeCompact(value) {
-  if (!value) return '-'
+function formatCreatedDateCompact(value) {
+  if (!value) return null
   const date = new Date(value)
-  return {
-    date: date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-    }),
-    time: date.toLocaleTimeString('en-IN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: true,
-    }),
-  }
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  })
 }
 
 function CreatedStamp({ value }) {
-  const stamp = formatDateTimeCompact(value)
-  if (stamp === '-') return <span className="text-xs text-slate-400">-</span>
+  const date = formatCreatedDateCompact(value)
+  if (!date) return <span className="text-xs text-slate-400">-</span>
   return (
     <div className="leading-tight">
-      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
-      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{date}</p>
     </div>
   )
 }
