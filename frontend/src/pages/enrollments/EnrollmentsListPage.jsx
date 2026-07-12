@@ -23,32 +23,21 @@ function formatDate(value) {
   })
 }
 
-function formatDateTimeCompact(dateValue, timeValue = dateValue) {
+function formatDateCompact(dateValue) {
   if (!dateValue) return null
   const date = new Date(dateValue)
-  const time = timeValue ? new Date(timeValue) : null
-  return {
-    date: date.toLocaleDateString('en-IN', {
-      day: '2-digit',
-      month: 'short',
-    }),
-    time: time && !Number.isNaN(time.getTime())
-      ? time.toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: true,
-        })
-      : '-',
-  }
+  return date.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+  })
 }
 
-function CompactStamp({ dateValue, timeValue }) {
-  const stamp = formatDateTimeCompact(dateValue, timeValue)
-  if (!stamp) return <span className="text-xs text-slate-400">-</span>
+function CompactStamp({ dateValue }) {
+  const date = formatDateCompact(dateValue)
+  if (!date) return <span className="text-xs text-slate-400">-</span>
   return (
     <div className="leading-tight">
-      <p className="whitespace-nowrap text-sm font-black text-slate-900">{stamp.date}</p>
-      <p className="mt-1 whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">{stamp.time}</p>
+      <p className="whitespace-nowrap text-sm font-black text-slate-900">{date}</p>
     </div>
   )
 }
@@ -461,7 +450,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'enrollmentDate', header: 'Enroll Date', width: '68px', className: 'flex items-center', render: (row) => <CompactStamp dateValue={row.enrollment_date || row.created_at} timeValue={row.created_at || row.enrollment_date} /> },
+                { key: 'enrollmentDate', header: 'Enroll Date', width: '68px', className: 'flex items-center', render: (row) => <CompactStamp dateValue={row.enrollment_date || row.created_at} /> },
                 { key: 'name', header: 'Student', width: 'minmax(155px,1.15fr)', className: 'flex items-center', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={withReturnTo(`/enrollments/${row.id}`, returnTo)} state={{ returnTo, listFilters: filters }} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
                 { key: 'course', header: 'Course', width: 'minmax(120px,0.95fr)', className: 'flex items-center', render: (row) => <span className="overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{row.course_name || 'Course pending'}</span> },
                 ...(isSuperAdmin ? [{ key: 'branch', header: 'Branch', width: 'minmax(76px,0.65fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.branch_name || 'No branch'}</span> }] : []),
