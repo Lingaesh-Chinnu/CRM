@@ -1651,8 +1651,15 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'preferred_timing_display','qualification','qualification_display','degree',
                   'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
                   'counselor_status','competitor_status','follow_up_priority','conversion_probability',
-                  'demo_class','interested_global_certification','rules_signing_status',
+                  'demo_class','interested_global_certification','admin_notes','rules_signing_status',
                   'payment_schedule_status']
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get('request')
+        if not (request and request.user and request.user.is_super_admin):
+            fields.pop('admin_notes', None)
+        return fields
 
     def get_payment_status(self, obj):
         if hasattr(obj, 'payment'):
@@ -1726,6 +1733,13 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
             'student_number', 'final_fees', 'custom_payable_fee', 'net_payable_fee',
             'spot_conversion_discount_amount', 'enrolled_by', 'created_by',
         ]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get('request')
+        if not (request and request.user and request.user.is_super_admin):
+            fields.pop('admin_notes', None)
+        return fields
 
     def validate(self, attrs):
         attrs = super().validate(attrs)

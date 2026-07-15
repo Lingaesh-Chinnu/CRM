@@ -100,6 +100,34 @@ function SummaryCard({ label, value, current, previous }) {
   )
 }
 
+function AdminNotesCell({ row, onSave, saving }) {
+  const [value, setValue] = useState(row.admin_notes || '')
+
+  useEffect(() => {
+    setValue(row.admin_notes || '')
+  }, [row.id, row.admin_notes])
+
+  const saveIfChanged = () => {
+    if (value !== (row.admin_notes || '')) {
+      onSave(row, value)
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <textarea
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={saveIfChanged}
+        rows={2}
+        placeholder="Add note"
+        className="min-h-[44px] w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-800 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+      />
+      {saving && <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Saving</p>}
+    </div>
+  )
+}
+
 function isoDate(value) {
   return value.toISOString().slice(0, 10)
 }
@@ -151,6 +179,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [savingNotes, setSavingNotes] = useState({})
   const location = useLocation()
   const returnTo = currentReturnTo(location)
   const navigationMessage = location.state?.message || ''
@@ -249,6 +278,27 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   const previousMonthEnrollmentCount = previousMetricRows.length
   const totalRevenue = metricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
   const previousRevenue = previousMetricRows.reduce((sum, row) => sum + Number(row.net_payable_fee || row.final_fees || 0), 0)
+  const totalPendingBalance = rows.reduce((sum, row) => sum + Number(row.payment_balance || 0), 0)
+
+  const saveAdminNotes = async (row, adminNotes) => {
+    setSavingNotes((current) => ({ ...current, [row.id]: true }))
+    try {
+      const response = await api.patch(`/enrollments/${row.id}/admin-notes/`, { admin_notes: adminNotes })
+      const savedNotes = response.data.admin_notes ?? adminNotes
+      setRows((current) => current.map((item) => (
+        item.id === row.id ? { ...item, admin_notes: savedNotes } : item
+      )))
+      setMessage('')
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to save admin notes.'))
+    } finally {
+      setSavingNotes((current) => {
+        const next = { ...current }
+        delete next[row.id]
+        return next
+      })
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -405,7 +455,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
         </div>
       </section>
 
-      {!isYetToEnroll && <section className="grid gap-4 md:grid-cols-2">
+      {!isYetToEnroll && <section className="grid gap-4 md:grid-cols-3">
         <SummaryCard
           label="Total Enrollments"
           value={currentMonthEnrollmentCount}
@@ -417,6 +467,12 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
           value={money(totalRevenue)}
           current={totalRevenue}
           previous={previousRevenue}
+        />
+        <SummaryCard
+          label="Total Pending Balance"
+          value={money(totalPendingBalance)}
+          current={totalPendingBalance}
+          previous={totalPendingBalance}
         />
       </section>}
 
@@ -463,6 +519,9 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
                   { key: 'balance', header: 'Balance', width: '82px', className: 'flex items-center', render: (row) => <span className="whitespace-nowrap font-semibold text-slate-900">{money(row.payment_balance)}</span> },
                 ]),
                 { key: 'counselor', header: 'Counselor', width: 'minmax(88px,0.75fr)', className: 'flex items-center', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
+                ...(isSuperAdmin ? [
+                  { key: 'adminNotes', header: 'Admin Notes', width: 'minmax(150px,1fr)', className: 'flex items-center', render: (row) => <AdminNotesCell row={row} onSave={saveAdminNotes} saving={Boolean(savingNotes[row.id])} /> },
+                ] : []),
               ]}
             />
           </div>

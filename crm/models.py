@@ -1200,6 +1200,7 @@ class Enrollment(TimeStampedModel):
     follow_up_priority = models.CharField(max_length=10, choices=Lead.FollowUpPriority.choices, blank=True)
     conversion_probability = models.CharField(max_length=3, choices=Lead.ConversionProbability.choices, blank=True)
     remarks          = models.TextField(blank=True)
+    admin_notes      = models.TextField(blank=True)
     source           = models.CharField(max_length=20, choices=WalkIn.Source.choices, blank=True, db_index=True)
     preferred_timing = models.CharField(max_length=30, choices=WalkIn.PreferredTiming.choices, blank=True)
     demo_class       = models.BooleanField(default=False)

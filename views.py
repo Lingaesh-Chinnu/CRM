@@ -9029,6 +9029,15 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         enrollment.save(update_fields=['is_important', 'updated_at'])
         return Response({'id': enrollment.id, 'is_important': enrollment.is_important})
 
+    @action(detail=True, methods=['patch'], url_path='admin-notes')
+    def admin_notes(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can update enrollment notes.'}, status=status.HTTP_403_FORBIDDEN)
+        enrollment = self.get_object()
+        enrollment.admin_notes = str(request.data.get('admin_notes') or '')
+        enrollment.save(update_fields=['admin_notes', 'updated_at'])
+        return Response({'id': enrollment.id, 'admin_notes': enrollment.admin_notes})
+
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
         if not request.user.is_super_admin:
