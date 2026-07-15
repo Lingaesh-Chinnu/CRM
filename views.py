@@ -9019,6 +9019,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(branch=self.request.user.branch)
         if getattr(self, 'action', None) == 'list' and self.request.query_params.get('queue') != 'yet_to_enroll':
             qs = official_enrollment_queryset(qs)
+        if getattr(self, 'action', None) == 'list' and self.request.query_params.get('queue') == 'enrolled':
+            today = timezone.localdate()
+            month_start = today.replace(day=1)
+            month_end = today.replace(day=monthrange(today.year, today.month)[1])
+            qs = qs.filter(enrollment_date__gte=month_start, enrollment_date__lte=month_end)
         return qs
 
     @action(detail=True, methods=['post'], url_path='toggle-important')

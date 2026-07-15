@@ -304,7 +304,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
         <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Enrollments</p>
-        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Yet To Enroll' : 'Confirmed student enrollments'}</h1>
+        <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Yet To Enroll' : 'Enrolled Student'}</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">
           {isYetToEnroll
             ? 'Candidates converted to enrollment who are waiting for Rules & Regulations completion and final enrollment confirmation.'
@@ -485,7 +485,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">{isYetToEnroll ? 'Enrollment Queue' : 'Enrolled Students'}</p>
-            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Candidates waiting for final enrollment' : 'Operational enrollment list with course details'}</h2>
+            <h2 className="mt-2 text-xl font-black tracking-tight text-slate-950">{isYetToEnroll ? 'Candidates waiting for final enrollment' : 'Candidates enrollment list with course details'}</h2>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-3">
             {!isYetToEnroll && <StatusFilterChips
