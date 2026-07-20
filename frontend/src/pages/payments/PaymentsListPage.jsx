@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import { openWhatsApp, renderWhatsAppTemplate } from '../../utils/whatsappTemplates'
 import { OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
@@ -70,6 +71,7 @@ const smartFilters = [
   { value: 'month', label: 'This Month' },
   { value: 'last_month', label: 'Last Month' },
 ]
+const PAGE_SIZE = 100
 
 function orderedInstallments(row) {
   return [...(row.installments || [])].sort((a, b) => {
@@ -147,6 +149,8 @@ export default function PaymentsListPage() {
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(navigationMessage)
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [sendingId, setSendingId] = useState(null)
   const [reasonRequest, setReasonRequest] = useState(null)
   const [reasonContext, setReasonContext] = useState(null)
@@ -224,12 +228,15 @@ export default function PaymentsListPage() {
       if (dateTo) params.date_to = dateTo
     }
     if (debouncedSearch) params.search = debouncedSearch
+    params.page = page
+    params.page_size = PAGE_SIZE
 
     setLoading(true)
     if (!navigationMessage) setMessage('')
     api.get('/payments/', { params, signal: controller.signal })
       .then(({ data }) => {
         setRows(data.results || data)
+        setTotalCount(data.count ?? (data.results || data || []).length)
         setSummary(data.summary || {
           total_records: 0,
           total_collection: 0,
@@ -244,12 +251,17 @@ export default function PaymentsListPage() {
       .catch((error) => {
         if (error.name === 'CanceledError') return
         setRows([])
+        setTotalCount(0)
         setMessage(apiErrorMessage(error, 'Failed to load payments.'))
       })
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek, navigationMessage])
+  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek, navigationMessage, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek])
 
   useEffect(() => {
     if (!reasonRequestId) return
@@ -394,9 +406,12 @@ export default function PaymentsListPage() {
             ...(duration === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
             ...(duration === 'custom' && dateTo ? { date_to: dateTo } : {}),
             ...(debouncedSearch ? { search: debouncedSearch } : {}),
+            page,
+            page_size: PAGE_SIZE,
           },
         })
         setRows(refreshed.data.results || refreshed.data)
+        setTotalCount(refreshed.data.count ?? (refreshed.data.results || refreshed.data || []).length)
         setSummary(refreshed.data.summary || summary)
       }
     } catch (error) {
@@ -671,7 +686,7 @@ export default function PaymentsListPage() {
             <CRMTable
               rows={rows}
               columns={[
-                { key: 'serial', header: 'S.No', width: '64px', render: (row) => rows.findIndex((item) => item.id === row.id) + 1 },
+                { key: 'serial', header: 'S.No', width: '64px', render: (row) => ((page - 1) * PAGE_SIZE) + rows.findIndex((item) => item.id === row.id) + 1 },
                 {
                   key: 'student',
                   header: 'Student',
@@ -720,6 +735,7 @@ export default function PaymentsListPage() {
                 },
               ]}
             />
+            <PaginationControls page={page} count={totalCount} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         )}
       </section>

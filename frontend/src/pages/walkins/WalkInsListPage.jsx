@@ -5,11 +5,13 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { CandidateInfo, ImportantFilter, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
 
 const appBasePath = (import.meta.env.VITE_APP_BASE_PATH || '').replace(/\/$/, '')
+const PAGE_SIZE = 100
 
 const emptyFilters = {
   search: '',
@@ -80,12 +82,23 @@ function formatDateCompact(dateValue) {
   })
 }
 
-function CompactStamp({ dateValue }) {
+function formatTimeCompact(dateValue) {
+  if (!dateValue) return null
+  return new Date(dateValue).toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  })
+}
+
+function CompactStamp({ dateValue, timeValue }) {
   const date = formatDateCompact(dateValue)
   if (!date) return <span className="text-xs text-slate-400">-</span>
+  const time = formatTimeCompact(timeValue)
   return (
     <div className="leading-tight">
       <p className="whitespace-nowrap text-sm font-black text-slate-900">{date}</p>
+      {time && <p className="mt-0.5 whitespace-nowrap text-xs font-semibold text-slate-500">{time}</p>}
     </div>
   )
 }
@@ -190,7 +203,7 @@ function CounselorBadge({ walkin }) {
   )
 }
 
-function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters }) {
+function WalkInSection({ title, walkins, count, page, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters, onPageChange }) {
   const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
   const todayWalkInCount = walkins.filter((walkin) => walkin.visit_date === todayIsoFrom()).length
@@ -231,7 +244,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
                 header: 'Walk-in Date',
                 width: '66px',
                 className: 'flex items-center',
-                render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} />,
+                render: (walkin) => <CompactStamp dateValue={walkin.visit_date || walkin.created_at} timeValue={walkin.created_at} />,
               },
               {
                 key: 'name',
@@ -277,6 +290,7 @@ function WalkInSection({ title, walkins, count, emptyMessage, onFollowUpSaved, o
               },
             ]}
           />
+          <PaginationControls page={page} count={count} pageSize={PAGE_SIZE} onPageChange={onPageChange} />
         </div>
       )}
 
@@ -289,6 +303,8 @@ export default function WalkInsListPage() {
   const [otherWalkins, setOtherWalkins] = useState([])
   const [currentMonthCount, setCurrentMonthCount] = useState(0)
   const [otherWalkinsCount, setOtherWalkinsCount] = useState(0)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [otherPage, setOtherPage] = useState(1)
   const [branches, setBranches] = useState([])
   const [courses, setCourses] = useState([])
   const [staffUsers, setStaffUsers] = useState([])
@@ -357,7 +373,9 @@ export default function WalkInsListPage() {
     const fetchWalkins = async () => {
       setLoading(true)
       try {
-        const params = hasDateRangeFilter ? {} : { sectioned: 1 }
+        const params = hasDateRangeFilter
+          ? { page: currentPage, page_size: PAGE_SIZE }
+          : { sectioned: 1, page: currentPage, other_page: otherPage, page_size: PAGE_SIZE }
         Object.entries(appliedFilters).forEach(([key, value]) => {
           if (key === 'search' || key === 'quick_filter') return
           if (value) params[key] = value
@@ -373,7 +391,7 @@ export default function WalkInsListPage() {
           const rows = data.results || data || []
           setCurrentMonthWalkins(rows)
           setOtherWalkins([])
-          setCurrentMonthCount(rows.length)
+          setCurrentMonthCount(data.count ?? rows.length)
           setOtherWalkinsCount(0)
         } else {
           setCurrentMonthWalkins(data.current_month_walkins || [])
@@ -394,9 +412,11 @@ export default function WalkInsListPage() {
     }
 
     fetchWalkins()
-  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus, hasDateRangeFilter])
+  }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus, hasDateRangeFilter, currentPage, otherPage])
 
   const updateFilter = (key, value) => {
+    setCurrentPage(1)
+    setOtherPage(1)
     if (key === 'quick_filter') {
       setFilters((current) => {
         const nextValue = current.quick_filter === value ? '' : value
@@ -416,6 +436,8 @@ export default function WalkInsListPage() {
   }
 
   const applyQuickFilter = (value) => {
+    setCurrentPage(1)
+    setOtherPage(1)
     const active = filters.quick_filter === value
     const nextValue = active ? '' : value
     const nextParams = new URLSearchParams(searchParams)
@@ -482,6 +504,8 @@ export default function WalkInsListPage() {
   }
 
   const applyStatusFilter = (value) => {
+    setCurrentPage(1)
+    setOtherPage(1)
     const nextParams = new URLSearchParams(searchParams)
     nextParams.delete('visit_date_from')
     nextParams.delete('visit_date_to')
@@ -503,6 +527,8 @@ export default function WalkInsListPage() {
 
   const submitFilters = (event) => {
     event.preventDefault()
+    setCurrentPage(1)
+    setOtherPage(1)
     const nextParams = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
       if (key === 'branch' && !canFilterByBranch) return
@@ -668,6 +694,7 @@ export default function WalkInsListPage() {
         title={hasDateRangeFilter ? 'Filtered Walk-ins' : 'Current Month Walk-ins'}
         walkins={currentMonthWalkins}
         count={currentMonthCount}
+        page={currentPage}
         emptyMessage={hasDateRangeFilter ? 'No walk-ins found within the selected date range.' : 'No current month walk-ins found.'}
         onFollowUpSaved={updateWalkInFollowUp}
         onImportantToggle={toggleWalkInImportant}
@@ -676,6 +703,7 @@ export default function WalkInsListPage() {
         canViewBranch={canFilterByBranch}
         returnTo={returnTo}
         listFilters={filters}
+        onPageChange={setCurrentPage}
       />
 
       {!hasDateRangeFilter && <div className="pt-2">
@@ -683,6 +711,7 @@ export default function WalkInsListPage() {
           title="All Other Walk-ins"
           walkins={otherWalkins}
           count={otherWalkinsCount}
+          page={otherPage}
           emptyMessage="No older walk-ins found."
           onFollowUpSaved={updateWalkInFollowUp}
           onImportantToggle={toggleWalkInImportant}
@@ -691,6 +720,7 @@ export default function WalkInsListPage() {
           canViewBranch={canFilterByBranch}
           returnTo={returnTo}
           listFilters={filters}
+          onPageChange={setOtherPage}
         />
       </div>}
     </div>

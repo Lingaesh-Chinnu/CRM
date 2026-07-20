@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import { OwnerDot, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 
@@ -34,6 +35,8 @@ function statusSelectValue(value) {
   return value === 'enrolled' ? 'active' : value || 'active'
 }
 
+const PAGE_SIZE = 100
+
 export default function StudentsListPage() {
   const [rows, setRows] = useState([])
   const [branches, setBranches] = useState([])
@@ -48,6 +51,8 @@ export default function StudentsListPage() {
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
   const debouncedSearch = useDebouncedValue(filters.search.trim())
@@ -58,6 +63,10 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
+  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin, page])
+
+  useEffect(() => {
+    setPage(1)
   }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
 
   const loadFilterOptions = async () => {
@@ -94,12 +103,16 @@ export default function StudentsListPage() {
       }
       if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
       if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
+      params.page = page
+      params.page_size = PAGE_SIZE
 
       const { data } = await api.get('/enrollments/', { params })
       setRows(normaliseListResponse(data))
+      setTotalCount(data.count ?? normaliseListResponse(data).length)
       setMessage('')
     } catch (error) {
       setRows([])
+      setTotalCount(0)
       setMessage(apiErrorMessage(error, 'Failed to load students.'))
     } finally {
       setLoading(false)
@@ -246,6 +259,7 @@ export default function StudentsListPage() {
                 { key: 'counselor', header: 'Counselor', width: 'minmax(88px,0.75fr)', render: (row) => <span className="truncate text-slate-700">{row.counselor_name || '-'}</span> },
               ]}
             />
+            <PaginationControls page={page} count={totalCount} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         )}
       </section>

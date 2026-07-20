@@ -49,6 +49,7 @@ from django.core.mail import send_mail
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.core.paginator import Paginator
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import render
 from django.db import IntegrityError, connection, transaction
@@ -1588,6 +1589,14 @@ def list_limit_from_request(request, default=100, maximum=250):
     except (TypeError, ValueError):
         raw = default
     return max(1, min(raw, maximum))
+
+
+def page_number_from_request(request, default=1):
+    try:
+        raw = int(request.query_params.get('page') or default)
+    except (TypeError, ValueError):
+        raw = default
+    return max(1, raw)
 
 
 def apply_text_search(queryset, search, fields, id_fields=None):
@@ -6814,6 +6823,21 @@ class NotificationViewSet(viewsets.ModelViewSet):
 class PendingManagementView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
+    def paginated_rows(self, request, queryset, row_builder):
+        page_size = list_limit_from_request(request, default=100, maximum=100)
+        paginator = Paginator(queryset, page_size)
+        page_number = page_number_from_request(request)
+        page = paginator.get_page(page_number)
+        rows = [row_builder(item) for item in page.object_list]
+        return Response({
+            'results': rows,
+            'count': paginator.count,
+            'page': page.number,
+            'page_size': page_size,
+            'next': page.next_page_number() if page.has_next() else None,
+            'previous': page.previous_page_number() if page.has_previous() else None,
+        })
+
     def base_leads(self, request):
         qs = visible_candidate_queryset(Lead.objects.select_related('branch', 'course', 'assigned_to'))
         latest_follow_up = FollowUp.objects.filter(
@@ -6990,14 +7014,13 @@ class PendingManagementView(APIView):
                 'total_pending': leads + walkins + payments,
             })
         if section == 'leads':
-            rows = [self.lead_row(lead) for lead in self.base_leads(request)[:500]]
+            return self.paginated_rows(request, self.base_leads(request), self.lead_row)
         elif section == 'walkins':
-            rows = [self.walkin_row(walkin) for walkin in self.base_walkins(request)[:500]]
+            return self.paginated_rows(request, self.base_walkins(request), self.walkin_row)
         elif section == 'payments':
-            rows = [self.payment_row(payment) for payment in self.base_payments(request)[:500]]
+            return self.paginated_rows(request, self.base_payments(request), self.payment_row)
         else:
             return Response({'detail': 'Invalid pending module.'}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'results': rows, 'count': len(rows)})
 
 
 class TeamNoticeViewSet(viewsets.ModelViewSet):
@@ -7350,19 +7373,31 @@ class WalkInViewSet(viewsets.ModelViewSet):
         current_month_walkins = queryset.filter(**current_month_filter)
         other_walkins = queryset.exclude(**current_month_filter)
 
-        limit = list_limit_from_request(self.request)
-        current_count = current_month_walkins.count()
-        other_count = other_walkins.count()
-        current_serializer = self.get_serializer(current_month_walkins[:limit], many=True)
-        other_serializer = self.get_serializer(other_walkins[:limit], many=True)
+        limit = list_limit_from_request(self.request, default=100, maximum=100)
+        current_page_number = page_number_from_request(self.request)
+        other_page_number = page_number_from_request(self.request, default=1)
+        try:
+            other_page_number = int(self.request.query_params.get('other_page') or other_page_number)
+        except (TypeError, ValueError):
+            other_page_number = 1
+        other_page_number = max(1, other_page_number)
+
+        current_paginator = Paginator(current_month_walkins, limit)
+        other_paginator = Paginator(other_walkins, limit)
+        current_page = current_paginator.get_page(current_page_number)
+        other_page = other_paginator.get_page(other_page_number)
+        current_serializer = self.get_serializer(current_page.object_list, many=True)
+        other_serializer = self.get_serializer(other_page.object_list, many=True)
         return Response({
             'current_month_walkins': current_serializer.data,
             'other_walkins': other_serializer.data,
-            'current_month_count': current_count,
-            'other_walkins_count': other_count,
+            'current_month_count': current_paginator.count,
+            'other_walkins_count': other_paginator.count,
             'limit': limit,
-            'current_month_has_more': current_count > limit,
-            'other_walkins_has_more': other_count > limit,
+            'current_month_page': current_page.number,
+            'other_walkins_page': other_page.number,
+            'current_month_has_more': current_page.has_next(),
+            'other_walkins_has_more': other_page.has_next(),
         })
 
     @action(detail=False, methods=['get'], url_path='sectioned')
@@ -11188,8 +11223,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         branch_header = self._branch_header_payload(enrollment.branch)
         is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
         generated_at = installment.bill_generated_at or timezone.now()
-        cutoff = generated_at if is_bill else timezone.now()
-        historical_installments = payment.installments.filter(created_at__lte=cutoff)
+        historical_installments = payment.installments.all()
         current_payment_amount = Decimal(str(installment.amount or 0))
         paid_amount = historical_installments.aggregate(total=Sum('amount'))['total'] or Decimal('0')
         paid_amount = Decimal(str(paid_amount or 0))
@@ -11201,7 +11235,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment_summary = self._installment_summary_for_paid_amount(payment, paid_amount)
         next_schedule = self._next_payment_schedule(payment, installment_summary)
         return {
-            'calculation_version': 'bill_amount_v2',
+            'calculation_version': 'bill_amount_v3',
             'document_type': 'bill' if is_bill else 'receipt',
             'document_number': self._document_number(installment),
             'generated_at': generated_at.isoformat() if generated_at else '',
@@ -11228,7 +11262,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 {
                     'label': item.get('label') or f"{item.get('index') or ''} Installment".strip(),
                     'due_date': self._snapshot_schedule_date(item.get('due_date')),
-                    'amount': self._snapshot_decimal(item.get('paid_amount') or 0),
+                    'amount': self._snapshot_decimal(item.get('required_amount') or 0),
                     'original_amount': self._snapshot_decimal(item.get('required_amount') or 0),
                     'paid_amount': self._snapshot_decimal(item.get('paid_amount') or 0),
                     'pending_amount': self._snapshot_decimal(item.get('pending_amount') or 0),
@@ -11268,6 +11302,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                     'label': item.get('label') or 'Installment',
                     'due_date': self._receipt_date(item.get('due_date')),
                     'amount': self._snapshot_decimal(item.get('amount') or 0),
+                    'original_amount': self._snapshot_decimal(item.get('amount') or 0),
+                    'paid_amount': self._snapshot_decimal(0),
+                    'pending_amount': self._snapshot_decimal(item.get('amount') or 0),
                     'status': 'Upcoming',
                 }
                 for item in get_payment_installment_schedule(payment)
@@ -11275,15 +11312,20 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         for item in schedule:
             label = item.get('label') or 'Installment'
             due_date_display = self._receipt_date(item.get('due_date')) if item.get('due_date') else 'Not set'
-            amount = Decimal(str(item.get('amount') or 0))
+            installment_amount = Decimal(str(item.get('original_amount') or item.get('amount') or 0))
+            paid_amount = Decimal(str(item.get('paid_amount') or 0))
+            pending_amount = Decimal(str(item.get('pending_amount') or 0))
             row_status = item.get('status') or 'Upcoming'
-            status_class = 'paid' if row_status == 'Paid' else 'upcoming'
+            normalized_status = str(row_status).strip().lower()
+            status_class = 'paid' if normalized_status == 'paid' else 'partial' if normalized_status == 'partial' else 'upcoming'
             schedule_rows.append(
                 f"""
                 <tr>
                   <td>{escape(str(label))}</td>
                   <td>{escape(due_date_display)}</td>
-                  <td class="amount">Rs {amount:,.2f}</td>
+                  <td class="amount">Rs {installment_amount:,.2f}</td>
+                  <td class="amount">Rs {paid_amount:,.2f}</td>
+                  <td class="amount">Rs {pending_amount:,.2f}</td>
                   <td class="status-cell"><span class="badge {status_class}">{escape(row_status)}</span></td>
                 </tr>
                 """
@@ -11354,6 +11396,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
       td.status-cell {{ text-align: center; }}
       .badge {{ display: inline-block; min-width: 70px; border-radius: 999px; padding: 2px 8px; text-align: center; font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; border: 1px solid #CBD5E1; line-height: 1.25; }}
       .badge.paid {{ background: #DCFCE7; color: #334155; border-color: #86EFAC; }}
+      .badge.partial {{ background: #FEF3C7; color: #334155; border-color: #FCD34D; }}
       .badge.upcoming {{ background: #FFF7ED; color: #334155; border-color: #FED7AA; }}
       .generated-info {{ padding: 18px 24px; background: white; color: #334155; font-size: 11.5px; line-height: 1.8; }}
       .generated-info p {{ margin: 0; }}
@@ -11411,7 +11454,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             <tr>
               <th>INSTALLMENT</th>
               <th>DUE DATE</th>
-              <th class="amount">Amount</th>
+              <th class="amount">Installment Amount</th>
+              <th class="amount">Amount Paid</th>
+              <th class="amount">Pending</th>
               <th>STATUS</th>
             </tr>
           </thead>
@@ -11508,24 +11553,17 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         return Response(PaymentInstallmentSerializer(installment).data)
 
     def _immutable_document_html(self, installment):
-        snapshot = installment.document_snapshot or {}
-        if snapshot.get('calculation_version') != 'bill_amount_v2':
-            snapshot = self._build_document_snapshot(installment)
+        snapshot = self._build_document_snapshot(installment)
         html = self._build_bill_html(installment, snapshot)
-        installment.document_snapshot = snapshot
-        installment.document_html = html
-        if installment.bill_number and not installment.bill_total:
-            installment.bill_total = Decimal(str(snapshot.get('bill_total') or installment.amount or 0))
-        installment.save(update_fields=['document_snapshot', 'document_html', 'bill_total'])
         return html
 
-    def _build_document_image(self, installment):
+    def _build_document_image(self, installment, snapshot=None):
         try:
             from PIL import Image, ImageDraw, ImageFont
         except ImportError as exc:
             raise RuntimeError('Pillow is required to generate bill documents.') from exc
 
-        snapshot = installment.document_snapshot or self._build_document_snapshot(installment)
+        snapshot = snapshot or self._build_document_snapshot(installment)
         branch = installment.enrollment.branch
         branch_header = self._branch_header_payload(branch)
         branch_address_lines = snapshot.get('branch_address_lines') or branch_header['branch_address_lines']
@@ -11610,8 +11648,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         table_y = y + 6 * row_height + 30
         draw.text((margin, table_y), 'PAYMENT SCHEDULE', fill='black', font=title_font)
         table_y += 34
-        headers = ['INSTALLMENT', 'DUE DATE', 'AMOUNT', 'STATUS']
-        col_widths = [420, 230, 230, 180]
+        headers = ['INSTALLMENT', 'DUE DATE', 'INSTALLMENT AMOUNT', 'AMOUNT PAID', 'PENDING', 'STATUS']
+        col_widths = [270, 160, 190, 160, 160, 120]
         x = margin
         for header, col_width_item in zip(headers, col_widths):
             draw.rectangle((x, table_y, x + col_width_item, table_y + 42), fill=light, outline=border)
@@ -11622,7 +11660,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             values = [
                 item.get('label') or '',
                 self._receipt_date(item.get('due_date')) if item.get('due_date') else '',
-                f"Rs {Decimal(str(item.get('amount') or 0)):,.2f}",
+                f"Rs {Decimal(str(item.get('original_amount') or item.get('amount') or 0)):,.2f}",
+                f"Rs {Decimal(str(item.get('paid_amount') or 0)):,.2f}",
+                f"Rs {Decimal(str(item.get('pending_amount') or 0)):,.2f}",
                 item.get('status') or '',
             ]
             x = margin
@@ -11647,15 +11687,15 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
         return page
 
-    def _build_document_pdf(self, installment):
-        page = self._build_document_image(installment)
+    def _build_document_pdf(self, installment, snapshot=None):
+        page = self._build_document_image(installment, snapshot)
         output = io.BytesIO()
         page.save(output, format='PDF')
         output.seek(0)
         return output.read()
 
-    def _build_document_png(self, installment):
-        page = self._build_document_image(installment)
+    def _build_document_png(self, installment, snapshot=None):
+        page = self._build_document_image(installment, snapshot)
         output = io.BytesIO()
         page.save(output, format='PNG')
         output.seek(0)
@@ -11683,11 +11723,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
         enrollment = installment.enrollment
         image_filename = f'{document_number}.png'
-        installment.document_snapshot = self._build_document_snapshot(installment)
-        installment.document_html = self._build_bill_html(installment, installment.document_snapshot)
-        installment.save(update_fields=['document_snapshot', 'document_html'])
+        snapshot = self._build_document_snapshot(installment)
         try:
-            image_bytes = self._build_document_png(installment)
+            image_bytes = self._build_document_png(installment, snapshot)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
         whatsapp_message = self._bill_whatsapp_message(enrollment, installment)

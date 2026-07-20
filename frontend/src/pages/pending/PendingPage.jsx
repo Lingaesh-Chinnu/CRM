@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { ImportantFilter, ImportantToggle, OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
@@ -22,6 +23,7 @@ const durationOptions = [
   { value: 'month', label: 'This Month' },
   { value: 'custom', label: 'Custom Range' },
 ]
+const PAGE_SIZE = 100
 
 function formatDate(value) {
   if (!value) return 'Not set'
@@ -52,6 +54,8 @@ export default function PendingPage() {
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [filters, setFilters] = useState({
     branch: '',
     user: '',
@@ -82,6 +86,8 @@ export default function PendingPage() {
     if (module === 'payments' && filters.status) next.status = filters.status
     if (debouncedSearch) next.search = debouncedSearch
     if (filters.importantOnly) next.important_only = true
+    next.page = page
+    next.page_size = PAGE_SIZE
     return next
   }, [
     filters.branch,
@@ -94,6 +100,7 @@ export default function PendingPage() {
     debouncedSearch,
     isAdmin,
     module,
+    page,
   ])
 
   const loadRows = async () => {
@@ -101,9 +108,11 @@ export default function PendingPage() {
     try {
       const { data } = await api.get(config.endpoint, { params })
       setRows(data.results || [])
+      setTotalCount(data.count ?? (data.results || []).length)
       setMessage('')
     } catch (error) {
       setRows([])
+      setTotalCount(0)
       setMessage(apiErrorMessage(error, 'Failed to load pending items.'))
     } finally {
       setLoading(false)
@@ -113,6 +122,10 @@ export default function PendingPage() {
   useEffect(() => {
     loadRows()
   }, [config.endpoint, params])
+
+  useEffect(() => {
+    setPage(1)
+  }, [config.endpoint, filters.branch, filters.user, filters.duration, filters.date_from, filters.date_to, filters.status, filters.importantOnly, debouncedSearch, isAdmin, module])
 
   useEffect(() => {
     Promise.all([
@@ -220,13 +233,14 @@ export default function PendingPage() {
       <section className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
         {(navigationMessage || message) && <div className="border-b border-slate-200 bg-slate-50 px-6 py-4 text-sm font-semibold text-slate-700">{navigationMessage || message}</div>}
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-5">
-          <h2 className="text-xl font-black tracking-tight text-slate-950">{rows.length} pending items</h2>
+          <h2 className="text-xl font-black tracking-tight text-slate-950">{totalCount} pending items</h2>
         </div>
         {loading ? (
           <div className="p-6 text-slate-500">Loading pending items...</div>
         ) : (
           <div className="p-4">
             <CRMTable rows={rows} columns={module === 'payments' ? paymentColumns : leadWalkinColumns} emptyMessage="No pending items found." />
+            <PaginationControls page={page} count={totalCount} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         )}
       </section>

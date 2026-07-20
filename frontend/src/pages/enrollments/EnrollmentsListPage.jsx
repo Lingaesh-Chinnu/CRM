@@ -5,6 +5,7 @@ import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import { OwnerDot } from '../../components/common/CandidateIdentity'
 import useDebouncedValue from '../../hooks/useDebouncedValue'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
@@ -158,6 +159,7 @@ const enrollmentSourceOptions = [
   { value: 'lead_conversion', label: 'Lead Conversion' },
   { value: 'others', label: 'Other' },
 ]
+const PAGE_SIZE = 100
 
 export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   const isYetToEnroll = queue === 'yet_to_enroll'
@@ -179,6 +181,8 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [savingNotes, setSavingNotes] = useState({})
   const location = useLocation()
   const returnTo = currentReturnTo(location)
@@ -199,6 +203,10 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
 
   useEffect(() => {
     loadEnrollments()
+  }, [filters.branch, filters.course, filters.counselor, filters.status, filters.source, filters.date_from, filters.date_to, debouncedSearch, isSuperAdmin, queue, page])
+
+  useEffect(() => {
+    setPage(1)
   }, [filters.branch, filters.course, filters.counselor, filters.status, filters.source, filters.date_from, filters.date_to, debouncedSearch, isSuperAdmin, queue])
 
   const loadFilterOptions = async () => {
@@ -248,17 +256,20 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
       if (debouncedSearch) {
         baseParams.search = debouncedSearch
       }
+      const rowParams = { ...baseParams, page, page_size: PAGE_SIZE }
       const [rowsRes, currentMetricsRes, previousMetricsRes] = await Promise.all([
-        api.get('/enrollments/', { params: baseParams }),
+        api.get('/enrollments/', { params: rowParams }),
         isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: thisMonthRange.from, enrolled_to: thisMonthRange.to } }),
         isYetToEnroll ? Promise.resolve({ data: [] }) : api.get('/enrollments/', { params: { ...baseParams, enrolled_from: lastMonthRange.from, enrolled_to: lastMonthRange.to } }),
       ])
       setRows(normaliseListResponse(rowsRes.data))
+      setTotalCount(rowsRes.data.count ?? normaliseListResponse(rowsRes.data).length)
       setMetricRows(normaliseListResponse(currentMetricsRes.data))
       setPreviousMetricRows(normaliseListResponse(previousMetricsRes.data))
       setMessage('')
     } catch (error) {
       setRows([])
+      setTotalCount(0)
       setMetricRows([])
       setPreviousMetricRows([])
       setMessage(apiErrorMessage(error, 'Failed to load enrollments.'))
@@ -524,6 +535,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
                 ] : []),
               ]}
             />
+            <PaginationControls page={page} count={totalCount} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         )}
       </section>

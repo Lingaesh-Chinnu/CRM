@@ -6,6 +6,7 @@ import { apiErrorMessage } from '../../utils/apiErrors'
 import StatusFilterChips from '../../components/common/StatusFilterChips'
 import ModalCloseButton from '../../components/common/ModalCloseButton'
 import CRMTable, { StatusBadge } from '../../components/common/CRMTable'
+import PaginationControls from '../../components/common/PaginationControls'
 import QuickFollowUpEdit from '../../components/common/QuickFollowUpEdit'
 import { CandidateInfo, ImportantFilter, TeamColorLegend } from '../../components/common/CandidateIdentity'
 import { currentReturnTo, withReturnTo } from '../../utils/returnNavigation'
@@ -147,6 +148,7 @@ function lifecycleStatusLabel(lead) {
 }
 
 const adminBranchNames = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
+const PAGE_SIZE = 100
 
 function statusCount(rows, status) {
   const statuses = Array.isArray(status) ? status : [status]
@@ -173,6 +175,8 @@ export default function LeadsListPage() {
   const [appliedSearch, setAppliedSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
+  const [page, setPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -288,6 +292,7 @@ export default function LeadsListPage() {
     filters.createdTo,
     filters.importantOnly,
     appliedSearch,
+    page,
   ])
 
   useEffect(() => {
@@ -342,6 +347,8 @@ export default function LeadsListPage() {
       if (filters.createdFrom) params.date_from = filters.createdFrom
       if (filters.createdTo) params.date_to = filters.createdTo
       if (filters.importantOnly) params.important_only = true
+      params.page = page
+      params.page_size = PAGE_SIZE
       const today = new Date()
       if (!isSuperAdmin && filters.followUp === 'today') {
         params.next_follow_up_date_from = isoDate(today)
@@ -358,9 +365,11 @@ export default function LeadsListPage() {
       }
       const { data } = await api.get('/leads/', { params })
       setLeads(data.results || data)
+      setTotalCount(data.count ?? (data.results || data || []).length)
       setLoadMessage('')
     } catch (error) {
       setLeads([])
+      setTotalCount(0)
       setLoadMessage(apiErrorMessage(error, 'Failed to load leads.'))
     } finally {
       setLoading(false)
@@ -404,6 +413,7 @@ export default function LeadsListPage() {
   }
 
   const updateFilter = (field, value) => {
+    setPage(1)
     if (field === 'leadPeriod') {
       setFilters((current) => ({
         ...current,
@@ -417,10 +427,12 @@ export default function LeadsListPage() {
 
   const submitSearch = (event) => {
     event.preventDefault()
+    setPage(1)
     setAppliedSearch(filters.search.trim())
   }
 
   const clearFilters = () => {
+    setPage(1)
     setFilters({
       search: '',
       status: '',
@@ -844,6 +856,7 @@ export default function LeadsListPage() {
                 },
               ]}
             />
+            <PaginationControls page={page} count={totalCount} pageSize={PAGE_SIZE} onPageChange={setPage} />
           </div>
         )}
       </section>

@@ -2966,26 +2966,116 @@ class PublicWalkInFormTests(APITestCase):
         schedule = {item['label']: item for item in installment.document_snapshot['payment_schedule']}
         self.assertEqual(Decimal(schedule['Enrollment']['amount']), Decimal('5000.00'))
         self.assertEqual(Decimal(schedule['Enrollment']['original_amount']), Decimal('5000.00'))
+        self.assertEqual(Decimal(schedule['Enrollment']['paid_amount']), Decimal('5000.00'))
         self.assertEqual(Decimal(schedule['Enrollment']['pending_amount']), Decimal('0.00'))
         self.assertEqual(schedule['Enrollment']['status'], 'Paid')
-        self.assertEqual(Decimal(schedule['1st Installment']['amount']), Decimal('2950.00'))
+        self.assertEqual(Decimal(schedule['1st Installment']['amount']), Decimal('10900.00'))
         self.assertEqual(Decimal(schedule['1st Installment']['original_amount']), Decimal('10900.00'))
+        self.assertEqual(Decimal(schedule['1st Installment']['paid_amount']), Decimal('2950.00'))
         self.assertEqual(Decimal(schedule['1st Installment']['pending_amount']), Decimal('7950.00'))
         self.assertEqual(schedule['1st Installment']['status'], 'Partial')
+        self.assertIn('<th class="amount">Installment Amount</th>', installment.document_html)
+        self.assertIn('<th class="amount">Amount Paid</th>', installment.document_html)
+        self.assertIn('<th class="amount">Pending</th>', installment.document_html)
         self.assertIn('Rs 2,950.00', installment.document_html)
-        self.assertNotIn('<td class="amount">Rs 10,900.00</td>', installment.document_html)
+        self.assertIn('<td class="amount">Rs 10,900.00</td>', installment.document_html)
+
+    def test_opening_existing_bill_recalculates_display_without_saving_snapshot(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Existing Bill Runtime Student',
+            phone='9000000140',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-05-12'},
+            ],
+        )
+        installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment',
+            payment_date='2026-05-11',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+
+        self.assertEqual(response.status_code, 200)
+        installment.refresh_from_db()
+        stale_snapshot = {
+            **installment.document_snapshot,
+            'calculation_version': 'bill_amount_v2',
+            'payment_schedule': [
+                {
+                    'label': 'Enrollment',
+                    'due_date': '2026-05-11',
+                    'amount': '5000.00',
+                    'original_amount': '5000.00',
+                    'paid_amount': '5000.00',
+                    'pending_amount': '0.00',
+                    'status': 'Paid',
+                },
+                {
+                    'label': '1st Installment',
+                    'due_date': '2026-05-12',
+                    'amount': '0.00',
+                    'original_amount': '10900.00',
+                    'paid_amount': '0.00',
+                    'pending_amount': '10900.00',
+                    'status': 'Pending',
+                },
+            ],
+        }
+        installment.document_snapshot = stale_snapshot
+        installment.document_html = 'STALE BILL HTML'
+        installment.save(update_fields=['document_snapshot', 'document_html'])
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=2950,
+            installment_index=2,
+            installment_label='1st Installment',
+            payment_date='2026-05-12',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+
+        response = self.client.get(f'/api/installments/{installment.id}/view-bill/')
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode('utf-8')
+        self.assertIn('<td class="amount">Rs 10,900.00</td>', html)
+        self.assertIn('<td class="amount">Rs 2,950.00</td>', html)
+        self.assertIn('<td class="amount">Rs 7,950.00</td>', html)
+        self.assertNotIn('STALE BILL HTML', html)
+        installment.refresh_from_db()
+        self.assertEqual(installment.document_snapshot, stale_snapshot)
+        self.assertEqual(installment.document_html, 'STALE BILL HTML')
 
     def test_generated_bill_schedule_matches_saved_payment_schedule_variants(self):
         self.client.force_authenticate(self.admin)
 
         variants = [
             (
-                'Single Payment Bill Student',
+                'Split Payment Bill Student',
                 '9000000136',
-                6500,
+                7500,
                 [
                     {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
-                    {'label': '1st Installment', 'amount': 1500, 'due_date': '2026-05-20'},
+                    {'label': '1st Installment', 'amount': 2500, 'due_date': '2026-05-20'},
                 ],
             ),
             (
@@ -3051,6 +3141,10 @@ class PublicWalkInFormTests(APITestCase):
             )
             self.assertEqual(
                 [Decimal(item['amount']) for item in installment.document_snapshot['payment_schedule']],
+                [Decimal(str(item['amount'])) for item in schedule],
+            )
+            self.assertEqual(
+                [Decimal(item['paid_amount']) for item in installment.document_snapshot['payment_schedule']],
                 [Decimal(str(first_item['amount']))] + [Decimal('0.00') for _ in schedule[1:]],
             )
             self.assertIn('TOTAL PAYMENT PAID', installment.document_html)
