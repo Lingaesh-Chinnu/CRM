@@ -11228,7 +11228,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 {
                     'label': item.get('label') or f"{item.get('index') or ''} Installment".strip(),
                     'due_date': self._snapshot_schedule_date(item.get('due_date')),
-                    'amount': self._snapshot_decimal(item.get('required_amount') or 0),
+                    'amount': self._snapshot_decimal(item.get('paid_amount') or 0),
+                    'original_amount': self._snapshot_decimal(item.get('required_amount') or 0),
                     'paid_amount': self._snapshot_decimal(item.get('paid_amount') or 0),
                     'pending_amount': self._snapshot_decimal(item.get('pending_amount') or 0),
                     'status': str(item.get('status') or 'pending').replace('_', ' ').title(),

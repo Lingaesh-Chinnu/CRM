@@ -2118,7 +2118,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(statuses['1st Installment'], 'paid')
         self.assertEqual(statuses['2nd Installment'], 'pending')
 
-    def test_deleted_middle_payment_does_not_reassign_later_payment_to_earlier_installment(self):
+    def test_deleted_middle_payment_rebuilds_schedule_sequentially(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
             course=self.final_course,
@@ -2163,15 +2163,62 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(payment.paid_amount, Decimal('10000.00'))
         self.assertEqual(payment.balance, Decimal('5000.00'))
         self.assertEqual(payment.status, Payment.Status.PARTIAL)
-        self.assertEqual(str(payment.next_payment_date), '2026-02-10')
+        self.assertEqual(str(payment.next_payment_date), '2026-03-10')
 
         self.client.force_authenticate(self.staff)
         response = self.client.get(f'/api/payments/{payment.id}/')
 
         statuses = {item['label']: item['status'] for item in response.data['installment_summary']}
         self.assertEqual(statuses['Enrollment Fee'], 'paid')
-        self.assertEqual(statuses['1st Installment'], 'pending')
-        self.assertEqual(statuses['2nd Installment'], 'paid')
+        self.assertEqual(statuses['1st Installment'], 'paid')
+        self.assertEqual(statuses['2nd Installment'], 'pending')
+
+    def test_payment_schedule_allocates_partial_spanning_payment_sequentially(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.final_course,
+            name='Partial Spanning Student',
+            phone='9000000137',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-02-01',
+            start_date='2026-02-10',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+            student_number='STU202602-0031',
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-02-01'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-02-10'},
+            ],
+        )
+        PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=7950,
+            installment_index=2,
+            installment_label='Enrollment + 1st Installment',
+            reference_number='STU202602-0031-P01',
+            payment_mode=PaymentInstallment.Mode.CASH,
+            payment_date='2026-02-01',
+        )
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.get(f'/api/payments/{payment.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        summary = {item['label']: item for item in response.data['installment_summary']}
+        self.assertEqual(Decimal(str(summary['Enrollment']['required_amount'])), Decimal('5000.00'))
+        self.assertEqual(Decimal(str(summary['Enrollment']['paid_amount'])), Decimal('5000.00'))
+        self.assertEqual(Decimal(str(summary['Enrollment']['pending_amount'])), Decimal('0.00'))
+        self.assertEqual(summary['Enrollment']['status'], 'paid')
+        self.assertEqual(Decimal(str(summary['1st Installment']['required_amount'])), Decimal('10900.00'))
+        self.assertEqual(Decimal(str(summary['1st Installment']['paid_amount'])), Decimal('2950.00'))
+        self.assertEqual(Decimal(str(summary['1st Installment']['pending_amount'])), Decimal('7950.00'))
+        self.assertEqual(summary['1st Installment']['status'], 'partial')
 
     def test_payment_schedule_allows_added_installment_before_rules_send(self):
         enrollment = Enrollment.objects.create(
@@ -2880,6 +2927,54 @@ class PublicWalkInFormTests(APITestCase):
         pdf_bytes = PaymentInstallmentViewSet()._build_document_pdf(installments[1])
         self.assertTrue(pdf_bytes.startswith(b'%PDF'))
 
+    def test_generated_receipt_schedule_displays_allocated_amount_for_partial_spanning_payment(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Partial Bill Schedule Student',
+            phone='9000000139',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-05-12'},
+            ],
+        )
+        installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=7950,
+            installment_index=2,
+            installment_label='Enrollment + 1st Installment',
+            payment_date='2026-05-11',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(f'/api/installments/{installment.id}/generate-receipt/')
+
+        self.assertEqual(response.status_code, 200)
+        installment.refresh_from_db()
+        schedule = {item['label']: item for item in installment.document_snapshot['payment_schedule']}
+        self.assertEqual(Decimal(schedule['Enrollment']['amount']), Decimal('5000.00'))
+        self.assertEqual(Decimal(schedule['Enrollment']['original_amount']), Decimal('5000.00'))
+        self.assertEqual(Decimal(schedule['Enrollment']['pending_amount']), Decimal('0.00'))
+        self.assertEqual(schedule['Enrollment']['status'], 'Paid')
+        self.assertEqual(Decimal(schedule['1st Installment']['amount']), Decimal('2950.00'))
+        self.assertEqual(Decimal(schedule['1st Installment']['original_amount']), Decimal('10900.00'))
+        self.assertEqual(Decimal(schedule['1st Installment']['pending_amount']), Decimal('7950.00'))
+        self.assertEqual(schedule['1st Installment']['status'], 'Partial')
+        self.assertIn('Rs 2,950.00', installment.document_html)
+        self.assertNotIn('<td class="amount">Rs 10,900.00</td>', installment.document_html)
+
     def test_generated_bill_schedule_matches_saved_payment_schedule_variants(self):
         self.client.force_authenticate(self.admin)
 
@@ -2951,8 +3046,12 @@ class PublicWalkInFormTests(APITestCase):
             self.assertEqual(response.status_code, 200)
             installment.refresh_from_db()
             self.assertEqual(
-                [(item['label'], Decimal(item['amount']), item['due_date']) for item in installment.document_snapshot['payment_schedule']],
+                [(item['label'], Decimal(item['original_amount']), item['due_date']) for item in installment.document_snapshot['payment_schedule']],
                 [(item['label'], Decimal(str(item['amount'])), item['due_date']) for item in schedule],
+            )
+            self.assertEqual(
+                [Decimal(item['amount']) for item in installment.document_snapshot['payment_schedule']],
+                [Decimal(str(first_item['amount']))] + [Decimal('0.00') for _ in schedule[1:]],
             )
             self.assertIn('TOTAL PAYMENT PAID', installment.document_html)
             self.assertNotIn('PAYMENT AMOUNT</div>', installment.document_html)

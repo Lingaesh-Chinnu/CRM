@@ -1618,20 +1618,16 @@ def build_payment_installment_summary_from_records(payment):
             'due_date': item.get('due_date').isoformat() if hasattr(item.get('due_date'), 'isoformat') else item.get('due_date'),
         })
 
-    # A surviving payment record must only satisfy its recorded installment and
-    # later rows. This prevents a later payment from keeping a deleted earlier
-    # installment marked as paid.
-    installments = payment.installments.order_by('payment_date', 'created_at', 'pk')
-    for installment in installments:
-        remaining_paid = Decimal(str(installment.amount or 0))
-        start_index = max(int(installment.installment_index or 1) - 1, 0)
-        for item in summary[start_index:]:
-            if remaining_paid <= 0:
-                break
-            pending_amount = max(item['required_amount'] - item['paid_amount'], Decimal('0'))
-            paid_amount = min(remaining_paid, pending_amount)
-            item['paid_amount'] += paid_amount
-            remaining_paid -= paid_amount
+    remaining_paid = sum(
+        (Decimal(str(installment.amount or 0)) for installment in payment.installments.all()),
+        Decimal('0'),
+    )
+    for item in summary:
+        if remaining_paid <= 0:
+            break
+        paid_amount = min(remaining_paid, item['required_amount'])
+        item['paid_amount'] = paid_amount
+        remaining_paid -= paid_amount
 
     for item in summary:
         required_amount = item['required_amount']
