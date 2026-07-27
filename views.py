@@ -12556,12 +12556,6 @@ class DashboardSummaryView(APIView):
         enroll_this_month = dashboard_monthly_enroll_qs.count()
         conversion_rate = bounded_ratio(enroll_this_month, walkins_this_month)
         current_month_walkin_qs = walkin_qs.filter(visit_date__year=year, visit_date__month=month)
-        walkin_followup_2day_count = active_walkin_follow_up_queryset(
-            walkin_qs,
-            'follow_up_date',
-            today,
-        ).filter(follow_up_date__lte=today + timedelta(days=2)).count()
-
         def choice_breakdown(queryset, field_name, choices):
             label_by_value = dict(choices)
             return [
@@ -12617,7 +12611,6 @@ class DashboardSummaryView(APIView):
             'value_target':       target_totals['value_target'] if target_count else None,
             'revenue_target':     target_totals['value_target'] if target_count else None,
             'today_birthdays':    birthday_rows,
-            'walkins_followup_2_days': walkin_followup_2day_count,
             'selected_branch_id':  selected_branch.id if selected_branch else None,
             'selected_branch_name': selected_branch.name if selected_branch else 'All Branches',
             'performance_scope': 'branch' if user.is_super_admin else 'user',

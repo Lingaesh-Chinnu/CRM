@@ -469,6 +469,8 @@ export default function WalkInsListPage() {
   }
 
   const updateWalkInFollowUp = (walkinId, followUp) => {
+    const todayFollowUpFilter = focus === 'today-follow-up' && followUpDateFrom === todayIsoFrom() && followUpDateTo === todayIsoFrom()
+    const closedStatuses = new Set(['converted', 'not_interested', 'closed', 'joined'])
     const updateRows = (rows) => rows.map((walkin) => (
       walkin.id === walkinId
         ? {
@@ -481,9 +483,26 @@ export default function WalkInsListPage() {
             follow_up_date: followUp.next_follow_up_date,
           }
         : walkin
+    )).filter((walkin) => (
+      !todayFollowUpFilter
+      || walkin.id !== walkinId
+      || (walkin.follow_up_date === todayIsoFrom() && !closedStatuses.has(walkin.status))
     ))
-    setCurrentMonthWalkins(updateRows)
-    setOtherWalkins(updateRows)
+    if (todayFollowUpFilter) {
+      setCurrentMonthWalkins((rows) => {
+        const nextRows = updateRows(rows)
+        setCurrentMonthCount((count) => Math.max(0, count - (rows.length - nextRows.length)))
+        return nextRows
+      })
+      setOtherWalkins((rows) => {
+        const nextRows = updateRows(rows)
+        setOtherWalkinsCount((count) => Math.max(0, count - (rows.length - nextRows.length)))
+        return nextRows
+      })
+    } else {
+      setCurrentMonthWalkins(updateRows)
+      setOtherWalkins(updateRows)
+    }
   }
 
   const toggleWalkInImportant = async (walkin, nextValue) => {
@@ -689,12 +708,6 @@ export default function WalkInsListPage() {
           Showing only walk-ins with follow-up scheduled for today.
         </div>
       )}
-      {focus === 'walkin-follow-up-2-days' && (
-        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-6 py-4 text-sm font-medium text-slate-700">
-          Showing only walk-ins with follow-up scheduled within the next 2 days.
-        </div>
-      )}
-
       <WalkInSection
         title={hasDateRangeFilter ? 'Filtered Walk-ins' : 'Current Month Walk-ins'}
         walkins={currentMonthWalkins}

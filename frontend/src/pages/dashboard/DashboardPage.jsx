@@ -81,13 +81,9 @@ function highlightRows(stats, branchId) {
 
 function followUpRows(stats, branchId) {
   const today = todayIso()
-  const twoDays = addDaysIso(2)
   const pendingPaymentsUrl = branchId && branchId !== 'all'
     ? `/payments?status=due&branch=${branchId}`
     : '/payments?status=due'
-  const walkinFollowUp2DaysUrl = branchId && branchId !== 'all'
-    ? `/walkins?follow_up_date_from=${today}&follow_up_date_to=${twoDays}&focus=walkin-follow-up-2-days&branch=${branchId}`
-    : `/walkins?follow_up_date_from=${today}&follow_up_date_to=${twoDays}&focus=walkin-follow-up-2-days`
 
   return [
     {
@@ -103,12 +99,6 @@ function followUpRows(stats, branchId) {
       tone: 'text-emerald-600',
     },
     {
-      label: 'Walk-in Follow-up (2 Days)',
-      value: stats?.walkins_followup_2_days || 0,
-      to: walkinFollowUp2DaysUrl,
-      tone: 'text-emerald-600',
-    },
-    {
       label: 'Due & Overdue Payments',
       value: stats?.pending_payments || 0,
       to: pendingPaymentsUrl,
@@ -119,13 +109,6 @@ function followUpRows(stats, branchId) {
 
 function todayIso() {
   const now = new Date()
-  const offset = now.getTimezoneOffset()
-  return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10)
-}
-
-function addDaysIso(days) {
-  const now = new Date()
-  now.setDate(now.getDate() + days)
   const offset = now.getTimezoneOffset()
   return new Date(now.getTime() - offset * 60000).toISOString().slice(0, 10)
 }
