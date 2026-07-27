@@ -8421,6 +8421,9 @@ def save_rules_proof_file(field, storage_name, file_bytes):
     if default_storage.exists(target_name):
         default_storage.delete(target_name)
     field.save(storage_name, ContentFile(file_bytes), save=False)
+    saved_name = getattr(field, 'name', '') or target_name
+    if not saved_name or not default_storage.exists(saved_name):
+        raise RuntimeError(f'Rules proof file was not stored successfully: {saved_name or target_name}')
 
 
 def file_response_from_field(field, content_type, filename=None):
@@ -8441,6 +8444,13 @@ def signing_image_content_type(signing, field_name):
 
 def latest_signed_rules_pdf(signing):
     return binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
+
+
+def latest_submitted_rules_signing(enrollment):
+    return RulesSigningRequest.objects.filter(
+        enrollment=enrollment,
+        status=RulesSigningRequest.Status.SUBMITTED,
+    ).order_by('-submitted_at', '-created_at', '-id').first()
 
 
 def archived_signed_rules_pdf_response(enrollment):
@@ -8469,23 +8479,16 @@ class RulesSignedPdfView(APIView):
             return proof_unavailable_response()
         if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
             return Response({'detail': 'You do not have permission to view this signed PDF.'}, status=403)
-        signing = RulesSigningRequest.objects.defer(
-            'selfie_image_file',
-            'signature_image',
-            'signature_image_file',
-            'signed_pdf_file',
-            'submitted_ip',
-            'submitted_user_agent',
-        ).filter(enrollment=enrollment).first()
+        signing = latest_submitted_rules_signing(enrollment)
         if signing:
-            stored_response = file_response_from_field(
-                signing.signed_pdf,
-                'application/pdf',
-                proof_filename(enrollment),
-            )
-            if stored_response:
-                resolve_rules_signed_notifications(enrollment.id)
-                return stored_response
+            signing = RulesSigningRequest.objects.defer(
+                'selfie_image_file',
+                'signature_image',
+                'signature_image_file',
+                'submitted_ip',
+                'submitted_user_agent',
+            ).get(pk=signing.pk)
+        if signing:
             pdf_bytes = latest_signed_rules_pdf(signing)
             if pdf_bytes:
                 resolve_rules_signed_notifications(enrollment.id)
@@ -8548,13 +8551,6 @@ class PublicRulesSignedPdfView(APIView):
         ).first()
         if not signing:
             return proof_unavailable_response()
-        stored_response = file_response_from_field(
-            signing.signed_pdf,
-            'application/pdf',
-            proof_filename(signing.enrollment),
-        )
-        if stored_response:
-            return stored_response
         pdf_bytes = latest_signed_rules_pdf(signing)
         if not pdf_bytes:
             return proof_unavailable_response()

@@ -90,7 +90,7 @@ For production media, use one of these:
 
 ```text
 1. S3-compatible object storage via django-storages
-2. A paid Render persistent disk mounted under the app and configured as MEDIA_ROOT
+2. A paid Render persistent disk mounted under the app and configured with MEDIA_ROOT=/path/to/mounted/media
 ```
 
 Without persistent media storage, rules signatures and generated PDFs can disappear after deploys/restarts.

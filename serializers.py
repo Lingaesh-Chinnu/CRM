@@ -1910,7 +1910,29 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         return self._rules_signing_data(obj).get('status') or 'pending'
 
     def get_rules_signed_pdf_url(self, obj):
-        return self._proof_url(obj, 'has_signed_pdf_file', 'signed_pdf', 'rules-signed-pdf')
+        try:
+            data = RulesSigningRequest.objects.filter(
+                enrollment=obj,
+                status=RulesSigningRequest.Status.SUBMITTED,
+            ).annotate(
+                has_signed_pdf_file=Case(
+                    When(signed_pdf_file__isnull=False, then=Value(True)),
+                    default=Value(False),
+                    output_field=BooleanField(),
+                ),
+            ).values(
+                'signed_pdf',
+                'has_signed_pdf_file',
+            ).order_by('-submitted_at', '-created_at', '-id').first()
+        except (OperationalError, ProgrammingError):
+            data = None
+        if not data or (not data.get('has_signed_pdf_file') and not data.get('signed_pdf')):
+            if not self._has_archived_signed_pdf(obj):
+                return None
+        base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
+        url = f'{base_path}/rules-signed-pdf/{obj.id}/'
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
     def get_rules_selfie_url(self, obj):
         return self._proof_url(obj, 'has_selfie_image_file', 'selfie_image', 'rules-selfie')

@@ -8,6 +8,7 @@ from decimal import Decimal
 from datetime import timedelta
 import base64
 import io
+import tempfile
 
 from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
@@ -2453,6 +2454,92 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.content, b'%PDF-stored')
         build_pdf.assert_not_called()
 
+    def test_staff_signed_rules_pdf_view_uses_legacy_signed_pdf_path(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Legacy Signed PDF Student',
+            phone='9000000141',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signed_pdf='signed_rules/rules_proofs/168/IIE-Rules-Regulations-168-signed.pdf',
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        detail_response = self.client.get(f'/api/enrollments/{enrollment.id}/')
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertIn(f'/rules-signed-pdf/{enrollment.id}/', detail_response.data['rules_signed_pdf_url'])
+
+        with mock.patch(
+            'views.open_existing_storage_file',
+            return_value=(io.BytesIO(b'%PDF-legacy'), signing.signed_pdf.name),
+        ):
+            response = self.client.get(f'/rules-signed-pdf/{enrollment.id}/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b'%PDF-legacy')
+
+    def test_rules_signing_does_not_save_database_path_when_storage_verification_fails(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Storage Verification Student',
+            phone='9000000142',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        import views as crm_views
+
+        original_exists = crm_views.default_storage.exists
+
+        def verified_pdf_missing(name):
+            exists = original_exists(name)
+            if str(name).endswith('-signed.pdf') and exists:
+                return False
+            return exists
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                with mock.patch('views.default_storage.exists', side_effect=verified_pdf_missing):
+                    response = self.client.post(
+                        f'/api/public/rules-sign/{signing.token}/',
+                        {'selfie': image_data, 'signature': image_data},
+                        format='json',
+                    )
+
+        self.assertEqual(response.status_code, 503)
+        signing.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SENT)
+        self.assertFalse(signing.signed_pdf)
+        self.assertFalse(signing.selfie_image)
+        self.assertFalse(signing.signature_image)
+        self.assertEqual(enrollment.status, Enrollment.Status.RULES_SENT)
+
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -2501,7 +2588,8 @@ class PublicWalkInFormTests(APITestCase):
             pdf_response = self.client.get(f'/public/rules-signed-pdf/{signing.token}/')
 
         self.assertEqual(pdf_response.status_code, 200)
-        self.assertTrue(b''.join(pdf_response.streaming_content).startswith(b'%PDF'))
+        pdf_content = getattr(pdf_response, 'content', None) or b''.join(pdf_response.streaming_content)
+        self.assertTrue(pdf_content.startswith(b'%PDF'))
         build_pdf.assert_not_called()
 
         self.client.force_authenticate(user=self.staff)

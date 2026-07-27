@@ -291,7 +291,7 @@ STATIC_ROOT  = BASE_DIR / 'staticfiles'
 STATICFILES_DIRS = [FRONTEND_DIST_DIR] if FRONTEND_DIST_DIR.exists() else []
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 MEDIA_URL    = os.environ.get('MEDIA_URL', prefixed_url('media'))
-MEDIA_ROOT   = BASE_DIR / 'media'
+MEDIA_ROOT   = Path(os.environ.get('MEDIA_ROOT', BASE_DIR / 'media'))
 
 # ── AWS S3 (production media storage) ─────────────────────────
 USE_S3_STORAGE = env_bool('USE_S3_STORAGE', False)
