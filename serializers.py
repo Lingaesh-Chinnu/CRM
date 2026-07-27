@@ -12,7 +12,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.core.files.storage import default_storage
-from django.db.models import BooleanField, Case, Value, When
+from django.db.models import BooleanField, Case, Q, Value, When
 from django.db.utils import OperationalError, ProgrammingError
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog, TeamNotice, TeamNoticeReply
 
@@ -1827,12 +1827,26 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
             data.get('status') != RulesSigningRequest.Status.SUBMITTED
             and not data.get(field_name)
             and not data.get(legacy_field_name)
+            and not (
+                path_name == 'rules-signed-pdf'
+                and self._has_archived_signed_pdf(obj)
+            )
         ):
             return None
         base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
         url = f'{base_path}/{path_name}/{obj.id}/'
         request = self.context.get('request')
         return request.build_absolute_uri(url) if request else url
+
+    def _has_archived_signed_pdf(self, obj):
+        try:
+            return obj.rules_reset_history.filter(
+                Q(previous_signed=True)
+                | Q(previous_signed_pdf__gt='')
+                | Q(previous_signed_pdf_file__isnull=False)
+            ).exists()
+        except (OperationalError, ProgrammingError):
+            return False
 
     def get_payment_info(self, obj):
         if hasattr(obj, 'payment'):

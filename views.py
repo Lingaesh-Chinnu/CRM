@@ -8443,10 +8443,32 @@ def latest_signed_rules_pdf(signing):
     return binary_or_legacy_file(signing, 'signed_pdf_file', 'signed_pdf')
 
 
+def archived_signed_rules_pdf_response(enrollment):
+    for reset_row in enrollment.rules_reset_history.all():
+        stored_response = file_response_from_field(
+            reset_row.previous_signed_pdf,
+            'application/pdf',
+            proof_filename(enrollment),
+        )
+        if stored_response:
+            return stored_response
+        pdf_bytes = binary_or_legacy_file(reset_row, 'previous_signed_pdf_file', 'previous_signed_pdf')
+        if pdf_bytes:
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
+            return response
+    return None
+
+
 class RulesSignedPdfView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
     def get(self, request, enrollment_id):
+        enrollment = Enrollment.objects.filter(pk=enrollment_id).first()
+        if not enrollment:
+            return proof_unavailable_response()
+        if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
+            return Response({'detail': 'You do not have permission to view this signed PDF.'}, status=403)
         signing = RulesSigningRequest.objects.defer(
             'selfie_image_file',
             'signature_image',
@@ -8454,27 +8476,28 @@ class RulesSignedPdfView(APIView):
             'signed_pdf_file',
             'submitted_ip',
             'submitted_user_agent',
-        ).select_related('enrollment').filter(enrollment_id=enrollment_id).first()
-        if not signing:
-            return proof_unavailable_response()
-        enrollment = signing.enrollment
-        if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
-            return Response({'detail': 'You do not have permission to view this signed PDF.'}, status=403)
-        stored_response = file_response_from_field(
-            signing.signed_pdf,
-            'application/pdf',
-            proof_filename(enrollment),
-        )
-        if stored_response:
+        ).filter(enrollment=enrollment).first()
+        if signing:
+            stored_response = file_response_from_field(
+                signing.signed_pdf,
+                'application/pdf',
+                proof_filename(enrollment),
+            )
+            if stored_response:
+                resolve_rules_signed_notifications(enrollment.id)
+                return stored_response
+            pdf_bytes = latest_signed_rules_pdf(signing)
+            if pdf_bytes:
+                resolve_rules_signed_notifications(enrollment.id)
+                response = HttpResponse(pdf_bytes, content_type='application/pdf')
+                response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
+                return response
+        archived_response = archived_signed_rules_pdf_response(enrollment)
+        if archived_response:
             resolve_rules_signed_notifications(enrollment.id)
-            return stored_response
-        pdf_bytes = latest_signed_rules_pdf(signing)
-        if not pdf_bytes:
-            return proof_unavailable_response()
+            return archived_response
         resolve_rules_signed_notifications(enrollment.id)
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
-        return response
+        return proof_unavailable_response()
 
 
 class RulesSelfieView(APIView):
