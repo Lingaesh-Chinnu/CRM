@@ -702,6 +702,12 @@ export default function PaymentsListPage() {
                   ),
                 },
                 {
+                  key: 'phone',
+                  header: 'Phone Number',
+                  width: '120px',
+                  render: (row) => <span className="whitespace-nowrap font-semibold text-slate-700">{row.student_phone || '-'}</span>,
+                },
+                {
                   key: 'course',
                   header: 'Course',
                   width: 'minmax(190px,240px)',

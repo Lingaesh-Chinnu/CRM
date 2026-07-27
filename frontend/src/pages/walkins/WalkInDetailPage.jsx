@@ -57,10 +57,7 @@ function discountAmount(discount, courseFee) {
 }
 
 const SPOT_CONVERSION_DISCOUNT = 2000
-
-function sameDate(first, second) {
-  return Boolean(first && second && first === second)
-}
+const BUDDY_OFFER_DISCOUNT = 1500
 
 function walkInByLabel(walkin) {
   return walkin.assigned_name || walkin.walk_in_by_display || 'Unassigned'
@@ -291,6 +288,7 @@ export default function WalkInDetailPage() {
     actual_fees: '',
     discount: '',
     spot_conversion_discount_applied: false,
+    buddy_offer_applied: false,
     start_date: '',
     assigned_to: '',
     counseling_by: '',
@@ -303,6 +301,7 @@ export default function WalkInDetailPage() {
   })
   const [message, setMessage] = useState('')
   const [loadError, setLoadError] = useState('')
+  const [now, setNow] = useState(() => Date.now())
   const isSuperAdmin = user?.role === 'super_admin'
 
   const selectedCourse = courses.find((course) => String(course.id) === String(form.course))
@@ -311,10 +310,24 @@ export default function WalkInDetailPage() {
   const selectedDiscount = availableDiscounts.find((discount) => String(discount.id) === String(form.discount))
   const appliedDiscount = discountAmount(selectedDiscount, discountBaseFee)
   const finalFees = selectedDiscount ? Math.max(discountBaseFee - appliedDiscount, 0) : courseFee
-  const spotDiscountEnabled = sameDate(form.visit_date, form.enrollment_date)
+  const spotDiscountExpiry = walkin?.fees_reduction_expires_at ? new Date(walkin.fees_reduction_expires_at).getTime() : 0
+  const spotDiscountEnabled = Boolean(walkin?.fees_reduction_available && spotDiscountExpiry && now <= spotDiscountExpiry)
   const spotDiscountApplied = spotDiscountEnabled && form.spot_conversion_discount_applied
   const spotDiscountAmount = spotDiscountApplied ? SPOT_CONVERSION_DISCOUNT : 0
-  const netPayableFees = Math.max(finalFees - spotDiscountAmount, 0)
+  const buddyOfferApplied = form.buddy_offer_applied
+  const buddyOfferAmount = buddyOfferApplied ? BUDDY_OFFER_DISCOUNT : 0
+  const netPayableFees = Math.max(finalFees - spotDiscountAmount - buddyOfferAmount, 0)
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!spotDiscountEnabled && form.spot_conversion_discount_applied) {
+      setForm((current) => ({ ...current, spot_conversion_discount_applied: false }))
+    }
+  }, [spotDiscountEnabled, form.spot_conversion_discount_applied])
 
   useEffect(() => {
     setLoadError('')
@@ -470,6 +483,7 @@ export default function WalkInDetailPage() {
       actual_fees: selectedDiscount ? discountBaseFee : courseFee,
       discount: form.discount || null,
       spot_conversion_discount_applied: spotDiscountApplied,
+      buddy_offer_applied: buddyOfferApplied,
       start_date: form.start_date || null,
     }
     if (walkin.course && String(walkin.course) !== String(payload.course)) {
@@ -495,7 +509,7 @@ export default function WalkInDetailPage() {
   const updateDetail = (field, value) => {
     setForm((current) => {
       const next = { ...current, [field]: value }
-      if ((field === 'visit_date' || field === 'enrollment_date') && !sameDate(next.visit_date, next.enrollment_date)) {
+      if (!spotDiscountEnabled) {
         next.spot_conversion_discount_applied = false
       }
       return next
@@ -1158,7 +1172,8 @@ export default function WalkInDetailPage() {
                 <p className="font-semibold">Actual Fees: Rs {formatMoney(discountBaseFee || courseFee)}</p>
                 <p className="font-semibold">Course Discount: Rs {formatMoney(appliedDiscount)}</p>
                 <p className="font-black">Final Fees: Rs {formatMoney(finalFees)}</p>
-                <p className="font-semibold">Spot Conversion Discount: Rs {formatMoney(spotDiscountAmount)}</p>
+                <p className="font-semibold">Fees Reduction: Rs {formatMoney(spotDiscountAmount)}</p>
+                <p className="font-semibold">Buddy Offer: Rs {formatMoney(buddyOfferAmount)}</p>
                 <p className="text-xl font-black tracking-tight">Net Payable Fees: Rs {formatMoney(netPayableFees)}</p>
               </div>
               <p className="hidden">
@@ -1175,18 +1190,29 @@ export default function WalkInDetailPage() {
                   onChange={(event) => setForm((current) => ({ ...current, spot_conversion_discount_applied: event.target.checked }))}
                   className="mt-0.5 h-4 w-4 flex-none accent-slate-950 disabled:opacity-50"
                 />
-                <span>Apply Spot Conversion Discount</span>
+                <span>Fees Reduction</span>
               </label>
               {!spotDiscountEnabled && (
                 <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
-                  Spot conversion discount is available only when visit date and enrollment date are the same.
+                  Fees Reduction is available only for 24 hours from walk-in creation.
                 </p>
               )}
               {spotDiscountEnabled && (
                 <p className="mt-2 text-xs font-medium leading-5 text-emerald-700">
-                  Same-day walk-in enrollment is eligible for Rs {formatMoney(SPOT_CONVERSION_DISCOUNT)} off net payable fees.
+                  Available until {formatDateTime(walkin.fees_reduction_expires_at)} for Rs {formatMoney(SPOT_CONVERSION_DISCOUNT)} off net payable fees.
                 </p>
               )}
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={buddyOfferApplied}
+                  onChange={(event) => setForm((current) => ({ ...current, buddy_offer_applied: event.target.checked }))}
+                  className="mt-0.5 h-4 w-4 flex-none accent-slate-950"
+                />
+                <span>Buddy Offer</span>
+              </label>
             </div>
             <div>
               <FormField label="Course Start Date">

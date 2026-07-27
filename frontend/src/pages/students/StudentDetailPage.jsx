@@ -264,6 +264,9 @@ export default function StudentDetailPage() {
 
   const latestBill = latestGeneratedBill(row.payment_info)
   const nextPending = nextPendingInstallment(row.payment_info)
+  const originalCourseFee = Number(row.actual_fees || 0)
+  const finalNetPayableFee = Number(row.net_payable_fee || row.final_fees || 0)
+  const totalDiscountAmount = Math.max(originalCourseFee - finalNetPayableFee, 0)
 
   return (
     <div className="space-y-6">
@@ -443,6 +446,16 @@ export default function StudentDetailPage() {
             <DetailCard label="Rules Form" value={prettyValue(row.rules_signing_status, 'pending')} />
           </div>
         </article>
+      </section>
+      <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
+        <h2 className="text-xl font-black tracking-tight text-slate-950">Discount Details</h2>
+        <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          <DetailCard label="Original Course Fee" value={`Rs ${money(originalCourseFee)}`} />
+          <DetailCard label="Fees Reduction Applied" value={row.spot_conversion_discount_applied ? 'Yes' : 'No'} />
+          <DetailCard label="Buddy Offer Applied" value={row.buddy_offer_applied ? 'Yes' : 'No'} />
+          <DetailCard label="Discount Amount" value={`Rs ${money(totalDiscountAmount)}`} />
+          <DetailCard label="Final Net Payable Fee" value={`Rs ${money(finalNetPayableFee)}`} />
+        </div>
       </section>
       <CourseChangeHistorySection history={row.course_change_history || []} />
       {showCourseChange && (

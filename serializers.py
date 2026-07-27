@@ -1014,6 +1014,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
     latest_remark = serializers.SerializerMethodField()
     latest_follow_up_at = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    fees_reduction_available = serializers.SerializerMethodField()
+    fees_reduction_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -1026,7 +1028,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
                   'converted_record_id','converted_at','enrollment_id',
                   'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
                   'counselor_status','competitor_status','follow_up_priority','conversion_probability',
-                  'is_converted_to_enrollment','latest_remark','latest_follow_up_at','is_important','created_at']
+                  'is_converted_to_enrollment','latest_remark','latest_follow_up_at','is_important','created_at',
+                  'fees_reduction_available', 'fees_reduction_expires_at']
 
     def to_representation(self, instance):
         defaults = {
@@ -1142,6 +1145,14 @@ class WalkInListSerializer(serializers.ModelSerializer):
         value = getattr(obj, 'latest_follow_up_at', None)
         return value.isoformat() if hasattr(value, 'isoformat') else value
 
+    def get_fees_reduction_expires_at(self, obj):
+        value = obj.created_at + timedelta(hours=24) if obj.created_at else None
+        return value.isoformat() if hasattr(value, 'isoformat') else value
+
+    def get_fees_reduction_available(self, obj):
+        expires_at = obj.created_at + timedelta(hours=24) if obj.created_at else None
+        return bool(expires_at and timezone.now() <= expires_at)
+
 
 class WalkInDetailSerializer(serializers.ModelSerializer):
     course_name   = serializers.CharField(source='course.name',          read_only=True)
@@ -1165,6 +1176,8 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
     enrollment_id = serializers.SerializerMethodField()
     is_converted_to_enrollment = serializers.SerializerMethodField()
     status_display = serializers.SerializerMethodField()
+    fees_reduction_available = serializers.SerializerMethodField()
+    fees_reduction_expires_at = serializers.SerializerMethodField()
 
     class Meta:
         model  = WalkIn
@@ -1211,6 +1224,14 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
 
     def get_status_display(self, obj):
         return effective_walkin_status_display(obj)
+
+    def get_fees_reduction_expires_at(self, obj):
+        value = obj.created_at + timedelta(hours=24) if obj.created_at else None
+        return value.isoformat() if hasattr(value, 'isoformat') else value
+
+    def get_fees_reduction_available(self, obj):
+        expires_at = obj.created_at + timedelta(hours=24) if obj.created_at else None
+        return bool(expires_at and timezone.now() <= expires_at)
 
     def get_follow_ups(self, obj):
         follow_ups = FollowUp.objects.filter(
@@ -1731,7 +1752,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = [
             'student_number', 'final_fees', 'custom_payable_fee', 'net_payable_fee',
-            'spot_conversion_discount_amount', 'enrolled_by', 'created_by',
+            'spot_conversion_discount_amount', 'buddy_offer_amount', 'enrolled_by', 'created_by',
         ]
 
     def get_fields(self):
@@ -1748,18 +1769,15 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
             getattr(self.instance, 'spot_conversion_discount_applied', False),
         )
         if spot_applied:
-            walkin = attrs.get('walkin') or getattr(self.instance, 'walkin', None)
-            visit_date = getattr(walkin, 'visit_date', None)
-            enrollment_date = attrs.get('enrollment_date', getattr(self.instance, 'enrollment_date', None))
-            if attrs.get('walkin') is None and self.instance is None:
-                return attrs
-            if not walkin or not visit_date:
+            walkin = attrs.get('walkin') or getattr(self.instance, 'walkin', None) or self.context.get('walkin')
+            if not walkin:
                 raise serializers.ValidationError({
                     'spot_conversion_discount_applied': 'Spot conversion discount is available only for walk-in enrollments.'
                 })
-            if visit_date != enrollment_date:
+            expires_at = walkin.created_at + timedelta(hours=24) if walkin.created_at else None
+            if not expires_at or timezone.now() > expires_at:
                 raise serializers.ValidationError({
-                    'spot_conversion_discount_applied': 'Spot conversion discount is available only when visit date and enrollment date are the same.'
+                    'spot_conversion_discount_applied': 'Fees Reduction is available only for 24 hours from walk-in creation.'
                 })
         return attrs
 
@@ -1805,7 +1823,11 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
 
     def _proof_url(self, obj, field_name, legacy_field_name, path_name):
         data = self._rules_signing_data(obj)
-        if not data.get(field_name) and not data.get(legacy_field_name):
+        if (
+            data.get('status') != RulesSigningRequest.Status.SUBMITTED
+            and not data.get(field_name)
+            and not data.get(legacy_field_name)
+        ):
             return None
         base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
         url = f'{base_path}/{path_name}/{obj.id}/'
@@ -2107,7 +2129,7 @@ class PaymentReasonMessageSerializer(serializers.ModelSerializer):
 class PaymentReasonRequestSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='payment.enrollment.name', read_only=True)
     course_name = serializers.CharField(source='payment.enrollment.course.name', read_only=True)
-    branch_name = serializers.CharField(source='payment.enrollment.branch.name', read_only=True)
+    branch_name = serializers.SerializerMethodField()
     admin_name = serializers.CharField(source='admin_user.full_name', read_only=True)
     branch_staff_name = serializers.CharField(source='branch_staff.full_name', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -2139,6 +2161,10 @@ class PaymentReasonRequestSerializer(serializers.ModelSerializer):
             return ''
         return timezone.localtime(obj.responded_at).strftime('%d %b %Y, %I:%M %p')
 
+    def get_branch_name(self, obj):
+        branch = obj.payment.effective_branch if obj.payment_id and obj.payment else None
+        return branch.name if branch else ''
+
     def get_created_display(self, obj):
         return timezone.localtime(obj.created_at).strftime('%d %b %Y, %I:%M %p')
 
@@ -2158,8 +2184,11 @@ class PaymentSerializer(serializers.ModelSerializer):
     student_phone = serializers.CharField(source='enrollment.phone', read_only=True)
     course_name = serializers.CharField(source='enrollment.course.name', read_only=True)
     first_class_date = serializers.DateField(source='enrollment.start_date', read_only=True)
-    branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
+    branch = serializers.SerializerMethodField()
     branch_name = serializers.SerializerMethodField()
+    enrollment_branch = serializers.IntegerField(source='enrollment.branch_id', read_only=True)
+    enrollment_branch_name = serializers.CharField(source='enrollment.branch.name', read_only=True)
+    payment_branch = serializers.IntegerField(source='payment_branch_id', read_only=True)
     counselor_name = serializers.SerializerMethodField()
     counselor_user = serializers.SerializerMethodField()
     payment_schedule = serializers.SerializerMethodField()
@@ -2171,7 +2200,7 @@ class PaymentSerializer(serializers.ModelSerializer):
         model  = Payment
         fields = ['id','enrollment','student_name','student_number','student_phone',
                   'course_name','first_class_date','branch','branch_name','counselor_name',
-                  'counselor_user',
+                  'counselor_user','enrollment_branch','enrollment_branch_name','payment_branch',
                   'total_fees','paid_amount','balance','status',
                   'next_payment_date','payment_schedule','installment_summary','manual_installment_schedule',
                   'installments','active_reason_requests','latest_reason_request','updated_at']
@@ -2179,11 +2208,17 @@ class PaymentSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         view = self.context.get('view')
-        instance.recalculate_from_installments(save=getattr(view, 'action', '') != 'list')
+        if getattr(view, 'action', '') != 'list':
+            instance.recalculate_from_installments(save=True)
         return super().to_representation(instance)
 
     def get_branch_name(self, obj):
-        return obj.enrollment.branch.name if obj.enrollment.branch else None
+        branch = obj.effective_branch
+        return branch.name if branch else None
+
+    def get_branch(self, obj):
+        branch = obj.effective_branch
+        return branch.id if branch else None
 
     def get_counselor_name(self, obj):
         user = enrollment_counselor(obj.enrollment)

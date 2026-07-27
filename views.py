@@ -698,16 +698,26 @@ def normalized_date(value):
     return value
 
 
-def apply_spot_conversion_discount(data, visit_date):
+def spot_discount_deadline(walkin):
+    created_at = getattr(walkin, 'created_at', None)
+    return created_at + timedelta(hours=24) if created_at else None
+
+
+def spot_discount_is_available(walkin, now=None):
+    deadline = spot_discount_deadline(walkin)
+    if not deadline:
+        return False
+    return (now or timezone.now()) <= deadline
+
+
+def apply_spot_conversion_discount(data, walkin):
     is_applied = truthy_value(data.get('spot_conversion_discount_applied'))
     data['spot_conversion_discount_applied'] = is_applied
     if not is_applied:
         data['spot_conversion_discount_amount'] = 0
         return
-    visit = normalized_date(visit_date)
-    enrollment = normalized_date(data.get('enrollment_date'))
-    if not visit or not enrollment or visit != enrollment:
-        raise ValueError('Spot conversion discount is available only when visit date and enrollment date are the same.')
+    if not spot_discount_is_available(walkin):
+        raise ValueError('Fees Reduction is available only for 24 hours from walk-in creation.')
     data['spot_conversion_discount_amount'] = 2000
 
 
@@ -4568,7 +4578,10 @@ class LeadViewSet(viewsets.ModelViewSet):
         data['actual_fees'] = data.get('actual_fees') or course.actual_fees
         try:
             apply_enrollment_discount(data, course, data.get('branch'))
-            apply_spot_conversion_discount(data, lead.walkin_date)
+            if truthy_value(data.get('spot_conversion_discount_applied')):
+                raise ValueError('Fees Reduction is available only for walk-in enrollments.')
+            data['spot_conversion_discount_applied'] = False
+            data['spot_conversion_discount_amount'] = 0
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -4609,6 +4622,7 @@ class LeadViewSet(viewsets.ModelViewSet):
                 discount_reason=data.get('discount_reason') or '',
                 discount_id=data.get('discount') or None,
                 spot_conversion_discount_applied=data.get('spot_conversion_discount_applied', False),
+                buddy_offer_applied=truthy_value(data.get('buddy_offer_applied')),
                 start_date=data.get('start_date') or None,
                 batch_timing=data.get('batch_timing') or '',
                 demo_class=data.get('demo_class', False),
@@ -7742,11 +7756,11 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data['actual_fees'] = data.get('actual_fees') or course.actual_fees
         try:
             apply_enrollment_discount(data, course, data.get('branch'))
-            apply_spot_conversion_discount(data, walkin.visit_date)
+            apply_spot_conversion_discount(data, walkin)
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-        serializer = EnrollmentDetailSerializer(data=data, context={'request': request})
+        serializer = EnrollmentDetailSerializer(data=data, context={'request': request, 'walkin': walkin})
         serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             enrollment = serializer.save(
@@ -7755,7 +7769,7 @@ class WalkInViewSet(viewsets.ModelViewSet):
                 final_enrollment_course=course,
                 enrolled_by=request.user,
                 created_by=request.user,
-                counselor=walkin.assigned_to or walkin.counseling_by or walkin.created_by or request.user,
+                counselor=walkin.counseling_by or walkin.assigned_to or walkin.created_by or request.user,
                 status=Enrollment.Status.PENDING_RULES,
             )
             enrollment.refresh_from_db()
@@ -9657,6 +9671,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             payment, created = Payment.objects.get_or_create(
                 enrollment=enrollment,
                 defaults={
+                    'payment_branch': enrollment.branch,
                     'total_fees': enrollment_payable_fee(enrollment),
                     'status': Payment.Status.UNPAID,
                     'manual_installment_schedule': serialize_enrollment_payment_schedule(enrollment),
@@ -9701,6 +9716,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             payment = Payment.objects.create(
                 enrollment=enrollment,
+                payment_branch=enrollment.branch,
                 total_fees=enrollment_payable_fee(enrollment),
                 status=Payment.Status.UNPAID,
                 manual_installment_schedule=serialize_enrollment_payment_schedule(enrollment),
@@ -10038,7 +10054,7 @@ from serializers import PaymentSerializer, PaymentInstallmentSerializer, payment
 
 class PaymentFilter(django_filters.FilterSet):
     status = django_filters.CharFilter(method='filter_status')
-    branch = django_filters.NumberFilter(field_name='enrollment__branch_id')
+    branch = django_filters.NumberFilter(method='filter_branch')
     user = django_filters.NumberFilter(method='filter_user')
     counselor = django_filters.NumberFilter(method='filter_user')
     important_only = django_filters.BooleanFilter(method='filter_important_only')
@@ -10055,6 +10071,12 @@ class PaymentFilter(django_filters.FilterSet):
             'status', 'branch', 'enrollment__branch', 'user', 'counselor', 'important_only',
             'duration', 'date_from', 'date_to', 'due_this_week', 'next_payment_from', 'next_payment_to',
         ]
+
+    def filter_branch(self, queryset, name, value):
+        return queryset.filter(
+            Q(payment_branch_id=value)
+            | Q(payment_branch__isnull=True, enrollment__branch_id=value)
+        )
 
     def filter_status(self, queryset, name, value):
         if value == 'weekly_pending':
@@ -10508,7 +10530,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = visible_payment_queryset(Payment.objects.select_related(
-            'enrollment__branch','enrollment__course','enrollment__counselor','enrollment__enrolled_by','enrollment__created_by'
+            'payment_branch','enrollment__branch','enrollment__course','enrollment__counselor','enrollment__enrolled_by','enrollment__created_by'
         ).prefetch_related(
             'installments',
             'reason_requests__admin_user',
@@ -10516,9 +10538,13 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             'reason_requests__messages__sender',
         ).filter(enrollment__status__in=Enrollment.FINAL_STATUSES))
         if not self.request.user.is_super_admin:
-            qs = qs.filter(enrollment__branch=self.request.user.branch)
+            qs = qs.filter(
+                Q(payment_branch=self.request.user.branch)
+                | Q(payment_branch__isnull=True, enrollment__branch=self.request.user.branch)
+            )
         elif self.request.query_params.get('branch'):
-            qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
+            branch_id = self.request.query_params.get('branch')
+            qs = qs.filter(Q(payment_branch_id=branch_id) | Q(payment_branch__isnull=True, enrollment__branch_id=branch_id))
         has_date_filter = any(self.request.query_params.get(key) for key in ('duration', 'date_from', 'date_to', 'next_payment_from', 'next_payment_to'))
         if (
             self.action in ('list', 'export')
@@ -10534,15 +10560,19 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         return qs
 
     def get_summary_queryset(self):
-        qs = visible_payment_queryset(Payment.objects.select_related('enrollment__branch').filter(
+        qs = visible_payment_queryset(Payment.objects.select_related('payment_branch', 'enrollment__branch').filter(
             enrollment__status__in=Enrollment.FINAL_STATUSES,
             status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL],
             paid_amount__lt=F('total_fees'),
         ))
         if not self.request.user.is_super_admin:
-            qs = qs.filter(enrollment__branch=self.request.user.branch)
+            qs = qs.filter(
+                Q(payment_branch=self.request.user.branch)
+                | Q(payment_branch__isnull=True, enrollment__branch=self.request.user.branch)
+            )
         elif self.request.query_params.get('branch'):
-            qs = qs.filter(enrollment__branch_id=self.request.query_params.get('branch'))
+            branch_id = self.request.query_params.get('branch')
+            qs = qs.filter(Q(payment_branch_id=branch_id) | Q(payment_branch__isnull=True, enrollment__branch_id=branch_id))
         return qs
 
     def pending_amount_for_month(self, queryset, month_start, month_end):
@@ -10674,6 +10704,25 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             str(request.data.get('reason') or 'Admin confirmed permanent delete.').strip(),
         )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='change-payment-branch')
+    def change_payment_branch(self, request, pk=None):
+        if not request.user.is_super_admin:
+            return Response({'detail': 'Only admin can change payment branch.'}, status=status.HTTP_403_FORBIDDEN)
+        payment = self.get_object()
+        branch_id = request.data.get('branch') or request.data.get('payment_branch')
+        branch = Branch.objects.filter(pk=branch_id, is_active=True).first()
+        if not branch:
+            return Response({'branch': 'Select a valid active branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        old_branch = payment.effective_branch
+        if old_branch and old_branch.id == branch.id:
+            return Response({'detail': 'Payment branch is already set to the selected branch.'}, status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            if old_branch:
+                PaymentInstallment.objects.filter(payment=payment, collection_branch__isnull=True).update(collection_branch=old_branch)
+            payment.payment_branch = branch
+            payment.save(update_fields=['payment_branch', 'status', 'next_payment_date', 'updated_at'])
+        return Response(PaymentSerializer(payment, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='export')
     def export(self, request):
@@ -10902,13 +10951,19 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = PaymentInstallment.objects.select_related(
             'payment',
+            'payment__payment_branch',
             'enrollment__branch',
             'enrollment__course',
+            'collection_branch',
             'collected_by',
             'bill_generated_by',
         )
         if not self.request.user.is_super_admin:
-            qs = qs.filter(enrollment__branch=self.request.user.branch)
+            qs = qs.filter(
+                Q(collection_branch=self.request.user.branch)
+                | Q(collection_branch__isnull=True, payment__payment_branch=self.request.user.branch)
+                | Q(collection_branch__isnull=True, payment__payment_branch__isnull=True, enrollment__branch=self.request.user.branch)
+            )
         return qs
 
     def create(self, request, *args, **kwargs):
@@ -10917,10 +10972,11 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if not payment_id:
             return Response({'detail': 'Payment record is required.'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            payment = Payment.objects.select_related('enrollment__branch').get(pk=payment_id)
+            payment = Payment.objects.select_related('payment_branch', 'enrollment__branch').get(pk=payment_id)
         except Payment.DoesNotExist:
             return Response({'detail': 'Payment record not found.'}, status=404)
-        if not request.user.is_super_admin and payment.enrollment.branch_id != request.user.branch_id:
+        payment_branch = payment.effective_branch
+        if not request.user.is_super_admin and (not payment_branch or payment_branch.id != request.user.branch_id):
             return Response({'detail': 'You do not have access to this payment.'}, status=403)
         if enrollment_id and str(payment.enrollment_id) != str(enrollment_id):
             return Response(
@@ -10948,6 +11004,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             'payment': payment,
             'enrollment': payment.enrollment,
             'collected_by': request.user,
+            'collection_branch': payment_branch,
             'installment_index': active['index'],
             'installment_label': self._allocation_label(allocation),
             'document_type': PaymentInstallment.DocumentType.RECEIPT,
@@ -11220,7 +11277,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     def _build_document_snapshot(self, installment):
         enrollment = installment.enrollment
         payment = installment.payment
-        branch_header = self._branch_header_payload(enrollment.branch)
+        document_branch = installment.collection_branch or payment.effective_branch
+        branch_header = self._branch_header_payload(document_branch)
         is_bill = bool(installment.bill_number) or installment.document_type == PaymentInstallment.DocumentType.BILL
         generated_at = installment.bill_generated_at or timezone.now()
         historical_installments = payment.installments.all()
@@ -11502,7 +11560,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         prefix = 'BILL' if document_type == PaymentInstallment.DocumentType.BILL else 'RCPT'
         number_prefix = f'{prefix}-{branch_code}-{year}-'
         field = 'bill_number__startswith' if document_type == PaymentInstallment.DocumentType.BILL else 'receipt_number__startswith'
-        generated_count = PaymentInstallment.objects.filter(enrollment__branch=branch, **{field: number_prefix}).count()
+        generated_count = PaymentInstallment.objects.filter(collection_branch=branch, **{field: number_prefix}).count()
         return f'{number_prefix}{generated_count + 1:04d}'
 
     @action(detail=True, methods=['post'], url_path='generate-bill')
@@ -11516,7 +11574,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         installment_status = PaymentInstallmentSerializer(installment).data.get('installment_status')
         if installment_status != 'paid':
             return Response({'detail': 'Official bill can be generated only after the required installment amount is fully paid.'}, status=400)
-        installment.bill_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.BILL)
+        document_branch = installment.collection_branch or installment.payment.effective_branch
+        installment.bill_number = self._generate_document_number(document_branch, PaymentInstallment.DocumentType.BILL)
         installment.document_type = PaymentInstallment.DocumentType.BILL
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
@@ -11538,7 +11597,8 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if installment.bill_number:
             return Response({'detail': 'Official bill already generated for this payment entry.'}, status=400)
         if not installment.receipt_number:
-            installment.receipt_number = self._generate_document_number(installment.enrollment.branch, PaymentInstallment.DocumentType.RECEIPT)
+            document_branch = installment.collection_branch or installment.payment.effective_branch
+            installment.receipt_number = self._generate_document_number(document_branch, PaymentInstallment.DocumentType.RECEIPT)
         installment.document_type = PaymentInstallment.DocumentType.RECEIPT
         installment.bill_generated_at = timezone.now()
         installment.bill_generated_by = request.user
@@ -12395,12 +12455,25 @@ class DashboardSummaryView(APIView):
         target_qs = BranchTarget.objects.filter(year=year, month=month)
         selected_branch = None
 
+        def filter_payments_by_payment_branch(queryset, branch):
+            return queryset.filter(
+                Q(payment_branch=branch)
+                | Q(payment_branch__isnull=True, enrollment__branch=branch)
+            )
+
+        def filter_collections_by_collection_branch(queryset, branch):
+            return queryset.filter(
+                Q(collection_branch=branch)
+                | Q(collection_branch__isnull=True, payment__payment_branch=branch)
+                | Q(collection_branch__isnull=True, payment__payment_branch__isnull=True, enrollment__branch=branch)
+            )
+
         if not user.is_super_admin:
             lead_qs = lead_qs.filter(branch=user.branch)
             walkin_qs = walkin_qs.filter(branch=user.branch)
             enroll_qs = enroll_qs.filter(branch=user.branch)
-            pay_qs = pay_qs.filter(enrollment__branch=user.branch)
-            collection_qs = collection_qs.filter(enrollment__branch=user.branch)
+            pay_qs = filter_payments_by_payment_branch(pay_qs, user.branch)
+            collection_qs = filter_collections_by_collection_branch(collection_qs, user.branch)
             transfer_qs = transfer_qs.filter(Q(current_branch=user.branch) | Q(requested_branch=user.branch))
             target_qs = target_qs.filter(branch=user.branch)
             selected_branch = user.branch
@@ -12412,8 +12485,8 @@ class DashboardSummaryView(APIView):
                     lead_qs = lead_qs.filter(branch=selected_branch)
                     walkin_qs = walkin_qs.filter(branch=selected_branch)
                     enroll_qs = enroll_qs.filter(branch=selected_branch)
-                    pay_qs = pay_qs.filter(enrollment__branch=selected_branch)
-                    collection_qs = collection_qs.filter(enrollment__branch=selected_branch)
+                    pay_qs = filter_payments_by_payment_branch(pay_qs, selected_branch)
+                    collection_qs = filter_collections_by_collection_branch(collection_qs, selected_branch)
                     transfer_qs = transfer_qs.filter(Q(current_branch=selected_branch) | Q(requested_branch=selected_branch))
                     target_qs = target_qs.filter(branch=selected_branch)
 
@@ -12483,6 +12556,11 @@ class DashboardSummaryView(APIView):
         enroll_this_month = dashboard_monthly_enroll_qs.count()
         conversion_rate = bounded_ratio(enroll_this_month, walkins_this_month)
         current_month_walkin_qs = walkin_qs.filter(visit_date__year=year, visit_date__month=month)
+        walkin_followup_2day_count = active_walkin_follow_up_queryset(
+            walkin_qs,
+            'follow_up_date',
+            today,
+        ).filter(follow_up_date__lte=today + timedelta(days=2)).count()
 
         def choice_breakdown(queryset, field_name, choices):
             label_by_value = dict(choices)
@@ -12539,6 +12617,7 @@ class DashboardSummaryView(APIView):
             'value_target':       target_totals['value_target'] if target_count else None,
             'revenue_target':     target_totals['value_target'] if target_count else None,
             'today_birthdays':    birthday_rows,
+            'walkins_followup_2_days': walkin_followup_2day_count,
             'selected_branch_id':  selected_branch.id if selected_branch else None,
             'selected_branch_name': selected_branch.name if selected_branch else 'All Branches',
             'performance_scope': 'branch' if user.is_super_admin else 'user',

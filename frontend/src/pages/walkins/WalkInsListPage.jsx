@@ -320,9 +320,9 @@ export default function WalkInsListPage() {
   const appliedFilters = useMemo(() => readFilters(searchParams, canFilterByBranch), [searchParams, canFilterByBranch])
   const visitDateFrom = searchParams.get('visit_date_from') || ''
   const visitDateTo = searchParams.get('visit_date_to') || ''
-  const followUpDateFrom = canFilterByBranch ? '' : searchParams.get('follow_up_date_from') || ''
-  const followUpDateTo = canFilterByBranch ? '' : searchParams.get('follow_up_date_to') || ''
-  const focus = canFilterByBranch ? '' : searchParams.get('focus') || ''
+  const followUpDateFrom = searchParams.get('follow_up_date_from') || ''
+  const followUpDateTo = searchParams.get('follow_up_date_to') || ''
+  const focus = searchParams.get('focus') || ''
   const hasDateRangeFilter = Boolean(
     appliedFilters.date_from
     || appliedFilters.date_to
@@ -687,6 +687,11 @@ export default function WalkInsListPage() {
       {focus === 'today-follow-up' && (
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-6 py-4 text-sm font-medium text-slate-700">
           Showing only walk-ins with follow-up scheduled for today.
+        </div>
+      )}
+      {focus === 'walkin-follow-up-2-days' && (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-6 py-4 text-sm font-medium text-slate-700">
+          Showing only walk-ins with follow-up scheduled within the next 2 days.
         </div>
       )}
 

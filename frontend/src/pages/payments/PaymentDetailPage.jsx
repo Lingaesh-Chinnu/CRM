@@ -217,6 +217,9 @@ export default function PaymentDetailPage() {
   const [billActionId, setBillActionId] = useState(null)
   const [message, setMessage] = useState('')
   const [schedule, setSchedule] = useState([])
+  const [branches, setBranches] = useState([])
+  const [paymentBranch, setPaymentBranch] = useState('')
+  const [branchSaving, setBranchSaving] = useState(false)
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
 
@@ -224,16 +227,41 @@ export default function PaymentDetailPage() {
     loadPayment()
   }, [id])
 
+  useEffect(() => {
+    if (!isSuperAdmin) return
+    api.get('/branches/')
+      .then(({ data }) => setBranches(data.results || data || []))
+      .catch(() => setBranches([]))
+  }, [isSuperAdmin])
+
   const loadPayment = async () => {
     setLoading(true)
     try {
       const { data } = await api.get(`/payments/${id}/`)
       setPayment(data)
       setSchedule(data.payment_schedule || [])
+      setPaymentBranch(data.branch ? String(data.branch) : '')
     } catch {
       setMessage('Failed to load payment details.')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const changePaymentBranch = async () => {
+    if (!paymentBranch || !payment) return
+    setBranchSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/payments/${payment.id}/change-payment-branch/`, { branch: Number(paymentBranch) })
+      setPayment(data)
+      setSchedule(data.payment_schedule || [])
+      setPaymentBranch(data.branch ? String(data.branch) : '')
+      setMessage('Payment branch updated.')
+    } catch (error) {
+      setMessage(error.response?.data?.detail || error.response?.data?.branch || 'Failed to change payment branch.')
+    } finally {
+      setBranchSaving(false)
     }
   }
 
@@ -417,7 +445,8 @@ export default function PaymentDetailPage() {
     payment.student_number || 'Student ID pending',
     payment.course_name || 'Course not set',
     ...(isSuperAdmin ? [
-      payment.branch_name || 'Branch not set',
+      `Payment: ${payment.branch_name || 'Branch not set'}`,
+      `Enrollment: ${payment.enrollment_branch_name || 'Branch not set'}`,
       payment.counselor_name || 'Counselor not assigned',
     ] : []),
   ]
@@ -438,6 +467,28 @@ export default function PaymentDetailPage() {
           </div>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {isSuperAdmin && (
+            <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 sm:flex-row sm:items-center">
+              <select
+                value={paymentBranch}
+                onChange={(event) => setPaymentBranch(event.target.value)}
+                className="min-w-[180px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+              >
+                <option value="">Select payment branch</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>{branch.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={changePaymentBranch}
+                disabled={branchSaving || !paymentBranch || String(paymentBranch) === String(payment.branch || '')}
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {branchSaving ? 'Saving...' : 'Change Payment Branch'}
+              </button>
+            </div>
+          )}
           {isSuperAdmin && (
             <AdminDeleteButton label="payment" onConfirm={deletePayment} />
           )}

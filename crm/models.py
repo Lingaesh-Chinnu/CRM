@@ -1213,6 +1213,8 @@ class Enrollment(TimeStampedModel):
     final_fees       = models.DecimalField(max_digits=10, decimal_places=2)
     spot_conversion_discount_applied = models.BooleanField(default=False)
     spot_conversion_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    buddy_offer_applied = models.BooleanField(default=False)
+    buddy_offer_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     custom_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     net_payable_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_schedule = models.JSONField(default=list, blank=True)
@@ -1256,7 +1258,11 @@ class Enrollment(TimeStampedModel):
             self.spot_conversion_discount_amount = Decimal('2000')
         else:
             self.spot_conversion_discount_amount = Decimal('0')
-        calculated_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount, 0)
+        if self.buddy_offer_applied:
+            self.buddy_offer_amount = Decimal('1500')
+        else:
+            self.buddy_offer_amount = Decimal('0')
+        calculated_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount - self.buddy_offer_amount, 0)
         self.net_payable_fee = self.custom_payable_fee if self.custom_payable_fee is not None else calculated_payable_fee
         super().save(*args, **kwargs)
 
@@ -1485,6 +1491,8 @@ class Payment(TimeStampedModel):
         PARTIAL = 'partial', 'Partial'
 
     enrollment  = models.OneToOneField(Enrollment, on_delete=models.CASCADE, related_name='payment')
+    payment_branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
+                                       related_name='payments')
     total_fees  = models.DecimalField(max_digits=10, decimal_places=2)
     paid_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     status      = models.CharField(max_length=10, choices=Status.choices,
@@ -1501,6 +1509,10 @@ class Payment(TimeStampedModel):
     @property
     def balance(self):
         return self.total_fees - self.paid_amount
+
+    @property
+    def effective_branch(self):
+        return self.payment_branch or self.enrollment.branch
 
     def update_status(self):
         if self.paid_amount <= 0:
@@ -1566,6 +1578,8 @@ class PaymentInstallment(models.Model):
 
     payment          = models.ForeignKey(Payment,    on_delete=models.CASCADE, related_name='installments')
     enrollment       = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='installments')
+    collection_branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
+                                          related_name='payment_installments')
     amount           = models.DecimalField(max_digits=10, decimal_places=2)
     installment_index = models.PositiveSmallIntegerField(default=1, db_index=True)
     installment_label = models.CharField(max_length=80, blank=True)
@@ -1596,6 +1610,8 @@ class PaymentInstallment(models.Model):
         ]
 
     def save(self, *args, **kwargs):
+        if not self.collection_branch_id and self.payment_id:
+            self.collection_branch = self.payment.payment_branch or self.enrollment.branch
         super().save(*args, **kwargs)
         self.payment.recalculate_from_installments()
 
