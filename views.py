@@ -72,6 +72,7 @@ import re
 import textwrap
 import uuid
 import zipfile
+from urllib.parse import unquote, urlparse
 from whatsapp_service import WATIClient, log_whatsapp_message, send_candidate_document, send_candidate_message, send_whatsapp_message
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
@@ -8334,6 +8335,56 @@ def proof_unavailable_response():
     )
 
 
+def storage_name_candidates(field):
+    raw_name = str(getattr(field, 'name', '') or '').strip()
+    if not raw_name:
+        return []
+    media_url = str(getattr(settings, 'MEDIA_URL', '/media/') or '/media/')
+    parsed = urlparse(raw_name)
+    raw_values = [raw_name]
+    if parsed.scheme or parsed.netloc:
+        raw_values.append(parsed.path)
+    candidates = []
+    for value in raw_values:
+        value = unquote(str(value or '').strip())
+        if not value:
+            continue
+        value = value.replace('\\', '/')
+        media_path = media_url
+        if media_path.startswith('/'):
+            media_path = media_path.lstrip('/')
+        for prefix in (media_url, f'/{media_path}', media_path, '/media/', 'media/'):
+            if prefix and value.startswith(prefix):
+                value = value[len(prefix):]
+                break
+        value = value.lstrip('/')
+        if value:
+            candidates.append(value)
+            if value.startswith('signed_rules/'):
+                candidates.append(value[len('signed_rules/'):])
+            else:
+                candidates.append(f'signed_rules/{value}')
+            if value.startswith('rules_proofs/'):
+                candidates.append(f'signed_rules/{value}')
+    seen = set()
+    unique = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique.append(candidate)
+    return unique
+
+
+def open_existing_storage_file(field):
+    for name in storage_name_candidates(field):
+        try:
+            if default_storage.exists(name):
+                return default_storage.open(name, 'rb'), name
+        except Exception:
+            logger.warning('Unable to open rules proof storage path=%s.', name, exc_info=True)
+    return None, ''
+
+
 def binary_or_legacy_file(signing, binary_field, legacy_field):
     try:
         binary_value = getattr(signing, binary_field, None)
@@ -8341,12 +8392,15 @@ def binary_or_legacy_file(signing, binary_field, legacy_field):
         binary_value = None
     if binary_value:
         return bytes(binary_value)
+    field = getattr(signing, legacy_field, None)
+    handle, _ = open_existing_storage_file(field)
+    if not handle:
+        return None
     try:
-        field = getattr(signing, legacy_field, None)
-        if field:
-            with field.open('rb') as handle:
-                return handle.read()
+        with handle:
+            return handle.read()
     except Exception:
+        logger.warning('Unable to read rules proof file path=%s.', getattr(field, 'name', ''), exc_info=True)
         return None
     return None
 
@@ -8370,11 +8424,8 @@ def save_rules_proof_file(field, storage_name, file_bytes):
 
 
 def file_response_from_field(field, content_type, filename=None):
-    if not field:
-        return None
-    try:
-        handle = field.open('rb')
-    except Exception:
+    handle, _storage_name = open_existing_storage_file(field)
+    if not handle:
         return None
     response = FileResponse(handle, content_type=content_type)
     if filename:
