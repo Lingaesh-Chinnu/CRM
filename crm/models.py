@@ -1458,8 +1458,10 @@ class RulesRegulationsDocument(TimeStampedModel):
     enrollment_date = models.DateField(null=True, blank=True)
     submitted_at = models.DateTimeField(db_index=True)
     selfie_image = models.FileField(upload_to='rules_document_selfies/', null=True, blank=True)
+    signature_image = models.FileField(upload_to='rules_document_signatures/', null=True, blank=True)
     signed_pdf = models.FileField(upload_to='rules_document_pdfs/', null=True, blank=True)
     selfie_image_file = models.BinaryField(null=True, blank=True)
+    signature_image_file = models.BinaryField(null=True, blank=True)
     signed_pdf_file = models.BinaryField(null=True, blank=True)
     source_token = models.UUIDField(null=True, blank=True, db_index=True)
 

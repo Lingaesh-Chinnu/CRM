@@ -175,6 +175,7 @@ function RulesRegulationsDetail() {
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [selfieObjectUrl, setSelfieObjectUrl] = useState('')
+  const [signatureObjectUrl, setSignatureObjectUrl] = useState('')
   const [pdfObjectUrl, setPdfObjectUrl] = useState('')
 
   useEffect(() => {
@@ -187,6 +188,7 @@ function RulesRegulationsDetail() {
 
     async function loadFiles() {
       setSelfieObjectUrl('')
+      setSignatureObjectUrl('')
       setPdfObjectUrl('')
       if (!row?.files) return
       try {
@@ -196,6 +198,14 @@ function RulesRegulationsDetail() {
             const url = window.URL.createObjectURL(data)
             objectUrls.push(url)
             setSelfieObjectUrl(url)
+          }
+        }
+        if (row.files.signature_url) {
+          const { data } = await api.get(row.files.signature_url, { responseType: 'blob' })
+          if (!cancelled) {
+            const url = window.URL.createObjectURL(data)
+            objectUrls.push(url)
+            setSignatureObjectUrl(url)
           }
         }
         if (row.files.pdf_url) {
@@ -305,6 +315,17 @@ function RulesRegulationsDetail() {
                 <img src={selfieObjectUrl} alt={`${candidate.name} submitted selfie`} className="max-h-[460px] w-full object-contain" />
               ) : (
                 <div className="px-4 py-12 text-center text-sm font-semibold text-slate-500">Photo unavailable</div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[20px] border border-slate-200 bg-white p-6">
+            <h2 className="text-lg font-black text-slate-950">Submitted Signature</h2>
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+              {signatureObjectUrl ? (
+                <img src={signatureObjectUrl} alt={`${candidate.name} submitted signature`} className="max-h-56 w-full object-contain" />
+              ) : (
+                <div className="px-4 py-12 text-center text-sm font-semibold text-slate-500">Signature unavailable</div>
               )}
             </div>
           </div>

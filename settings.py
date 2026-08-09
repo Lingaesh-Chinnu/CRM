@@ -9,6 +9,7 @@ from pathlib import Path
 from datetime import timedelta
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIST_DIR = BASE_DIR / 'frontend' / 'dist'
@@ -297,13 +298,34 @@ MEDIA_ROOT   = Path(os.environ.get('MEDIA_ROOT', BASE_DIR / 'media'))
 USE_S3_STORAGE = env_bool('USE_S3_STORAGE', False)
 if USE_S3_STORAGE:
     DEFAULT_FILE_STORAGE   = 'storages.backends.s3boto3.S3Boto3Storage'
+    STORAGES = {
+        'default': {
+            'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+        },
+        'staticfiles': {
+            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        },
+    }
     AWS_ACCESS_KEY_ID      = os.environ.get('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY  = os.environ.get('AWS_SECRET_ACCESS_KEY')
     AWS_STORAGE_BUCKET_NAME= os.environ.get('AWS_STORAGE_BUCKET_NAME', 'crm-erp-media')
     AWS_S3_REGION_NAME     = os.environ.get('AWS_S3_REGION_NAME', 'ap-south-1')
-    AWS_S3_CUSTOM_DOMAIN   = f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+    AWS_S3_ENDPOINT_URL    = os.environ.get('AWS_S3_ENDPOINT_URL') or None
+    AWS_S3_ADDRESSING_STYLE= os.environ.get('AWS_S3_ADDRESSING_STYLE') or None
+    AWS_S3_CUSTOM_DOMAIN   = os.environ.get('AWS_S3_CUSTOM_DOMAIN') or (
+        None if AWS_S3_ENDPOINT_URL else f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com'
+    )
     AWS_DEFAULT_ACL        = None
     AWS_S3_FILE_OVERWRITE  = False
+
+RUNNING_ON_RENDER = env_bool('RENDER', False) or bool(os.environ.get('RENDER_SERVICE_ID'))
+MEDIA_ROOT_IS_DEFAULT_LOCAL = MEDIA_ROOT.resolve() == (BASE_DIR / 'media').resolve()
+if RUNNING_ON_RENDER and not USE_S3_STORAGE and MEDIA_ROOT_IS_DEFAULT_LOCAL:
+    raise ImproperlyConfigured(
+        'Render filesystems are ephemeral. Configure USE_S3_STORAGE=true for S3-compatible '
+        'media storage, or set MEDIA_ROOT to an attached Render persistent disk before '
+        'accepting Rules & Regulations signed PDFs, signatures, and selfies.'
+    )
 
 # ── WhatsApp Cloud API ────────────────────────────────────────
 WHATSAPP_API_TOKEN   = os.environ.get('WHATSAPP_API_TOKEN', '')

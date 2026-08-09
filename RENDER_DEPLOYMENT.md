@@ -94,3 +94,25 @@ For production media, use one of these:
 ```
 
 Without persistent media storage, rules signatures and generated PDFs can disappear after deploys/restarts.
+
+The application now refuses to start on Render when media is still configured as the default app-local `media/` directory. Configure one of:
+
+```text
+USE_S3_STORAGE=true
+AWS_STORAGE_BUCKET_NAME=...
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_S3_REGION_NAME=...
+# Optional for S3-compatible providers such as R2/Spaces:
+AWS_S3_ENDPOINT_URL=...
+AWS_S3_ADDRESSING_STYLE=path
+AWS_S3_CUSTOM_DOMAIN=...
+```
+
+or attach a Render persistent disk and set:
+
+```text
+MEDIA_ROOT=/path/to/persistent-disk/media
+```
+
+New Rules & Regulations submissions also keep database-backed copies of the signed PDF, selfie, and signature so protected API views can still serve the document even if an older file path is unavailable.

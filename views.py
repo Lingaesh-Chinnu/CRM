@@ -8470,8 +8470,10 @@ def persist_rules_regulations_document(signing):
             'branch_name': enrollment.branch.name if enrollment.branch else '',
             'enrollment_date': enrollment.enrollment_date,
             'selfie_image': signing.selfie_image.name if signing.selfie_image else None,
+            'signature_image': signing.signature_image.name if signing.signature_image else None,
             'signed_pdf': signing.signed_pdf.name if signing.signed_pdf else None,
             'selfie_image_file': signing.selfie_image_file,
+            'signature_image_file': signing.signature_image_file,
             'signed_pdf_file': signing.signed_pdf_file,
             'source_token': signing.token,
         },
@@ -8480,6 +8482,7 @@ def persist_rules_regulations_document(signing):
         return document
     if (
         not stored_rules_file_exists(document, 'selfie_image', 'selfie_image_file')
+        or not stored_rules_file_exists(document, 'signature_image', 'signature_image_file')
         or not stored_rules_file_exists(document, 'signed_pdf', 'signed_pdf_file')
     ):
         document.delete()
@@ -8595,6 +8598,35 @@ class RulesSelfieView(APIView):
         return HttpResponse(image_bytes, content_type='image/jpeg')
 
 
+class RulesSignatureView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, enrollment_id):
+        signing = RulesSigningRequest.objects.defer(
+            'selfie_image',
+            'selfie_image_file',
+            'signed_pdf',
+            'signed_pdf_file',
+            'submitted_ip',
+            'submitted_user_agent',
+        ).select_related('enrollment').filter(enrollment_id=enrollment_id).first()
+        if not signing:
+            return Response({'detail': 'Signature is not available.'}, status=404)
+        enrollment = signing.enrollment
+        if not request.user.is_super_admin and enrollment.branch_id != request.user.branch_id:
+            return Response({'detail': 'You do not have permission to view this signature.'}, status=403)
+        stored_response = file_response_from_field(
+            signing.signature_image,
+            signing_image_content_type(signing, 'signature_image'),
+        )
+        if stored_response:
+            return stored_response
+        image_bytes = binary_or_legacy_file(signing, 'signature_image_file', 'signature_image')
+        if not image_bytes:
+            return Response({'detail': 'Signature is not available.'}, status=404)
+        return HttpResponse(image_bytes, content_type='image/jpeg')
+
+
 def rules_document_queryset_for_user(user):
     queryset = RulesRegulationsDocument.objects.select_related(
         'branch',
@@ -8630,12 +8662,15 @@ def serialize_rules_document(document, request, include_detail=False):
     counselor = enrollment_counselor(enrollment) if enrollment else None
     pdf_available = rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf')
     selfie_available = rules_document_has_file(document, 'selfie_image_file', 'selfie_image')
+    signature_available = rules_document_has_file(document, 'signature_image_file', 'signature_image')
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
     pdf_url = f'{base_path}/api/rules-regulations/{document.id}/pdf/' if pdf_available else None
     selfie_url = f'{base_path}/api/rules-regulations/{document.id}/selfie/' if selfie_available else None
+    signature_url = f'{base_path}/api/rules-regulations/{document.id}/signature/' if signature_available else None
     if request:
         pdf_url = request.build_absolute_uri(pdf_url) if pdf_url else None
         selfie_url = request.build_absolute_uri(selfie_url) if selfie_url else None
+        signature_url = request.build_absolute_uri(signature_url) if signature_url else None
     row = {
         'id': document.id,
         'enrollment_id': enrollment.id if enrollment else None,
@@ -8653,6 +8688,7 @@ def serialize_rules_document(document, request, include_detail=False):
         'pdf_url': pdf_url,
         'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
         'selfie_url': selfie_url,
+        'signature_url': signature_url,
     }
     if include_detail:
         row.update({
@@ -8668,9 +8704,11 @@ def serialize_rules_document(document, request, include_detail=False):
             'files': {
                 'pdf_available': pdf_available,
                 'selfie_available': selfie_available,
+                'signature_available': signature_available,
                 'pdf_url': pdf_url,
                 'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
                 'selfie_url': selfie_url,
+                'signature_url': signature_url,
             },
         })
     return row
@@ -8736,6 +8774,25 @@ class RulesRegulationsSelfieView(APIView):
         image_bytes = binary_or_legacy_file(document, 'selfie_image_file', 'selfie_image')
         if not image_bytes:
             return Response({'detail': 'Selfie is not available.'}, status=404)
+        return HttpResponse(image_bytes, content_type='image/jpeg')
+
+
+class RulesRegulationsSignatureView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, pk):
+        document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
+        if not document:
+            return Response({'detail': 'Signature is not available.'}, status=404)
+        stored_response = file_response_from_field(
+            document.signature_image,
+            signing_image_content_type(document, 'signature_image'),
+        )
+        if stored_response:
+            return stored_response
+        image_bytes = binary_or_legacy_file(document, 'signature_image_file', 'signature_image')
+        if not image_bytes:
+            return Response({'detail': 'Signature is not available.'}, status=404)
         return HttpResponse(image_bytes, content_type='image/jpeg')
 
 

@@ -2506,6 +2506,7 @@ class PublicWalkInFormTests(APITestCase):
             status=RulesSigningRequest.Status.SUBMITTED,
             submitted_at=timezone.now(),
             selfie_image_file=b'\x89PNG-selfie',
+            signature_image_file=b'\x89PNG-signature',
             signed_pdf_file=b'%PDF-stored',
         )
         document = RulesRegulationsDocument.objects.create(
@@ -2520,6 +2521,7 @@ class PublicWalkInFormTests(APITestCase):
             enrollment_date=enrollment.enrollment_date,
             submitted_at=signing.submitted_at,
             selfie_image_file=b'\x89PNG-selfie',
+            signature_image_file=b'\x89PNG-signature',
             signed_pdf_file=b'%PDF-stored',
             source_token=signing.token,
         )
@@ -2548,6 +2550,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(list_response.data['results'][0]['status'], 'available')
         self.assertIn(f'/api/rules-regulations/{document.id}/pdf/', list_response.data['results'][0]['pdf_url'])
         self.assertIn(f'/api/rules-regulations/{document.id}/selfie/', list_response.data['results'][0]['selfie_url'])
+        self.assertIn(f'/api/rules-regulations/{document.id}/signature/', list_response.data['results'][0]['signature_url'])
 
         detail_response = self.client.get(f'/api/rules-regulations/{document.id}/')
 
@@ -2555,10 +2558,15 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(detail_response.data['candidate']['name'], 'Rules Document Student')
         self.assertTrue(detail_response.data['files']['pdf_available'])
         self.assertTrue(detail_response.data['files']['selfie_available'])
+        self.assertTrue(detail_response.data['files']['signature_available'])
 
         pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response.content, b'%PDF-stored')
+
+        signature_response = self.client.get(f'/api/rules-regulations/{document.id}/signature/')
+        self.assertEqual(signature_response.status_code, 200)
+        self.assertEqual(signature_response.content, b'\x89PNG-signature')
 
     def test_rules_regulations_document_history_survives_signing_reset_and_deleted_enrollment(self):
         enrollment = Enrollment.objects.create(
@@ -2578,6 +2586,7 @@ class PublicWalkInFormTests(APITestCase):
             status=RulesSigningRequest.Status.SUBMITTED,
             submitted_at=timezone.now(),
             selfie_image_file=b'\x89PNG-permanent',
+            signature_image_file=b'\x89PNG-signature-permanent',
             signed_pdf_file=b'%PDF-permanent',
         )
         document = RulesRegulationsDocument.objects.create(
@@ -2592,6 +2601,7 @@ class PublicWalkInFormTests(APITestCase):
             enrollment_date=enrollment.enrollment_date,
             submitted_at=signing.submitted_at,
             selfie_image_file=b'\x89PNG-permanent',
+            signature_image_file=b'\x89PNG-signature-permanent',
             signed_pdf_file=b'%PDF-permanent',
             source_token=signing.token,
         )
@@ -2601,10 +2611,12 @@ class PublicWalkInFormTests(APITestCase):
         signing.selfie_image = None
         signing.signed_pdf = None
         signing.selfie_image_file = None
+        signing.signature_image = None
+        signing.signature_image_file = None
         signing.signed_pdf_file = None
         signing.save(update_fields=[
-            'status', 'submitted_at', 'selfie_image', 'signed_pdf',
-            'selfie_image_file', 'signed_pdf_file', 'updated_at',
+            'status', 'submitted_at', 'selfie_image', 'signature_image', 'signed_pdf',
+            'selfie_image_file', 'signature_image_file', 'signed_pdf_file', 'updated_at',
         ])
         enrollment.is_deleted = True
         enrollment.deleted_at = timezone.now()
@@ -2620,6 +2632,10 @@ class PublicWalkInFormTests(APITestCase):
         pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response.content, b'%PDF-permanent')
+
+        signature_response = self.client.get(f'/api/rules-regulations/{document.id}/signature/')
+        self.assertEqual(signature_response.status_code, 200)
+        self.assertEqual(signature_response.content, b'\x89PNG-signature-permanent')
 
     def test_rules_regulations_list_marks_missing_legacy_pdf_unavailable(self):
         enrollment = Enrollment.objects.create(
@@ -2663,6 +2679,55 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.data['results'][0]['id'], document.id)
         self.assertEqual(response.data['results'][0]['status'], 'document_unavailable')
         self.assertIsNone(response.data['results'][0]['pdf_url'])
+
+    def test_rules_regulations_list_uses_persistent_storage_path_when_available(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Stored Path Rules Document Student',
+            phone='9000000147',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signed_pdf='signed_rules/rules_proofs/168/IIE-Rules-Regulations-168-signed.pdf',
+        )
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number or '',
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+            signed_pdf='signed_rules/rules_proofs/168/IIE-Rules-Regulations-168-signed.pdf',
+            source_token=signing.token,
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        with mock.patch(
+            'views.open_existing_storage_file',
+            side_effect=lambda field: (io.BytesIO(b'%PDF-persistent-storage'), document.signed_pdf.name),
+        ):
+            list_response = self.client.get('/api/rules-regulations/', {'search': 'Stored Path Rules'})
+            pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data['count'], 1)
+        self.assertEqual(list_response.data['results'][0]['status'], 'available')
+        self.assertIn(f'/api/rules-regulations/{document.id}/pdf/', list_response.data['results'][0]['pdf_url'])
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.content, b'%PDF-persistent-storage')
 
     def test_rules_signing_does_not_save_database_path_when_storage_verification_fails(self):
         enrollment = Enrollment.objects.create(
@@ -2761,6 +2826,7 @@ class PublicWalkInFormTests(APITestCase):
         document = RulesRegulationsDocument.objects.get(signing_request=signing)
         self.assertEqual(document.candidate_name, 'Rules Signing Candidate')
         self.assertTrue(document.selfie_image_file)
+        self.assertTrue(document.signature_image_file)
         self.assertTrue(document.signed_pdf_file)
         self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
 
@@ -2776,6 +2842,11 @@ class PublicWalkInFormTests(APITestCase):
         selfie_response = self.client.get(f'/rules-selfie/{enrollment.id}/')
         self.assertEqual(selfie_response.status_code, 200)
         self.assertTrue(b''.join(selfie_response.streaming_content).startswith(b'\x89PNG'))
+
+        signature_response = self.client.get(f'/rules-signature/{enrollment.id}/')
+        self.assertEqual(signature_response.status_code, 200)
+        signature_content = getattr(signature_response, 'content', None) or b''.join(signature_response.streaming_content)
+        self.assertTrue(signature_content.startswith(b'\x89PNG'))
 
     def test_public_rules_signing_hides_dependency_errors(self):
         enrollment = Enrollment.objects.create(

@@ -1733,6 +1733,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     rules_signing_status = serializers.SerializerMethodField()
     rules_signed_pdf_url = serializers.SerializerMethodField()
     rules_selfie_url = serializers.SerializerMethodField()
+    rules_signature_url = serializers.SerializerMethodField()
     rules_submitted_at = serializers.SerializerMethodField()
     installment_schedule = serializers.SerializerMethodField()
     course_change_history = CourseChangeHistorySerializer(many=True, read_only=True)
@@ -1797,11 +1798,18 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
                     default=Value(False),
                     output_field=BooleanField(),
                 ),
+                has_signature_image_file=Case(
+                    When(signature_image_file__isnull=False, then=Value(True)),
+                    default=Value(False),
+                    output_field=BooleanField(),
+                ),
             ).values(
                 *base_fields,
                 'selfie_image',
+                'signature_image',
                 'has_signed_pdf_file',
                 'has_selfie_image_file',
+                'has_signature_image_file',
             ).first()
         except (OperationalError, ProgrammingError):
             try:
@@ -1936,6 +1944,18 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
 
     def get_rules_selfie_url(self, obj):
         return self._proof_url(obj, 'has_selfie_image_file', 'selfie_image', 'rules-selfie')
+
+    def get_rules_signature_url(self, obj):
+        data = self._rules_signing_data(obj)
+        if (
+            data.get('status') != RulesSigningRequest.Status.SUBMITTED
+            or (not data.get('has_signature_image_file') and not data.get('signature_image'))
+        ):
+            return None
+        base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
+        url = f'{base_path}/rules-signature/{obj.id}/'
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
     def get_rules_submitted_at(self, obj):
         return self._rules_signing_data(obj).get('submitted_at')
