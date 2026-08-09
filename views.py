@@ -101,7 +101,7 @@ from serializers import (
     TeamNoticeSerializer, TeamNoticeReplySerializer, DataImportHistorySerializer,
     PaymentReasonRequestSerializer, CourseChangeHistorySerializer, CourseChangeRequestSerializer,
     CounselorChangeRequestSerializer, WalkInAssignmentChangeRequestSerializer, payment_installment_summary,
-    effective_walkin_status, effective_walkin_status_display, user_identity_payload,
+    effective_walkin_status, effective_walkin_status_display, enrollment_counselor, user_identity_payload,
 )
 
 
@@ -8169,7 +8169,7 @@ class PublicRulesSigningView(APIView):
         ).filter(token=token).first()
 
     def public_pdf_url(self, request, signing):
-        if signing.signed_pdf:
+        if stored_rules_file_exists(signing, 'signed_pdf'):
             return request.build_absolute_uri(f'{app_url(f"public/rules-signed-pdf/{signing.token}")}/')
         try:
             has_pdf = RulesSigningRequest.objects.filter(
@@ -8268,9 +8268,15 @@ class PublicRulesSigningView(APIView):
                 proof_storage_name(enrollment, 'signed', 'pdf'),
                 pdf_bytes,
             )
-            signing.selfie_image_file = None
-            signing.signature_image_file = None
-            signing.signed_pdf_file = None
+            signing.selfie_image_file = selfie_bytes
+            signing.signature_image_file = signature_bytes
+            signing.signed_pdf_file = pdf_bytes
+            if (
+                not stored_rules_file_exists(signing, 'selfie_image')
+                or not stored_rules_file_exists(signing, 'signature_image')
+                or not stored_rules_file_exists(signing, 'signed_pdf')
+            ):
+                raise RuntimeError('Rules proof files were not verified after storage.')
             signing.status = RulesSigningRequest.Status.SUBMITTED
             signing.submitted_at = submitted_at
             signing.submitted_ip = get_client_ip(request)
@@ -8326,6 +8332,11 @@ class PublicRulesSigningView(APIView):
 def proof_filename(enrollment):
     student_id = enrollment.student_number or enrollment.id
     return f'IIE-Rules-Regulations-{student_id}.pdf'
+
+
+def proof_content_disposition(request, enrollment, default='inline'):
+    disposition = 'attachment' if request.query_params.get('download') in {'1', 'true', 'yes'} else default
+    return f'{disposition}; filename="{proof_filename(enrollment)}"'
 
 
 def proof_unavailable_response():
@@ -8424,6 +8435,25 @@ def save_rules_proof_file(field, storage_name, file_bytes):
     saved_name = getattr(field, 'name', '') or target_name
     if not saved_name or not default_storage.exists(saved_name):
         raise RuntimeError(f'Rules proof file was not stored successfully: {saved_name or target_name}')
+    return saved_name
+
+
+def stored_rules_file_exists(signing, field_name, binary_field_name=None):
+    if binary_field_name:
+        try:
+            if getattr(signing, binary_field_name, None):
+                return True
+        except (OperationalError, ProgrammingError):
+            pass
+    field = getattr(signing, field_name, None)
+    handle, _ = open_existing_storage_file(field)
+    if not handle:
+        return False
+    try:
+        handle.close()
+    except Exception:
+        pass
+    return True
 
 
 def file_response_from_field(field, content_type, filename=None):
@@ -8493,11 +8523,12 @@ class RulesSignedPdfView(APIView):
             if pdf_bytes:
                 resolve_rules_signed_notifications(enrollment.id)
                 response = HttpResponse(pdf_bytes, content_type='application/pdf')
-                response['Content-Disposition'] = f'inline; filename="{proof_filename(enrollment)}"'
+                response['Content-Disposition'] = proof_content_disposition(request, enrollment)
                 return response
         archived_response = archived_signed_rules_pdf_response(enrollment)
         if archived_response:
             resolve_rules_signed_notifications(enrollment.id)
+            archived_response['Content-Disposition'] = proof_content_disposition(request, enrollment)
             return archived_response
         resolve_rules_signed_notifications(enrollment.id)
         return proof_unavailable_response()
@@ -8531,6 +8562,118 @@ class RulesSelfieView(APIView):
         if not image_bytes:
             return Response({'detail': 'Selfie is not available.'}, status=404)
         return HttpResponse(image_bytes, content_type='image/jpeg')
+
+
+def rules_signing_queryset_for_user(user):
+    queryset = RulesSigningRequest.objects.filter(
+        status=RulesSigningRequest.Status.SUBMITTED,
+    ).select_related(
+        'enrollment__course',
+        'enrollment__branch',
+        'enrollment__counselor',
+        'enrollment__created_by',
+        'enrollment__enrolled_by',
+        'enrollment__walkin__assigned_to',
+        'enrollment__lead__assigned_to',
+    )
+    if 'is_deleted' not in missing_model_columns(Enrollment, ['is_deleted']):
+        queryset = queryset.filter(enrollment__is_deleted=False)
+    if not user.is_super_admin:
+        queryset = queryset.filter(enrollment__branch=user.branch)
+    return queryset
+
+
+def rules_signing_has_file(signing, binary_field_name, file_field_name):
+    try:
+        if getattr(signing, binary_field_name, None):
+            return True
+    except (OperationalError, ProgrammingError):
+        pass
+    return stored_rules_file_exists(signing, file_field_name)
+
+
+def rules_signing_document_status(signing):
+    return 'available' if rules_signing_has_file(signing, 'signed_pdf_file', 'signed_pdf') else 'document_unavailable'
+
+
+def serialize_rules_signing(signing, request, include_detail=False):
+    enrollment = signing.enrollment
+    counselor = enrollment_counselor(enrollment)
+    pdf_available = rules_signing_has_file(signing, 'signed_pdf_file', 'signed_pdf')
+    selfie_available = rules_signing_has_file(signing, 'selfie_image_file', 'selfie_image')
+    base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
+    pdf_url = f'{base_path}/rules-signed-pdf/{enrollment.id}/' if pdf_available else None
+    selfie_url = f'{base_path}/rules-selfie/{enrollment.id}/' if selfie_available else None
+    if request:
+        pdf_url = request.build_absolute_uri(pdf_url) if pdf_url else None
+        selfie_url = request.build_absolute_uri(selfie_url) if selfie_url else None
+    row = {
+        'id': signing.id,
+        'enrollment_id': enrollment.id,
+        'candidate_name': enrollment.name,
+        'student_number': enrollment.student_number or '',
+        'phone': enrollment.phone or '',
+        'course': enrollment.course.name if enrollment.course else '',
+        'branch': enrollment.branch.name if enrollment.branch else '',
+        'enrollment_date': enrollment.enrollment_date,
+        'signed_date': signing.submitted_at,
+        'submitted_at': signing.submitted_at,
+        'status': rules_signing_document_status(signing),
+        'status_label': 'Available' if pdf_available else 'Document unavailable',
+        'rules_status': signing.status,
+        'pdf_url': pdf_url,
+        'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
+        'selfie_url': selfie_url,
+    }
+    if include_detail:
+        row.update({
+            'candidate': {
+                'name': enrollment.name,
+                'student_number': enrollment.student_number or '',
+                'phone': enrollment.phone or '',
+                'course': enrollment.course.name if enrollment.course else '',
+                'branch': enrollment.branch.name if enrollment.branch else '',
+                'enrollment_date': enrollment.enrollment_date,
+                'counselor_name': counselor.full_name if counselor else '',
+            },
+            'files': {
+                'pdf_available': pdf_available,
+                'selfie_available': selfie_available,
+                'pdf_url': pdf_url,
+                'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
+                'selfie_url': selfie_url,
+            },
+        })
+    return row
+
+
+class RulesRegulationsListView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        queryset = rules_signing_queryset_for_user(request.user)
+        search = str(request.query_params.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(enrollment__name__icontains=search)
+                | Q(enrollment__student_number__icontains=search)
+                | Q(enrollment__phone__icontains=search)
+            )
+        queryset = queryset.order_by('-submitted_at', '-created_at', '-id')
+        paginator = FastPageNumberPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        rows = [serialize_rules_signing(signing, request) for signing in page]
+        return paginator.get_paginated_response(rows)
+
+
+class RulesRegulationsDetailView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, pk):
+        signing = rules_signing_queryset_for_user(request.user).filter(pk=pk).first()
+        if not signing:
+            return Response({'detail': 'Rules & Regulations document was not found.'}, status=404)
+        return Response(serialize_rules_signing(signing, request, include_detail=True))
 
 
 class PublicRulesSignedPdfView(APIView):

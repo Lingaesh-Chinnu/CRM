@@ -11,6 +11,7 @@ const navigation = [
   { name: 'Walk-ins', href: '/walkins', short: 'WI' },
   { name: 'Students', href: '/students', short: 'ST' },
   { name: 'Enrollments', href: '/enrollments', short: 'EN' },
+  { name: 'Rules & Regulations', href: '/rules-regulations', short: 'RR' },
   { name: 'Payments', href: '/payments', short: 'PY' },
   { name: 'Pending', href: '/pending/leads', short: 'PE', pending: true },
   { name: 'Performance Hub', href: '/performance-hub', short: 'PH', staffOnly: true },

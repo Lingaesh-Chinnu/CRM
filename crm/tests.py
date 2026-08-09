@@ -2488,6 +2488,87 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.content, b'%PDF-legacy')
 
+    def test_rules_regulations_list_and_detail_show_submitted_documents(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Document Student',
+            phone='9000000143',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            selfie_image_file=b'\x89PNG-selfie',
+            signed_pdf_file=b'%PDF-stored',
+        )
+        RulesSigningRequest.objects.create(
+            enrollment=Enrollment.objects.create(
+                branch=self.branch,
+                course=self.course,
+                name='Unsigned Rules Student',
+                phone='9000000144',
+                preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                enrollment_date='2026-05-11',
+                start_date='2026-05-12',
+                actual_fees=15900,
+                discount_amount=0,
+                status=Enrollment.Status.RULES_SENT,
+            ),
+            status=RulesSigningRequest.Status.SENT,
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        list_response = self.client.get('/api/rules-regulations/', {'search': 'Rules Document'})
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data['count'], 1)
+        self.assertEqual(list_response.data['results'][0]['id'], signing.id)
+        self.assertEqual(list_response.data['results'][0]['status'], 'available')
+        self.assertIn(f'/rules-signed-pdf/{enrollment.id}/', list_response.data['results'][0]['pdf_url'])
+        self.assertIn(f'/rules-selfie/{enrollment.id}/', list_response.data['results'][0]['selfie_url'])
+
+        detail_response = self.client.get(f'/api/rules-regulations/{signing.id}/')
+
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_response.data['candidate']['name'], 'Rules Document Student')
+        self.assertTrue(detail_response.data['files']['pdf_available'])
+        self.assertTrue(detail_response.data['files']['selfie_available'])
+
+    def test_rules_regulations_list_marks_missing_legacy_pdf_unavailable(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Missing Rules Document Student',
+            phone='9000000145',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signed_pdf='signed_rules/missing.pdf',
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        response = self.client.get('/api/rules-regulations/', {'search': 'Missing Rules Document'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['status'], 'document_unavailable')
+        self.assertIsNone(response.data['results'][0]['pdf_url'])
+
     def test_rules_signing_does_not_save_database_path_when_storage_verification_fails(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -2579,9 +2660,9 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(signing.selfie_image)
         self.assertTrue(signing.signature_image)
         self.assertTrue(signing.signed_pdf)
-        self.assertFalse(signing.selfie_image_file)
-        self.assertFalse(signing.signature_image_file)
-        self.assertFalse(signing.signed_pdf_file)
+        self.assertTrue(signing.selfie_image_file)
+        self.assertTrue(signing.signature_image_file)
+        self.assertTrue(signing.signed_pdf_file)
         self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
 
         with mock.patch('views.build_signed_rules_pdf') as build_pdf:

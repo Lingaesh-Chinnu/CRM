@@ -40,6 +40,7 @@ import TeamBoardPage from './pages/team/TeamBoardPage'
 import CounselorChangeRequestsPage from './pages/CounselorChangeRequestsPage'
 import PendingPage from './pages/pending/PendingPage'
 import PerformanceHubPage from './pages/performance/PerformanceHubPage'
+import RulesRegulationsPage from './pages/rules/RulesRegulationsPage'
 
 // Admin-only pages
 import CoursesPage   from './pages/admin/CoursesPage'
@@ -143,6 +144,8 @@ export default function App() {
         <Route path="performance-hub" element={<UserPerformanceRoute />} />
         <Route path="counselor-change-requests" element={<CounselorChangeRequestsPage />} />
         <Route path="pending/:module" element={<PendingPage />} />
+        <Route path="rules-regulations" element={<RulesRegulationsPage />} />
+        <Route path="rules-regulations/:id" element={<RulesRegulationsPage />} />
 
         {/* Viewable by all logged-in users */}
         <Route path="courses"         element={<CoursesPage />} />
