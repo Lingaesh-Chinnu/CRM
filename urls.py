@@ -32,6 +32,7 @@ from views import (
     PublicWalkInFormView, PublicLeadFormView, PublicRulesSigningView,
     SessionHeartbeatView, UserMonitoringView, PhoneNumberUpdateView, rules_sign_view,
     RulesSignedPdfView, RulesSelfieView, RulesRegulationsListView, RulesRegulationsDetailView,
+    RulesRegulationsPdfView, RulesRegulationsSelfieView,
     PublicRulesSignedPdfView, PublicRulesReviewPdfView,
     PublicBillView,
 )
@@ -78,6 +79,8 @@ api_urlpatterns = [
     path('students/<int:pk>/', EnrollmentViewSet.as_view({'get': 'retrieve'}), name='student-detail'),
     path('rules-regulations/', RulesRegulationsListView.as_view(), name='rules-regulations-list'),
     path('rules-regulations/<int:pk>/', RulesRegulationsDetailView.as_view(), name='rules-regulations-detail'),
+    path('rules-regulations/<int:pk>/pdf/', RulesRegulationsPdfView.as_view(), name='rules-regulations-pdf'),
+    path('rules-regulations/<int:pk>/selfie/', RulesRegulationsSelfieView.as_view(), name='rules-regulations-selfie'),
     path('dashboard/', DashboardSummaryView.as_view(), name='dashboard-summary-alias'),
     path('pending/<str:section>/', PendingManagementView.as_view(), name='pending-section'),
     path('', include(router.urls)),

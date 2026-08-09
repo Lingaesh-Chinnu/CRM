@@ -1426,6 +1426,55 @@ class RulesSigningRequest(TimeStampedModel):
         return f'Rules signing for {self.enrollment.student_number} - {self.get_status_display()}'
 
 
+class RulesRegulationsDocument(TimeStampedModel):
+    """Immutable repository entry for a submitted Rules & Regulations form."""
+
+    signing_request = models.ForeignKey(
+        RulesSigningRequest,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='document_history',
+    )
+    enrollment = models.ForeignKey(
+        Enrollment,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rules_regulations_documents',
+    )
+    branch = models.ForeignKey(
+        Branch,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='rules_regulations_documents',
+    )
+    candidate_name = models.CharField(max_length=200)
+    student_number = models.CharField(max_length=20, blank=True, db_index=True)
+    phone = models.CharField(max_length=20, blank=True, db_index=True)
+    course_name = models.CharField(max_length=200, blank=True)
+    branch_name = models.CharField(max_length=200, blank=True)
+    enrollment_date = models.DateField(null=True, blank=True)
+    submitted_at = models.DateTimeField(db_index=True)
+    selfie_image = models.FileField(upload_to='rules_document_selfies/', null=True, blank=True)
+    signed_pdf = models.FileField(upload_to='rules_document_pdfs/', null=True, blank=True)
+    selfie_image_file = models.BinaryField(null=True, blank=True)
+    signed_pdf_file = models.BinaryField(null=True, blank=True)
+    source_token = models.UUIDField(null=True, blank=True, db_index=True)
+
+    class Meta:
+        db_table = 'rules_regulations_documents'
+        ordering = ['-submitted_at', '-created_at']
+        indexes = [
+            models.Index(fields=['branch', 'submitted_at'], name='rules_doc_branch_sub_idx'),
+            models.Index(fields=['candidate_name'], name='rules_doc_name_idx'),
+        ]
+
+    def __str__(self):
+        return f'Rules document for {self.student_number or self.candidate_name}'
+
+
 class EnrollmentRulesResetHistory(models.Model):
     enrollment = models.ForeignKey(Enrollment, on_delete=models.CASCADE, related_name='rules_reset_history')
     reset_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name='rules_process_resets')

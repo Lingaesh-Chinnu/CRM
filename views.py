@@ -73,14 +73,14 @@ import textwrap
 import uuid
 import zipfile
 from urllib.parse import unquote, urlparse
-from whatsapp_service import WATIClient, log_whatsapp_message, send_candidate_document, send_candidate_message, send_whatsapp_message
+from whatsapp_service import WATIClient, log_whatsapp_message, normalize_candidate_phone, send_candidate_document, send_candidate_message, send_whatsapp_message, whatsapp_web_url
 from calendar import month_abbr, monthrange
 from xml.etree import ElementTree
 
 from crm.models import (
     Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, Discount, BranchTransferRequest,
     DataImportHistory,
-    RulesSigningRequest, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
+    RulesSigningRequest, RulesRegulationsDocument, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
     PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
@@ -8253,19 +8253,20 @@ class PublicRulesSigningView(APIView):
                 return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
             selfie_extension = image_storage_extension(selfie_bytes)
             signature_extension = image_storage_extension(signature_bytes)
+            proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S}'
             save_rules_proof_file(
                 signing.selfie_image,
-                proof_storage_name(enrollment, 'selfie', selfie_extension),
+                proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
                 selfie_bytes,
             )
             save_rules_proof_file(
                 signing.signature_image,
-                proof_storage_name(enrollment, 'signature', signature_extension),
+                proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
                 signature_bytes,
             )
             save_rules_proof_file(
                 signing.signed_pdf,
-                proof_storage_name(enrollment, 'signed', 'pdf'),
+                proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
                 pdf_bytes,
             )
             signing.selfie_image_file = selfie_bytes
@@ -8277,23 +8278,25 @@ class PublicRulesSigningView(APIView):
                 or not stored_rules_file_exists(signing, 'signed_pdf')
             ):
                 raise RuntimeError('Rules proof files were not verified after storage.')
-            signing.status = RulesSigningRequest.Status.SUBMITTED
-            signing.submitted_at = submitted_at
-            signing.submitted_ip = get_client_ip(request)
-            signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
-            signing.save(update_fields=[
-                'selfie_image',
-                'signature_image',
-                'signed_pdf',
-                'selfie_image_file',
-                'signature_image_file',
-                'signed_pdf_file',
-                'status',
-                'submitted_at',
-                'submitted_ip',
-                'submitted_user_agent',
-                'updated_at',
-            ])
+            with transaction.atomic():
+                signing.status = RulesSigningRequest.Status.SUBMITTED
+                signing.submitted_at = submitted_at
+                signing.submitted_ip = get_client_ip(request)
+                signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
+                signing.save(update_fields=[
+                    'selfie_image',
+                    'signature_image',
+                    'signed_pdf',
+                    'selfie_image_file',
+                    'signature_image_file',
+                    'signed_pdf_file',
+                    'status',
+                    'submitted_at',
+                    'submitted_ip',
+                    'submitted_user_agent',
+                    'updated_at',
+                ])
+                persist_rules_regulations_document(signing)
         except (OperationalError, ProgrammingError):
             logger.exception(
                 'Rules signing storage failed for token=%s enrollment_id=%s.',
@@ -8424,11 +8427,6 @@ def proof_storage_name(enrollment, suffix, extension):
 
 def save_rules_proof_file(field, storage_name, file_bytes):
     target_name = field.field.generate_filename(field.instance, storage_name)
-    if field and field.name and field.name != target_name:
-        try:
-            field.delete(save=False)
-        except Exception:
-            logger.warning('Unable to delete replaced rules proof file path=%s.', field.name, exc_info=True)
     if default_storage.exists(target_name):
         default_storage.delete(target_name)
     field.save(storage_name, ContentFile(file_bytes), save=False)
@@ -8454,6 +8452,39 @@ def stored_rules_file_exists(signing, field_name, binary_field_name=None):
     except Exception:
         pass
     return True
+
+
+def persist_rules_regulations_document(signing):
+    enrollment = signing.enrollment
+    submitted_at = signing.submitted_at or timezone.now()
+    document, created = RulesRegulationsDocument.objects.get_or_create(
+        signing_request=signing,
+        submitted_at=submitted_at,
+        defaults={
+            'enrollment': enrollment,
+            'branch': enrollment.branch,
+            'candidate_name': enrollment.name or '',
+            'student_number': enrollment.student_number or '',
+            'phone': enrollment.phone or '',
+            'course_name': enrollment.course.name if enrollment.course else '',
+            'branch_name': enrollment.branch.name if enrollment.branch else '',
+            'enrollment_date': enrollment.enrollment_date,
+            'selfie_image': signing.selfie_image.name if signing.selfie_image else None,
+            'signed_pdf': signing.signed_pdf.name if signing.signed_pdf else None,
+            'selfie_image_file': signing.selfie_image_file,
+            'signed_pdf_file': signing.signed_pdf_file,
+            'source_token': signing.token,
+        },
+    )
+    if not created:
+        return document
+    if (
+        not stored_rules_file_exists(document, 'selfie_image', 'selfie_image_file')
+        or not stored_rules_file_exists(document, 'signed_pdf', 'signed_pdf_file')
+    ):
+        document.delete()
+        raise RuntimeError('Rules repository document was not verified after storage.')
+    return document
 
 
 def file_response_from_field(field, content_type, filename=None):
@@ -8564,10 +8595,9 @@ class RulesSelfieView(APIView):
         return HttpResponse(image_bytes, content_type='image/jpeg')
 
 
-def rules_signing_queryset_for_user(user):
-    queryset = RulesSigningRequest.objects.filter(
-        status=RulesSigningRequest.Status.SUBMITTED,
-    ).select_related(
+def rules_document_queryset_for_user(user):
+    queryset = RulesRegulationsDocument.objects.select_related(
+        'branch',
         'enrollment__course',
         'enrollment__branch',
         'enrollment__counselor',
@@ -8575,52 +8605,51 @@ def rules_signing_queryset_for_user(user):
         'enrollment__enrolled_by',
         'enrollment__walkin__assigned_to',
         'enrollment__lead__assigned_to',
+        'signing_request',
     )
-    if 'is_deleted' not in missing_model_columns(Enrollment, ['is_deleted']):
-        queryset = queryset.filter(enrollment__is_deleted=False)
     if not user.is_super_admin:
-        queryset = queryset.filter(enrollment__branch=user.branch)
+        queryset = queryset.filter(branch=user.branch)
     return queryset
 
 
-def rules_signing_has_file(signing, binary_field_name, file_field_name):
+def rules_document_has_file(document, binary_field_name, file_field_name):
     try:
-        if getattr(signing, binary_field_name, None):
+        if getattr(document, binary_field_name, None):
             return True
     except (OperationalError, ProgrammingError):
         pass
-    return stored_rules_file_exists(signing, file_field_name)
+    return stored_rules_file_exists(document, file_field_name)
 
 
-def rules_signing_document_status(signing):
-    return 'available' if rules_signing_has_file(signing, 'signed_pdf_file', 'signed_pdf') else 'document_unavailable'
+def rules_repository_document_status(document):
+    return 'available' if rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf') else 'document_unavailable'
 
 
-def serialize_rules_signing(signing, request, include_detail=False):
-    enrollment = signing.enrollment
-    counselor = enrollment_counselor(enrollment)
-    pdf_available = rules_signing_has_file(signing, 'signed_pdf_file', 'signed_pdf')
-    selfie_available = rules_signing_has_file(signing, 'selfie_image_file', 'selfie_image')
+def serialize_rules_document(document, request, include_detail=False):
+    enrollment = document.enrollment
+    counselor = enrollment_counselor(enrollment) if enrollment else None
+    pdf_available = rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf')
+    selfie_available = rules_document_has_file(document, 'selfie_image_file', 'selfie_image')
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
-    pdf_url = f'{base_path}/rules-signed-pdf/{enrollment.id}/' if pdf_available else None
-    selfie_url = f'{base_path}/rules-selfie/{enrollment.id}/' if selfie_available else None
+    pdf_url = f'{base_path}/api/rules-regulations/{document.id}/pdf/' if pdf_available else None
+    selfie_url = f'{base_path}/api/rules-regulations/{document.id}/selfie/' if selfie_available else None
     if request:
         pdf_url = request.build_absolute_uri(pdf_url) if pdf_url else None
         selfie_url = request.build_absolute_uri(selfie_url) if selfie_url else None
     row = {
-        'id': signing.id,
-        'enrollment_id': enrollment.id,
-        'candidate_name': enrollment.name,
-        'student_number': enrollment.student_number or '',
-        'phone': enrollment.phone or '',
-        'course': enrollment.course.name if enrollment.course else '',
-        'branch': enrollment.branch.name if enrollment.branch else '',
-        'enrollment_date': enrollment.enrollment_date,
-        'signed_date': signing.submitted_at,
-        'submitted_at': signing.submitted_at,
-        'status': rules_signing_document_status(signing),
+        'id': document.id,
+        'enrollment_id': enrollment.id if enrollment else None,
+        'candidate_name': document.candidate_name,
+        'student_number': document.student_number or '',
+        'phone': document.phone or '',
+        'course': document.course_name or '',
+        'branch': document.branch_name or '',
+        'enrollment_date': document.enrollment_date,
+        'signed_date': document.submitted_at,
+        'submitted_at': document.submitted_at,
+        'status': rules_repository_document_status(document),
         'status_label': 'Available' if pdf_available else 'Document unavailable',
-        'rules_status': signing.status,
+        'rules_status': RulesSigningRequest.Status.SUBMITTED,
         'pdf_url': pdf_url,
         'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
         'selfie_url': selfie_url,
@@ -8628,12 +8657,12 @@ def serialize_rules_signing(signing, request, include_detail=False):
     if include_detail:
         row.update({
             'candidate': {
-                'name': enrollment.name,
-                'student_number': enrollment.student_number or '',
-                'phone': enrollment.phone or '',
-                'course': enrollment.course.name if enrollment.course else '',
-                'branch': enrollment.branch.name if enrollment.branch else '',
-                'enrollment_date': enrollment.enrollment_date,
+                'name': document.candidate_name,
+                'student_number': document.student_number or '',
+                'phone': document.phone or '',
+                'course': document.course_name or '',
+                'branch': document.branch_name or '',
+                'enrollment_date': document.enrollment_date,
                 'counselor_name': counselor.full_name if counselor else '',
             },
             'files': {
@@ -8651,18 +8680,18 @@ class RulesRegulationsListView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
     def get(self, request):
-        queryset = rules_signing_queryset_for_user(request.user)
+        queryset = rules_document_queryset_for_user(request.user)
         search = str(request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(
-                Q(enrollment__name__icontains=search)
-                | Q(enrollment__student_number__icontains=search)
-                | Q(enrollment__phone__icontains=search)
+                Q(candidate_name__icontains=search)
+                | Q(student_number__icontains=search)
+                | Q(phone__icontains=search)
             )
         queryset = queryset.order_by('-submitted_at', '-created_at', '-id')
         paginator = FastPageNumberPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
-        rows = [serialize_rules_signing(signing, request) for signing in page]
+        rows = [serialize_rules_document(document, request) for document in page]
         return paginator.get_paginated_response(rows)
 
 
@@ -8670,10 +8699,44 @@ class RulesRegulationsDetailView(APIView):
     permission_classes = [IsStaffOrAdmin]
 
     def get(self, request, pk):
-        signing = rules_signing_queryset_for_user(request.user).filter(pk=pk).first()
-        if not signing:
+        document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
+        if not document:
             return Response({'detail': 'Rules & Regulations document was not found.'}, status=404)
-        return Response(serialize_rules_signing(signing, request, include_detail=True))
+        return Response(serialize_rules_document(document, request, include_detail=True))
+
+
+class RulesRegulationsPdfView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, pk):
+        document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
+        if not document:
+            return proof_unavailable_response()
+        pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+        if not pdf_bytes:
+            return proof_unavailable_response()
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = proof_content_disposition(request, document)
+        return response
+
+
+class RulesRegulationsSelfieView(APIView):
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, pk):
+        document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
+        if not document:
+            return Response({'detail': 'Selfie is not available.'}, status=404)
+        stored_response = file_response_from_field(
+            document.selfie_image,
+            signing_image_content_type(document, 'selfie_image'),
+        )
+        if stored_response:
+            return stored_response
+        image_bytes = binary_or_legacy_file(document, 'selfie_image_file', 'selfie_image')
+        if not image_bytes:
+            return Response({'detail': 'Selfie is not available.'}, status=404)
+        return HttpResponse(image_bytes, content_type='image/jpeg')
 
 
 class PublicRulesSignedPdfView(APIView):
@@ -11985,6 +12048,20 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'inline; filename="{document_number}.html"'
         return response
 
+    @action(detail=True, methods=['get'], url_path='download-bill')
+    def download_bill(self, request, pk=None):
+        installment = self.get_object()
+        document_number = installment.bill_number
+        if not document_number:
+            return Response({'detail': 'Bill has not been generated yet.'}, status=404)
+        try:
+            pdf_bytes = self._build_document_pdf(installment)
+        except RuntimeError as exc:
+            return Response({'detail': str(exc)}, status=503)
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="{document_number}.pdf"'
+        return response
+
     @action(detail=True, methods=['post'], url_path='send-bill')
     def send_bill(self, request, pk=None):
         installment = self.get_object()
@@ -11995,22 +12072,25 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return Response({'detail': 'Generate the bill before sending it.'}, status=400)
 
         enrollment = installment.enrollment
-        image_filename = f'{document_number}.png'
+        pdf_filename = f'{document_number}.pdf'
         snapshot = self._build_document_snapshot(installment)
         try:
-            image_bytes = self._build_document_png(installment, snapshot)
+            pdf_bytes = self._build_document_pdf(installment, snapshot)
         except RuntimeError as exc:
             return Response({'detail': str(exc)}, status=503)
         whatsapp_message = self._bill_whatsapp_message(enrollment, installment)
+        normalized_phone = normalize_candidate_phone(enrollment.phone)
+        if not normalized_phone:
+            return Response({'detail': 'Student phone number is not valid for WhatsApp.'}, status=400)
         if self._bill_api_delivery_enabled() and WATIClient().is_configured:
             log = send_candidate_document(
                 candidate_name=enrollment.name,
                 phone=enrollment.phone,
                 message_type=WhatsAppMessage.MsgType.MANUAL,
                 caption=whatsapp_message,
-                file_bytes=image_bytes,
-                filename=image_filename,
-                content_type='image/png',
+                file_bytes=pdf_bytes,
+                filename=pdf_filename,
+                content_type='application/pdf',
                 sent_by=request.user,
                 related_model='payment_installment',
                 related_id=installment.id,
@@ -12019,8 +12099,9 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             return Response({
                 'detail': detail,
                 'phone': enrollment.phone,
+                'normalized_phone': normalized_phone,
                 'document_number': document_number,
-                'document_filename': image_filename,
+                'document_filename': pdf_filename,
                 'whatsapp_message': whatsapp_message,
                 'sent_at': log.sent_at or log.created_at,
                 'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),
@@ -12028,20 +12109,23 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
                 **whatsapp_send_payload(log),
             })
 
-        self._store_bill_image(request, installment, image_bytes)
+        pdf_url = self._store_bill_pdf(request, installment, pdf_bytes)
         return Response({
-            'detail': 'Bill image generated. Share it through WhatsApp.',
+            'detail': 'WhatsApp Web opened. Attach the generated Bill PDF and click Send.',
             'phone': enrollment.phone,
+            'normalized_phone': normalized_phone,
             'document_number': document_number,
-            'document_filename': image_filename,
-            'bill_image_data': base64.b64encode(image_bytes).decode('ascii'),
-            'bill_image_content_type': 'image/png',
-            'share_mode': 'browser_file_share',
+            'document_filename': pdf_filename,
+            'bill_pdf_data': base64.b64encode(pdf_bytes).decode('ascii'),
+            'bill_pdf_content_type': 'application/pdf',
+            'bill_pdf_url': pdf_url,
+            'share_mode': 'whatsapp_web_pdf_share',
+            'whatsapp_url': whatsapp_web_url(normalized_phone, whatsapp_message),
             'whatsapp_message': whatsapp_message,
             'whatsapp_sent': False,
             'whatsapp_status': 'prepared',
             'whatsapp_error': '',
-            'whatsapp_provider': 'browser_file_share',
+            'whatsapp_provider': 'whatsapp_web',
         })
 
     @action(detail=True, methods=['post'], url_path='confirm-bill-sent')
@@ -12061,21 +12145,21 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
             message_type=WhatsAppMessage.MsgType.MANUAL,
             message_body=message,
             result={
-                'provider': 'browser_file_share',
+                'provider': 'whatsapp_web_pdf_share',
                 'document_number': document_number,
-                'filename': f'{document_number}.png',
+                'filename': f'{document_number}.pdf',
             },
-            template_name=f'{document_number}.png',
+            template_name=f'{document_number}.pdf',
             sent_by=request.user,
             related_model='payment_installment',
             related_id=installment.id,
-            provider='browser_file_share',
+            provider='whatsapp_web',
         )
         return Response({
             'detail': 'Bill sent successfully.',
             'phone': enrollment.phone,
             'document_number': document_number,
-            'document_filename': f'{document_number}.png',
+            'document_filename': f'{document_number}.pdf',
             'whatsapp_message': message,
             'sent_at': log.sent_at or log.created_at,
             'sent_at_display': timezone.localtime(log.sent_at or log.created_at).strftime('%d-%b-%Y %I:%M %p'),

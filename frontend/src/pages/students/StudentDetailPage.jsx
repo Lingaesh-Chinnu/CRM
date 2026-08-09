@@ -57,32 +57,55 @@ function sendBillButtonClass(installment) {
   return `inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl ${color} px-5 py-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50`
 }
 
-async function shareBillImageFile(data) {
-  let blob
-  if (data.bill_image_data) {
-    const byteCharacters = window.atob(data.bill_image_data)
-    const byteArrays = []
-    for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
-      const slice = byteCharacters.slice(offset, offset + 1024)
-      byteArrays.push(new Uint8Array([...slice].map((char) => char.charCodeAt(0))))
-    }
-    blob = new Blob(byteArrays, { type: data.bill_image_content_type || 'image/png' })
-  } else {
-    throw new Error('Bill image was not returned by the server.')
+function blobFromBase64(value, contentType) {
+  const byteCharacters = window.atob(value || '')
+  const byteArrays = []
+  for (let offset = 0; offset < byteCharacters.length; offset += 1024) {
+    const slice = byteCharacters.slice(offset, offset + 1024)
+    byteArrays.push(new Uint8Array([...slice].map((char) => char.charCodeAt(0))))
   }
+  return new Blob(byteArrays, { type: contentType })
+}
+
+function billPdfBlob(data) {
+  if (!data.bill_pdf_data) {
+    throw new Error('Bill PDF was not returned by the server.')
+  }
+  return blobFromBase64(data.bill_pdf_data, data.bill_pdf_content_type || 'application/pdf')
+}
+
+async function shareBillPdfFile(data) {
+  const blob = billPdfBlob(data)
   const file = new File(
     [blob],
-    data.document_filename || `${data.document_number || 'bill'}.png`,
-    { type: blob.type || 'image/png' },
+    data.document_filename || `${data.document_number || 'bill'}.pdf`,
+    { type: blob.type || 'application/pdf' },
   )
   if (!navigator.share || (navigator.canShare && !navigator.canShare({ files: [file] }))) {
-    throw new Error('Image sharing is not supported in this browser. Use a WhatsApp API-enabled device or browser.')
+    throw new Error('PDF file sharing is not supported in this browser.')
   }
   await navigator.share({
     files: [file],
     text: data.whatsapp_message || '',
-    title: 'Payment Receipt',
+    title: 'Payment Bill',
   })
+}
+
+function openBillPdfBlob(data) {
+  const blob = billPdfBlob(data)
+  const url = window.URL.createObjectURL(blob)
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function openWhatsAppBillHandoff(data, targetWindow = null) {
+  if (data.whatsapp_url) {
+    if (targetWindow && !targetWindow.closed) {
+      targetWindow.opener = null
+      targetWindow.location.href = data.whatsapp_url
+      return
+    }
+    window.open(data.whatsapp_url, '_blank', 'noopener,noreferrer')
+  }
 }
 
 function latestGeneratedBill(paymentInfo) {
@@ -221,17 +244,53 @@ export default function StudentDetailPage() {
     }
   }
 
+  const downloadBill = async (installment) => {
+    if (!installment) return
+    setBillActionId(installment.id)
+    setMessage('')
+    try {
+      const { data } = await api.get(`/installments/${installment.id}/download-bill/`, {
+        responseType: 'blob',
+      })
+      const documentNumber = installment.document_number || installment.bill_number || 'bill'
+      const url = window.URL.createObjectURL(data)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${documentNumber}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to download bill.'))
+    } finally {
+      setBillActionId(null)
+    }
+  }
+
   const sendBill = async (installment) => {
     if (!installment || sendingBillId) return
     setSendingBillId(installment.id)
     setMessage('')
+    const whatsappWindow = window.open('about:blank', '_blank')
     try {
       const { data } = await api.post(`/installments/${installment.id}/send-bill/`)
       let sentData = data
-      if (data.share_mode === 'browser_file_share') {
-        await shareBillImageFile(data)
-        const confirmation = await api.post(`/installments/${installment.id}/confirm-bill-sent/`)
-        sentData = confirmation.data
+      if (data.share_mode === 'whatsapp_web_pdf_share') {
+        openWhatsAppBillHandoff(data, whatsappWindow)
+        try {
+          await shareBillPdfFile(data)
+          const confirmation = await api.post(`/installments/${installment.id}/confirm-bill-sent/`)
+          sentData = confirmation.data
+        } catch (shareError) {
+          openBillPdfBlob(data)
+          sentData = {
+            ...data,
+            detail: data.detail || shareError.message || 'WhatsApp Web opened. Attach the generated Bill PDF and click Send.',
+          }
+        }
+      } else if (whatsappWindow && !whatsappWindow.closed) {
+        whatsappWindow.close()
       }
       setMessage(sentData.whatsapp_sent ? 'Bill sent successfully.' : sentData.whatsapp_error || sentData.detail || 'Bill send request failed.')
       if (sentData.whatsapp_sent) {
@@ -256,6 +315,9 @@ export default function StudentDetailPage() {
         })
       }
     } catch (error) {
+      if (whatsappWindow && !whatsappWindow.closed) {
+        whatsappWindow.close()
+      }
       setMessage(apiErrorMessage(error, error.message || 'Failed to send bill.'))
     } finally {
       setSendingBillId(null)
@@ -366,6 +428,14 @@ export default function StudentDetailPage() {
               className="inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {billActionId === latestBill?.id ? 'Opening...' : 'View Bill'}
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadBill(latestBill)}
+              disabled={!latestBill || billActionId === latestBill?.id}
+              className="inline-flex min-w-[140px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {billActionId === latestBill?.id ? 'Downloading...' : 'Download Bill'}
             </button>
             {!isSuperAdmin && (
               <button

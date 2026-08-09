@@ -10,7 +10,7 @@ import base64
 import io
 import tempfile
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
@@ -2508,6 +2508,21 @@ class PublicWalkInFormTests(APITestCase):
             selfie_image_file=b'\x89PNG-selfie',
             signed_pdf_file=b'%PDF-stored',
         )
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number or '',
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+            selfie_image_file=b'\x89PNG-selfie',
+            signed_pdf_file=b'%PDF-stored',
+            source_token=signing.token,
+        )
         RulesSigningRequest.objects.create(
             enrollment=Enrollment.objects.create(
                 branch=self.branch,
@@ -2529,17 +2544,82 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(list_response.data['count'], 1)
-        self.assertEqual(list_response.data['results'][0]['id'], signing.id)
+        self.assertEqual(list_response.data['results'][0]['id'], document.id)
         self.assertEqual(list_response.data['results'][0]['status'], 'available')
-        self.assertIn(f'/rules-signed-pdf/{enrollment.id}/', list_response.data['results'][0]['pdf_url'])
-        self.assertIn(f'/rules-selfie/{enrollment.id}/', list_response.data['results'][0]['selfie_url'])
+        self.assertIn(f'/api/rules-regulations/{document.id}/pdf/', list_response.data['results'][0]['pdf_url'])
+        self.assertIn(f'/api/rules-regulations/{document.id}/selfie/', list_response.data['results'][0]['selfie_url'])
 
-        detail_response = self.client.get(f'/api/rules-regulations/{signing.id}/')
+        detail_response = self.client.get(f'/api/rules-regulations/{document.id}/')
 
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_response.data['candidate']['name'], 'Rules Document Student')
         self.assertTrue(detail_response.data['files']['pdf_available'])
         self.assertTrue(detail_response.data['files']['selfie_available'])
+
+        pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.content, b'%PDF-stored')
+
+    def test_rules_regulations_document_history_survives_signing_reset_and_deleted_enrollment(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Permanent Rules Student',
+            phone='9000000146',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            selfie_image_file=b'\x89PNG-permanent',
+            signed_pdf_file=b'%PDF-permanent',
+        )
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number or '',
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+            selfie_image_file=b'\x89PNG-permanent',
+            signed_pdf_file=b'%PDF-permanent',
+            source_token=signing.token,
+        )
+
+        signing.status = RulesSigningRequest.Status.PENDING
+        signing.submitted_at = None
+        signing.selfie_image = None
+        signing.signed_pdf = None
+        signing.selfie_image_file = None
+        signing.signed_pdf_file = None
+        signing.save(update_fields=[
+            'status', 'submitted_at', 'selfie_image', 'signed_pdf',
+            'selfie_image_file', 'signed_pdf_file', 'updated_at',
+        ])
+        enrollment.is_deleted = True
+        enrollment.deleted_at = timezone.now()
+        enrollment.deleted_by = self.admin
+        enrollment.save(update_fields=['is_deleted', 'deleted_at', 'deleted_by', 'updated_at'])
+
+        self.client.force_authenticate(user=self.staff)
+        list_response = self.client.get('/api/rules-regulations/', {'search': 'Permanent Rules'})
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data['count'], 1)
+        self.assertEqual(list_response.data['results'][0]['id'], document.id)
+
+        pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.content, b'%PDF-permanent')
 
     def test_rules_regulations_list_marks_missing_legacy_pdf_unavailable(self):
         enrollment = Enrollment.objects.create(
@@ -2554,11 +2634,25 @@ class PublicWalkInFormTests(APITestCase):
             discount_amount=0,
             status=Enrollment.Status.RULES_SUBMITTED,
         )
-        RulesSigningRequest.objects.create(
+        signing = RulesSigningRequest.objects.create(
             enrollment=enrollment,
             status=RulesSigningRequest.Status.SUBMITTED,
             submitted_at=timezone.now(),
             signed_pdf='signed_rules/missing.pdf',
+        )
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number or '',
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+            signed_pdf='signed_rules/missing.pdf',
+            source_token=signing.token,
         )
         self.client.force_authenticate(user=self.staff)
 
@@ -2566,6 +2660,7 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['id'], document.id)
         self.assertEqual(response.data['results'][0]['status'], 'document_unavailable')
         self.assertIsNone(response.data['results'][0]['pdf_url'])
 
@@ -2595,17 +2690,16 @@ class PublicWalkInFormTests(APITestCase):
 
         import views as crm_views
 
-        original_exists = crm_views.default_storage.exists
+        original_save_rules_proof_file = crm_views.save_rules_proof_file
 
-        def verified_pdf_missing(name):
-            exists = original_exists(name)
-            if str(name).endswith('-signed.pdf') and exists:
-                return False
-            return exists
+        def fail_signed_pdf_storage(field, storage_name, file_bytes):
+            if str(storage_name).endswith('.pdf') and '-signed' in str(storage_name):
+                raise RuntimeError('Rules proof file was not stored successfully.')
+            return original_save_rules_proof_file(field, storage_name, file_bytes)
 
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
-                with mock.patch('views.default_storage.exists', side_effect=verified_pdf_missing):
+                with mock.patch('views.save_rules_proof_file', side_effect=fail_signed_pdf_storage):
                     response = self.client.post(
                         f'/api/public/rules-sign/{signing.token}/',
                         {'selfie': image_data, 'signature': image_data},
@@ -2619,6 +2713,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertFalse(signing.signed_pdf)
         self.assertFalse(signing.selfie_image)
         self.assertFalse(signing.signature_image)
+        self.assertFalse(RulesRegulationsDocument.objects.filter(signing_request=signing).exists())
         self.assertEqual(enrollment.status, Enrollment.Status.RULES_SENT)
 
     def test_public_rules_signing_processes_photo_signature_and_pdf(self):
@@ -2663,6 +2758,10 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(signing.selfie_image_file)
         self.assertTrue(signing.signature_image_file)
         self.assertTrue(signing.signed_pdf_file)
+        document = RulesRegulationsDocument.objects.get(signing_request=signing)
+        self.assertEqual(document.candidate_name, 'Rules Signing Candidate')
+        self.assertTrue(document.selfie_image_file)
+        self.assertTrue(document.signed_pdf_file)
         self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
 
         with mock.patch('views.build_signed_rules_pdf') as build_pdf:
@@ -3233,6 +3332,104 @@ class PublicWalkInFormTests(APITestCase):
         installment.refresh_from_db()
         self.assertEqual(installment.document_snapshot, stale_snapshot)
         self.assertEqual(installment.document_html, 'STALE BILL HTML')
+
+    def test_staff_send_bill_prepares_whatsapp_web_pdf_handoff(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='WhatsApp PDF Bill Student',
+            phone='9000000141',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-05-12'},
+            ],
+        )
+        installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment',
+            payment_date='2026-05-11',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+        self.client.force_authenticate(self.admin)
+        bill_response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+        self.assertEqual(bill_response.status_code, 200)
+        installment.refresh_from_db()
+
+        self.client.force_authenticate(self.staff)
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(
+                BILL_WHATSAPP_API_ENABLED=False,
+                WHATSCHIMP_ENABLED=False,
+                WATI_API_URL='',
+                WATI_ACCESS_TOKEN='',
+                MEDIA_ROOT=media_root,
+            ):
+                response = self.client.post(f'/api/installments/{installment.id}/send-bill/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['share_mode'], 'whatsapp_web_pdf_share')
+        self.assertEqual(response.data['normalized_phone'], '919000000141')
+        self.assertEqual(response.data['document_filename'], f'{installment.bill_number}.pdf')
+        self.assertEqual(response.data['bill_pdf_content_type'], 'application/pdf')
+        self.assertIn('https://wa.me/919000000141?', response.data['whatsapp_url'])
+        self.assertNotIn('bill_image_data', response.data)
+        self.assertNotIn('browser_file_share', response.data.get('share_mode', ''))
+        self.assertTrue(base64.b64decode(response.data['bill_pdf_data']).startswith(b'%PDF'))
+
+    def test_download_bill_returns_existing_bill_pdf(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Download PDF Bill Student',
+            phone='9000000142',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-05-12'},
+            ],
+        )
+        installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment',
+            payment_date='2026-05-11',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+        self.client.force_authenticate(self.admin)
+        bill_response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+        self.assertEqual(bill_response.status_code, 200)
+        installment.refresh_from_db()
+
+        response = self.client.get(f'/api/installments/{installment.id}/download-bill/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertIn(f'filename="{installment.bill_number}.pdf"', response['Content-Disposition'])
+        self.assertTrue(response.content.startswith(b'%PDF'))
 
     def test_generated_bill_schedule_matches_saved_payment_schedule_variants(self):
         self.client.force_authenticate(self.admin)
