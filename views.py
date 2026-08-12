@@ -300,6 +300,8 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
+RULES_SUCCESS_MESSAGE = 'Thank You! Rules & Regulations has been submitted successfully.'
+RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 PUBLIC_LEAD_COURSE_NAMES = [
     'Artificial Intelligence',
     'Data Analytics',
@@ -8324,11 +8326,12 @@ class PublicRulesSigningView(APIView):
             )
         notify_rules_signed(enrollment, signing.submitted_at)
         return Response({
-            'detail': 'Rules & Regulation form submitted successfully.',
+            'detail': RULES_SUCCESS_MESSAGE,
             'status': signing.status,
             'signed_pdf_url': self.public_pdf_url(request, signing),
             'selfie_url': None,
             'submitted_at': signing.submitted_at,
+            'redirect_url': RULES_SUCCESS_REDIRECT_URL,
         })
 
 
@@ -8343,6 +8346,7 @@ def proof_content_disposition(request, enrollment, default='inline'):
 
 
 def proof_unavailable_response():
+    logger.warning('Rules proof unavailable response returned without a resolvable signed PDF.')
     return Response(
         {'detail': 'Signed PDF is not available. Please resend and collect the signed form again.'},
         status=404,
@@ -8409,6 +8413,14 @@ def binary_or_legacy_file(signing, binary_field, legacy_field):
     field = getattr(signing, legacy_field, None)
     handle, _ = open_existing_storage_file(field)
     if not handle:
+        logger.warning(
+            'Rules proof file unavailable: model=%s id=%s binary_field=%s legacy_field=%s legacy_path=%s.',
+            signing.__class__.__name__,
+            getattr(signing, 'id', None),
+            binary_field,
+            legacy_field,
+            getattr(field, 'name', ''),
+        )
         return None
     try:
         with handle:

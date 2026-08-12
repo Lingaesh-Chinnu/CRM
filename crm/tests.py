@@ -2812,7 +2812,8 @@ class PublicWalkInFormTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['detail'], 'Rules & Regulation form submitted successfully.')
+        self.assertEqual(response.data['detail'], 'Thank You! Rules & Regulations has been submitted successfully.')
+        self.assertEqual(response.data['redirect_url'], 'https://indrainstitute.com/')
         signing.refresh_from_db()
         enrollment.refresh_from_db()
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)

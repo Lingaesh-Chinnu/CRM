@@ -25,6 +25,7 @@ const documentCardClass = 'rounded-[20px] border border-slate-200 bg-white p-5 s
 const sectionHeadingClass = 'text-[17px] font-bold leading-snug text-slate-950'
 const labelClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500'
 const valueClass = 'mt-2 text-[14px] font-semibold leading-snug text-slate-950'
+const SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 
 export default function RulesSigningPage() {
   const { token } = useParams()
@@ -254,7 +255,10 @@ export default function RulesSigningPage() {
         selfie_url: response.selfie_url,
       }))
       stopCamera()
-      setMessage('Signed form submitted successfully.')
+      setMessage(response.detail || 'Thank You! Rules & Regulations has been submitted successfully.')
+      window.setTimeout(() => {
+        window.location.assign(response.redirect_url || SUCCESS_REDIRECT_URL)
+      }, 1800)
     } catch (error) {
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
     } finally {
