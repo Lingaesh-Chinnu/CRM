@@ -1,4 +1,3 @@
-```python
 # ============================================================
 # backend/core/settings.py
 # Production-ready Django settings for CRM ERP
@@ -775,4 +774,3 @@ LOGGING: dict = {
         },
     },
 }
-```
