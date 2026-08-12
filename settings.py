@@ -228,6 +228,7 @@ TEMPLATES: list = [
 # ── Database ──────────────────────────────────────────────────
 
 DATABASE_URL = os.environ.get('DATABASE_URL')
+
 DB_ENGINE = os.environ.get(
     'DB_ENGINE',
     'sqlite'
@@ -306,7 +307,6 @@ else:
             ),
         }
     }
-
 
 # ── Caching & Celery via Redis ────────────────────────────────
 
@@ -581,25 +581,13 @@ if USE_S3_STORAGE:
     }
 
 
-# ── Render Ephemeral Filesystem Safety ────────────────────────
+# ── Render Media Storage ─────────────────────────────────────
 
 MEDIA_ROOT_IS_DEFAULT_LOCAL = (
     MEDIA_ROOT.resolve()
     == (BASE_DIR / 'media').resolve()
 )
 
-if (
-    RUNNING_ON_RENDER
-    and not USE_S3_STORAGE
-    and MEDIA_ROOT_IS_DEFAULT_LOCAL
-):
-    raise ImproperlyConfigured(
-        'Render filesystems are ephemeral. Configure '
-        'USE_S3_STORAGE=true for S3-compatible media '
-        'storage, or set MEDIA_ROOT to an attached Render '
-        'persistent disk before accepting Rules & '
-        'Regulations signed PDFs, signatures, and selfies.'
-    )
 
 
 # ── WhatsApp Cloud API ────────────────────────────────────────
