@@ -313,6 +313,10 @@ PUBLIC_LEAD_COURSE_NAMES = [
 ]
 
 
+def rules_database_file_backups_enabled():
+    return False
+
+
 def missing_model_columns(model, field_names):
     cache_key = model._meta.db_table
     try:
@@ -8271,9 +8275,14 @@ class PublicRulesSigningView(APIView):
                 proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
                 pdf_bytes,
             )
-            signing.selfie_image_file = selfie_bytes
-            signing.signature_image_file = signature_bytes
-            signing.signed_pdf_file = pdf_bytes
+            if rules_database_file_backups_enabled():
+                signing.selfie_image_file = selfie_bytes
+                signing.signature_image_file = signature_bytes
+                signing.signed_pdf_file = pdf_bytes
+            else:
+                signing.selfie_image_file = None
+                signing.signature_image_file = None
+                signing.signed_pdf_file = None
             if (
                 not stored_rules_file_exists(signing, 'selfie_image')
                 or not stored_rules_file_exists(signing, 'signature_image')
@@ -8484,9 +8493,9 @@ def persist_rules_regulations_document(signing):
             'selfie_image': signing.selfie_image.name if signing.selfie_image else None,
             'signature_image': signing.signature_image.name if signing.signature_image else None,
             'signed_pdf': signing.signed_pdf.name if signing.signed_pdf else None,
-            'selfie_image_file': signing.selfie_image_file,
-            'signature_image_file': signing.signature_image_file,
-            'signed_pdf_file': signing.signed_pdf_file,
+            'selfie_image_file': signing.selfie_image_file if rules_database_file_backups_enabled() else None,
+            'signature_image_file': signing.signature_image_file if rules_database_file_backups_enabled() else None,
+            'signed_pdf_file': signing.signed_pdf_file if rules_database_file_backups_enabled() else None,
             'source_token': signing.token,
         },
     )
@@ -9184,7 +9193,11 @@ def reset_rules_for_course_change(enrollment, user, reason, previous_schedule, p
         previous_payment_schedule=previous_schedule or [],
         previous_signed=previous_signed,
         previous_signed_pdf=signing.signed_pdf.name if signing and signing.signed_pdf else None,
-        previous_signed_pdf_file=signing.signed_pdf_file if signing and signing.signed_pdf_file else None,
+        previous_signed_pdf_file=(
+            signing.signed_pdf_file
+            if signing and signing.signed_pdf_file and not signing.signed_pdf
+            else None
+        ),
     )
 
     if signing:

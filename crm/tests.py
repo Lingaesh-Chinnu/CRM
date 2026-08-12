@@ -2821,14 +2821,17 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(signing.selfie_image)
         self.assertTrue(signing.signature_image)
         self.assertTrue(signing.signed_pdf)
-        self.assertTrue(signing.selfie_image_file)
-        self.assertTrue(signing.signature_image_file)
-        self.assertTrue(signing.signed_pdf_file)
+        self.assertIsNone(signing.selfie_image_file)
+        self.assertIsNone(signing.signature_image_file)
+        self.assertIsNone(signing.signed_pdf_file)
         document = RulesRegulationsDocument.objects.get(signing_request=signing)
         self.assertEqual(document.candidate_name, 'Rules Signing Candidate')
-        self.assertTrue(document.selfie_image_file)
-        self.assertTrue(document.signature_image_file)
-        self.assertTrue(document.signed_pdf_file)
+        self.assertTrue(document.selfie_image)
+        self.assertTrue(document.signature_image)
+        self.assertTrue(document.signed_pdf)
+        self.assertIsNone(document.selfie_image_file)
+        self.assertIsNone(document.signature_image_file)
+        self.assertIsNone(document.signed_pdf_file)
         self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
 
         with mock.patch('views.build_signed_rules_pdf') as build_pdf:
@@ -2848,6 +2851,57 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(signature_response.status_code, 200)
         signature_content = getattr(signature_response, 'content', None) or b''.join(signature_response.streaming_content)
         self.assertTrue(signature_content.startswith(b'\x89PNG'))
+
+    def test_public_rules_signing_with_s3_storage_does_not_store_database_media(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules S3 Candidate',
+            phone='9000000136',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root, USE_S3_STORAGE=True):
+                response = self.client.post(
+                    f'/api/public/rules-sign/{signing.token}/',
+                    {'selfie': image_data, 'signature': image_data},
+                    format='json',
+                )
+                self.assertEqual(response.status_code, 200)
+                signing.refresh_from_db()
+                self.assertTrue(signing.selfie_image)
+                self.assertTrue(signing.signature_image)
+                self.assertTrue(signing.signed_pdf)
+                self.assertIsNone(signing.selfie_image_file)
+                self.assertIsNone(signing.signature_image_file)
+                self.assertIsNone(signing.signed_pdf_file)
+                document = RulesRegulationsDocument.objects.get(signing_request=signing)
+                self.assertTrue(document.selfie_image)
+                self.assertTrue(document.signature_image)
+                self.assertTrue(document.signed_pdf)
+                self.assertIsNone(document.selfie_image_file)
+                self.assertIsNone(document.signature_image_file)
+                self.assertIsNone(document.signed_pdf_file)
+                pdf_response = self.client.get(f'/public/rules-signed-pdf/{signing.token}/')
+
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertTrue(pdf_response.content.startswith(b'%PDF'))
 
     def test_public_rules_signing_hides_dependency_errors(self):
         enrollment = Enrollment.objects.create(
@@ -3037,7 +3091,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(reset_history.previous_schedule_locked)
         self.assertTrue(reset_history.previous_signed)
         self.assertEqual(reset_history.previous_signed_pdf.name, 'signed_rules/approval-change-old.pdf')
-        self.assertEqual(bytes(reset_history.previous_signed_pdf_file), b'%PDF-old-rules')
+        self.assertIsNone(reset_history.previous_signed_pdf_file)
         self.assertEqual(reset_history.previous_payment_schedule, [
             {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-11'},
             {'label': '2nd Installment', 'amount': 5000, 'due_date': '2026-05-12'},
