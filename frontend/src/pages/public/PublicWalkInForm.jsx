@@ -149,9 +149,10 @@ export default function PublicWalkInForm() {
   const [saving, setSaving] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const submittingRef = useRef(false)
+  const redirectTimerRef = useRef(null)
 
   useEffect(() => {
-    api.get('/public/walkin/').then(({ data }) => {
+    api.get('/public/walkin/', { skipAuth: true }).then(({ data }) => {
       const branchFromLink = new URLSearchParams(window.location.search).get('branch') || ''
       setBranches(data.branches || [])
       setCourses(data.courses || [])
@@ -168,6 +169,12 @@ export default function PublicWalkInForm() {
       console.error('Public walk-in form options failed', error)
       setMessage(formatSubmitError(error))
     })
+
+    return () => {
+      if (redirectTimerRef.current) {
+        window.clearTimeout(redirectTimerRef.current)
+      }
+    }
   }, [])
 
   const updateField = (field, value) => {
@@ -212,20 +219,28 @@ export default function PublicWalkInForm() {
     setMessage('')
 
     try {
-      const { data } = await api.post('/public/walkin/', {
-        ...form,
-        branch: Number(form.branch),
-        course: Number(form.course),
-        demo_class: form.demo_class === 'yes',
-        interested_global_certification: form.interested_global_certification === 'yes',
-        dob: form.dob || null,
-        visit_date: new Date().toISOString().slice(0, 10),
-      })
+      const { data } = await api.post(
+        '/public/walkin/',
+        {
+          ...form,
+          branch: Number(form.branch),
+          course: Number(form.course),
+          demo_class: form.demo_class === 'yes',
+          interested_global_certification: form.interested_global_certification === 'yes',
+          dob: form.dob || null,
+          visit_date: new Date().toISOString().slice(0, 10),
+        },
+        { skipAuth: true },
+      )
       if (!data?.id && !data?.candidate_number) {
         throw new Error('Public walk-in save response did not include a record identifier.')
       }
+      setSaving(false)
+      setMessage('Thank you for filling out the form.')
       setRedirecting(true)
-      window.location.assign('https://www.indrainstitute.com/')
+      redirectTimerRef.current = window.setTimeout(() => {
+        window.location.assign('https://www.indrainstitute.com')
+      }, 2000)
     } catch (error) {
       console.error('Public walk-in form submission failed', error)
       submittingRef.current = false

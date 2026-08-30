@@ -31,6 +31,9 @@ function retryDelay(ms = 700) {
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
+    if (config.skipAuth) {
+      return config
+    }
     const token = localStorage.getItem('access_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -64,7 +67,7 @@ api.interceptors.response.use(
       return api(originalRequest)
     }
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest?.skipAuth && !originalRequest._retry) {
       originalRequest._retry = true
 
       try {

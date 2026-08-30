@@ -97,6 +97,18 @@ function openBillPdfBlob(data) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function downloadBillPdfBlob(data) {
+  const blob = billPdfBlob(data)
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = data.document_filename || `${data.document_number || 'bill'}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 function openWhatsAppBillHandoff(data, targetWindow = null) {
   if (data.whatsapp_url) {
     if (targetWindow && !targetWindow.closed) {
@@ -284,11 +296,14 @@ export default function StudentDetailPage() {
           sentData = confirmation.data
         } catch (shareError) {
           openBillPdfBlob(data)
+          downloadBillPdfBlob(data)
           sentData = {
             ...data,
-            detail: data.detail || shareError.message || 'WhatsApp Web opened. Attach the generated Bill PDF and click Send.',
+            detail: data.detail || shareError.message || 'WhatsApp Web opened. The generated Bill PDF has been opened/downloaded for attachment.',
           }
         }
+      } else if (data.whatsapp_url) {
+        openWhatsAppBillHandoff(data, whatsappWindow)
       } else if (whatsappWindow && !whatsappWindow.closed) {
         whatsappWindow.close()
       }
@@ -437,16 +452,14 @@ export default function StudentDetailPage() {
             >
               {billActionId === latestBill?.id ? 'Downloading...' : 'Download Bill'}
             </button>
-            {!isSuperAdmin && (
-              <button
-                type="button"
-                onClick={() => sendBill(latestBill)}
-                disabled={!latestBill || sendingBillId === latestBill?.id}
-                className={sendBillButtonClass(latestBill)}
-              >
-                {sendingBillId === latestBill?.id ? 'Sending...' : billWasSent(latestBill) ? 'Bill Sent' : 'Send Bill'}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => sendBill(latestBill)}
+              disabled={!latestBill || sendingBillId === latestBill?.id}
+              className={sendBillButtonClass(latestBill)}
+            >
+              {sendingBillId === latestBill?.id ? 'Sending...' : billWasSent(latestBill) ? 'Bill Sent' : 'Send Bill'}
+            </button>
           </div>
         </div>
       </section>

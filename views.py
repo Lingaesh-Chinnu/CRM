@@ -314,7 +314,12 @@ PUBLIC_LEAD_COURSE_NAMES = [
 
 
 def rules_database_file_backups_enabled():
-    return False
+    configured = getattr(settings, 'RULES_DATABASE_FILE_BACKUPS', None)
+    if configured is not None:
+        if isinstance(configured, str):
+            return configured.strip().lower() in {'1', 'true', 'yes', 'on'}
+        return bool(configured)
+    return not bool(getattr(settings, 'USE_S3_STORAGE', False))
 
 
 def missing_model_columns(model, field_names):
@@ -8148,7 +8153,7 @@ class PublicWalkInFormView(APIView):
 
         return Response(
             {
-                'detail': 'Thanks for filling out the form.',
+                'detail': 'Thank you for filling out the form.',
                 'candidate_number': walkin.candidate_number,
                 'id': walkin.id,
                 'duplicate': bool(duplicate_records),
@@ -12147,8 +12152,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='send-bill')
     def send_bill(self, request, pk=None):
         installment = self.get_object()
-        if request.user.is_super_admin:
-            return Response({'detail': 'Admins can generate and verify bills, but cannot send bills.'}, status=403)
         document_number = installment.bill_number
         if not document_number:
             return Response({'detail': 'Generate the bill before sending it.'}, status=400)
@@ -12213,8 +12216,6 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='confirm-bill-sent')
     def confirm_bill_sent(self, request, pk=None):
         installment = self.get_object()
-        if request.user.is_super_admin:
-            return Response({'detail': 'Admins can generate and verify bills, but cannot send bills.'}, status=403)
         document_number = installment.bill_number
         if not document_number:
             return Response({'detail': 'Generate the bill before sending it.'}, status=400)

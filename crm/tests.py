@@ -948,7 +948,7 @@ class PublicWalkInFormTests(APITestCase):
         response = self.client.post('/api/public/walkin/', self.payload, format='json')
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['detail'], 'Thanks for filling out the form.')
+        self.assertEqual(response.data['detail'], 'Thank you for filling out the form.')
         walkin = WalkIn.objects.get(phone='9876543210')
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.course, self.course)
@@ -1451,13 +1451,15 @@ class PublicWalkInFormTests(APITestCase):
         self.client.force_authenticate(self.staff)
         staff_response = self.client.get('/api/walkins/')
         self.assertEqual(staff_response.status_code, 200)
-        self.assertEqual(len(staff_response.data), 1)
-        self.assertEqual(staff_response.data[0]['branch_name'], self.branch.name)
+        staff_rows = staff_response.data.get('results', staff_response.data)
+        self.assertEqual(len(staff_rows), 1)
+        self.assertEqual(staff_rows[0]['branch_name'], self.branch.name)
 
         self.client.force_authenticate(self.admin)
         admin_response = self.client.get('/api/walkins/')
         self.assertEqual(admin_response.status_code, 200)
-        self.assertEqual(len(admin_response.data), 1)
+        admin_rows = admin_response.data.get('results', admin_response.data)
+        self.assertEqual(len(admin_rows), 1)
 
     def test_admin_walkin_date_range_returns_only_records_created_within_range(self):
         within_range = WalkIn.objects.create(
@@ -2821,17 +2823,17 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(signing.selfie_image)
         self.assertTrue(signing.signature_image)
         self.assertTrue(signing.signed_pdf)
-        self.assertIsNone(signing.selfie_image_file)
-        self.assertIsNone(signing.signature_image_file)
-        self.assertIsNone(signing.signed_pdf_file)
+        self.assertTrue(bytes(signing.selfie_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(signing.signature_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
         document = RulesRegulationsDocument.objects.get(signing_request=signing)
         self.assertEqual(document.candidate_name, 'Rules Signing Candidate')
         self.assertTrue(document.selfie_image)
         self.assertTrue(document.signature_image)
         self.assertTrue(document.signed_pdf)
-        self.assertIsNone(document.selfie_image_file)
-        self.assertIsNone(document.signature_image_file)
-        self.assertIsNone(document.signed_pdf_file)
+        self.assertTrue(bytes(document.selfie_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(document.signature_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(document.signed_pdf_file).startswith(b'%PDF'))
         self.assertIn('/public/rules-signed-pdf/', response.data['signed_pdf_url'])
 
         with mock.patch('views.build_signed_rules_pdf') as build_pdf:
@@ -3513,6 +3515,57 @@ class PublicWalkInFormTests(APITestCase):
         self.assertIn('https://wa.me/919000000141?', response.data['whatsapp_url'])
         self.assertNotIn('bill_image_data', response.data)
         self.assertNotIn('browser_file_share', response.data.get('share_mode', ''))
+        self.assertTrue(base64.b64decode(response.data['bill_pdf_data']).startswith(b'%PDF'))
+
+    def test_admin_send_bill_prepares_same_pdf_handoff(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Admin WhatsApp PDF Bill Student',
+            phone='9000000144',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.ACTIVE,
+        )
+        payment = Payment.objects.create(
+            enrollment=enrollment,
+            total_fees=enrollment.net_payable_fee,
+            manual_installment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 10900, 'due_date': '2026-05-12'},
+            ],
+        )
+        installment = PaymentInstallment.objects.create(
+            payment=payment,
+            enrollment=enrollment,
+            amount=5000,
+            installment_index=1,
+            installment_label='Enrollment',
+            payment_date='2026-05-11',
+            payment_mode=PaymentInstallment.Mode.CASH,
+        )
+        self.client.force_authenticate(self.admin)
+        bill_response = self.client.post(f'/api/installments/{installment.id}/generate-bill/')
+        self.assertEqual(bill_response.status_code, 200)
+        installment.refresh_from_db()
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(
+                BILL_WHATSAPP_API_ENABLED=False,
+                WHATSCHIMP_ENABLED=False,
+                WATI_API_URL='',
+                WATI_ACCESS_TOKEN='',
+                MEDIA_ROOT=media_root,
+            ):
+                response = self.client.post(f'/api/installments/{installment.id}/send-bill/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['share_mode'], 'whatsapp_web_pdf_share')
+        self.assertEqual(response.data['document_filename'], f'{installment.bill_number}.pdf')
+        self.assertEqual(response.data['bill_pdf_content_type'], 'application/pdf')
         self.assertTrue(base64.b64decode(response.data['bill_pdf_data']).startswith(b'%PDF'))
 
     def test_download_bill_returns_existing_bill_pdf(self):
