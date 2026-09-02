@@ -948,7 +948,7 @@ class PublicWalkInFormTests(APITestCase):
         response = self.client.post('/api/public/walkin/', self.payload, format='json')
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['detail'], 'Thank you for filling out the form.')
+        self.assertEqual(response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
         walkin = WalkIn.objects.get(phone='9876543210')
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.course, self.course)

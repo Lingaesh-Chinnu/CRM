@@ -8153,7 +8153,7 @@ class PublicWalkInFormView(APIView):
 
         return Response(
             {
-                'detail': 'Thank you for filling out the form.',
+                'detail': 'Thank you for filling out the form. Your details have been submitted successfully.',
                 'candidate_number': walkin.candidate_number,
                 'id': walkin.id,
                 'duplicate': bool(duplicate_records),

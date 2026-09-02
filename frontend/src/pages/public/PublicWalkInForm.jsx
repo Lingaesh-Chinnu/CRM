@@ -147,6 +147,7 @@ export default function PublicWalkInForm() {
   const [sources, setSources] = useState([])
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
   const [redirecting, setRedirecting] = useState(false)
   const submittingRef = useRef(false)
   const redirectTimerRef = useRef(null)
@@ -236,7 +237,8 @@ export default function PublicWalkInForm() {
         throw new Error('Public walk-in save response did not include a record identifier.')
       }
       setSaving(false)
-      setMessage('Thank you for filling out the form.')
+      setSubmitted(true)
+      setMessage('Thank you for filling out the form. Your details have been submitted successfully.')
       setRedirecting(true)
       redirectTimerRef.current = window.setTimeout(() => {
         window.location.assign('https://www.indrainstitute.com')
@@ -244,6 +246,7 @@ export default function PublicWalkInForm() {
     } catch (error) {
       console.error('Public walk-in form submission failed', error)
       submittingRef.current = false
+      setSubmitted(false)
       setRedirecting(false)
       setMessage(formatSubmitError(error))
       setSaving(false)
@@ -253,16 +256,15 @@ export default function PublicWalkInForm() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 px-4 py-10 sm:px-8">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.16),transparent_26%),radial-gradient(circle_at_bottom_right,rgba(59,130,246,0.22),transparent_30%)]" />
-      {false && (
+      {submitted && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-labelledby="walkin-success-title" className="w-full max-w-md rounded-[28px] bg-white p-7 text-center shadow-[0_30px_80px_-35px_rgba(15,23,42,1)]">
             <h2 id="walkin-success-title" className="text-2xl font-black tracking-tight text-slate-950">
-              ✅ Enquiry Submitted Successfully
+              Enquiry Submitted Successfully
             </h2>
             <div className="mt-5 space-y-3 text-sm font-medium leading-6 text-slate-600">
-              <p>Thank you for contacting Indra Institute of Education.</p>
-              <p>Your enquiry has been submitted successfully.</p>
-              <p>Our team will contact you shortly.</p>
+              <p>Thank you for filling out the form. Your details have been submitted successfully.</p>
+              {redirecting && <p>Redirecting to Indra Institute of Education...</p>}
             </div>
           </div>
         </div>
