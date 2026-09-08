@@ -34,6 +34,7 @@ export default function RulesSigningPage() {
   const fileInputRef = useRef(null)
   const streamRef = useRef(null)
   const drawingRef = useRef(false)
+  const submittingRef = useRef(false)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -233,6 +234,7 @@ export default function RulesSigningPage() {
   }
 
   const submitSignature = async () => {
+    if (submittingRef.current) return
     if (!selfie) {
       setMessage('Identity photo is required before signing the form.')
       return
@@ -242,11 +244,16 @@ export default function RulesSigningPage() {
       return
     }
 
+    submittingRef.current = true
     setSubmitting(true)
     setMessage('')
     try {
       const signature = canvasRef.current.toDataURL('image/png')
-      const { data: response } = await api.post(`/public/rules-sign/${token}/`, { selfie, signature })
+      const { data: response } = await api.post(
+        `/public/rules-sign/${token}/`,
+        { selfie, signature },
+        { timeout: 90000 },
+      )
       setData((current) => ({
         ...current,
         status: 'submitted',
@@ -260,6 +267,7 @@ export default function RulesSigningPage() {
         window.location.assign(response.redirect_url || SUCCESS_REDIRECT_URL)
       }, 1800)
     } catch (error) {
+      submittingRef.current = false
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
     } finally {
       setSubmitting(false)

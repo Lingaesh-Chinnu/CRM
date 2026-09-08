@@ -876,6 +876,36 @@ class PaymentScheduleSyncTests(APITestCase):
         self.assertEqual(len(followup_response.data['messages']), 3)
         self.assertEqual(followup_response.data['messages'][-1]['sender_role'], 'admin')
 
+    def test_fully_paid_receipt_pending_payment_remains_visible_outside_current_month(self):
+        old_payment_date = timezone.localdate().replace(day=1) - timedelta(days=1)
+        pending_receipt_installment = PaymentInstallment.objects.create(
+            payment=self.payment,
+            enrollment=self.enrollment,
+            amount=Decimal('27900'),
+            installment_index=2,
+            installment_label='Final Installment',
+            payment_mode=PaymentInstallment.Mode.UPI,
+            reference_number='UPI-FINAL-001',
+            payment_date=old_payment_date,
+        )
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.balance, Decimal('0.00'))
+        self.assertEqual(self.payment.status, Payment.Status.PAID)
+
+        self.client.force_authenticate(self.admin)
+        response = self.client.get('/api/payments/', {'search': self.enrollment.name})
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.data.get('results', response.data)
+        self.assertIn(self.payment.id, [row['id'] for row in rows])
+
+        receipt_response = self.client.post(
+            f'/api/installments/{pending_receipt_installment.id}/generate-receipt/',
+        )
+        self.assertEqual(receipt_response.status_code, 200)
+        pending_receipt_installment.refresh_from_db()
+        self.assertTrue(pending_receipt_installment.receipt_number)
+
 
 @override_settings(
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],
@@ -2814,7 +2844,7 @@ class PublicWalkInFormTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['detail'], 'Thank You! Rules & Regulations has been submitted successfully.')
+        self.assertEqual(response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
         self.assertEqual(response.data['redirect_url'], 'https://indrainstitute.com/')
         signing.refresh_from_db()
         enrollment.refresh_from_db()
@@ -2853,6 +2883,16 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(signature_response.status_code, 200)
         signature_content = getattr(signature_response, 'content', None) or b''.join(signature_response.streaming_content)
         self.assertTrue(signature_content.startswith(b'\x89PNG'))
+
+        retry_response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'selfie': image_data, 'signature': image_data},
+            format='json',
+        )
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(retry_response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
+        self.assertEqual(retry_response.data['submitted_at'], response.data['submitted_at'])
+        self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
 
     def test_public_rules_signing_with_s3_storage_does_not_store_database_media(self):
         enrollment = Enrollment.objects.create(

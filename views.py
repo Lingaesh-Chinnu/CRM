@@ -300,7 +300,7 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
-RULES_SUCCESS_MESSAGE = 'Thank You! Rules & Regulations has been submitted successfully.'
+RULES_SUCCESS_MESSAGE = 'Thank you for filling out the form. Your details have been submitted successfully.'
 RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 PUBLIC_LEAD_COURSE_NAMES = [
     'Artificial Intelligence',
@@ -8231,12 +8231,22 @@ class PublicRulesSigningView(APIView):
         except (OperationalError, ProgrammingError, ValueError):
             return None
 
+    def submitted_response(self, request, signing):
+        return Response({
+            'detail': RULES_SUCCESS_MESSAGE,
+            'status': signing.status,
+            'signed_pdf_url': self.public_pdf_url(request, signing),
+            'selfie_url': None,
+            'submitted_at': signing.submitted_at,
+            'redirect_url': RULES_SUCCESS_REDIRECT_URL,
+        })
+
     def post(self, request, token):
         signing = self.get_signing(token)
         if not signing:
             return Response({'detail': 'Invalid signing link.'}, status=404)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
-            return Response({'detail': 'Rules & Regulation form has already been submitted.'}, status=400)
+            return self.submitted_response(request, signing)
 
         try:
             selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
@@ -8250,51 +8260,58 @@ class PublicRulesSigningView(APIView):
                 detail = 'Identity photo is required before signing the form.'
             return Response({'detail': detail}, status=400)
 
-        enrollment = signing.enrollment
-        submitted_at = timezone.now()
         try:
-            try:
-                pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
-            except RuntimeError as exc:
-                logger.exception(
-                    'Rules signing PDF generation failed for token=%s enrollment_id=%s.',
-                    token,
-                    enrollment.id,
-                )
-                return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
-            selfie_extension = image_storage_extension(selfie_bytes)
-            signature_extension = image_storage_extension(signature_bytes)
-            proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S}'
-            save_rules_proof_file(
-                signing.selfie_image,
-                proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
-                selfie_bytes,
-            )
-            save_rules_proof_file(
-                signing.signature_image,
-                proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
-                signature_bytes,
-            )
-            save_rules_proof_file(
-                signing.signed_pdf,
-                proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
-                pdf_bytes,
-            )
-            if rules_database_file_backups_enabled():
-                signing.selfie_image_file = selfie_bytes
-                signing.signature_image_file = signature_bytes
-                signing.signed_pdf_file = pdf_bytes
-            else:
-                signing.selfie_image_file = None
-                signing.signature_image_file = None
-                signing.signed_pdf_file = None
-            if (
-                not stored_rules_file_exists(signing, 'selfie_image')
-                or not stored_rules_file_exists(signing, 'signature_image')
-                or not stored_rules_file_exists(signing, 'signed_pdf')
-            ):
-                raise RuntimeError('Rules proof files were not verified after storage.')
             with transaction.atomic():
+                signing = RulesSigningRequest.objects.select_for_update().select_related(
+                    'enrollment__branch',
+                    'enrollment__course',
+                ).get(pk=signing.pk)
+                if signing.status == RulesSigningRequest.Status.SUBMITTED:
+                    return self.submitted_response(request, signing)
+
+                enrollment = signing.enrollment
+                submitted_at = timezone.now()
+                try:
+                    pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
+                except RuntimeError as exc:
+                    logger.exception(
+                        'Rules signing PDF generation failed for token=%s enrollment_id=%s.',
+                        token,
+                        enrollment.id,
+                    )
+                    return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
+                selfie_extension = image_storage_extension(selfie_bytes)
+                signature_extension = image_storage_extension(signature_bytes)
+                proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S%f}'
+                save_rules_proof_file(
+                    signing.selfie_image,
+                    proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
+                    selfie_bytes,
+                )
+                save_rules_proof_file(
+                    signing.signature_image,
+                    proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
+                    signature_bytes,
+                )
+                save_rules_proof_file(
+                    signing.signed_pdf,
+                    proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
+                    pdf_bytes,
+                )
+                if rules_database_file_backups_enabled():
+                    signing.selfie_image_file = selfie_bytes
+                    signing.signature_image_file = signature_bytes
+                    signing.signed_pdf_file = pdf_bytes
+                else:
+                    signing.selfie_image_file = None
+                    signing.signature_image_file = None
+                    signing.signed_pdf_file = None
+                if (
+                    not stored_rules_file_exists(signing, 'selfie_image')
+                    or not stored_rules_file_exists(signing, 'signature_image')
+                    or not stored_rules_file_exists(signing, 'signed_pdf')
+                ):
+                    raise RuntimeError('Rules proof files were not verified after storage.')
                 signing.status = RulesSigningRequest.Status.SUBMITTED
                 signing.submitted_at = submitted_at
                 signing.submitted_ip = get_client_ip(request)
@@ -8313,40 +8330,40 @@ class PublicRulesSigningView(APIView):
                     'updated_at',
                 ])
                 persist_rules_regulations_document(signing)
+                if enrollment.status != Enrollment.Status.ENROLLED:
+                    old_status = enrollment.status
+                    enrollment.status = Enrollment.Status.RULES_SUBMITTED
+                    enrollment.save(update_fields=['status', 'updated_at'])
+                    create_status_history(
+                        enrollment,
+                        CandidateStatusHistory.RecordType.ENROLLMENT,
+                        old_status,
+                        enrollment.status,
+                        remarks='Rules form submitted.',
+                    )
         except (OperationalError, ProgrammingError):
             logger.exception(
                 'Rules signing storage failed for token=%s enrollment_id=%s.',
                 token,
-                enrollment.id,
+                signing.enrollment_id,
             )
             return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
         except Exception:
             logger.exception(
                 'Rules signing submission failed for token=%s enrollment_id=%s.',
                 token,
-                enrollment.id,
+                signing.enrollment_id,
             )
             return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
-        if enrollment.status != Enrollment.Status.ENROLLED:
-            old_status = enrollment.status
-            enrollment.status = Enrollment.Status.RULES_SUBMITTED
-            enrollment.save(update_fields=['status', 'updated_at'])
-            create_status_history(
-                enrollment,
-                CandidateStatusHistory.RecordType.ENROLLMENT,
-                old_status,
-                enrollment.status,
-                remarks='Rules form submitted.',
+        try:
+            notify_rules_signed(enrollment, signing.submitted_at)
+        except Exception:
+            logger.exception(
+                'Rules signing notification creation failed after save: token=%s enrollment_id=%s.',
+                token,
+                enrollment.id,
             )
-        notify_rules_signed(enrollment, signing.submitted_at)
-        return Response({
-            'detail': RULES_SUCCESS_MESSAGE,
-            'status': signing.status,
-            'signed_pdf_url': self.public_pdf_url(request, signing),
-            'selfie_url': None,
-            'submitted_at': signing.submitted_at,
-            'redirect_url': RULES_SUCCESS_REDIRECT_URL,
-        })
+        return self.submitted_response(request, signing)
 
 
 def proof_filename(enrollment):
@@ -10919,6 +10936,11 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 Q(installments__payment_date__gte=month_start, installments__payment_date__lte=month_end)
                 | Q(next_payment_date__gte=month_start, next_payment_date__lte=month_end)
                 | Q(status__in=[Payment.Status.UNPAID, Payment.Status.PARTIAL], enrollment__enrollment_date__lte=month_end)
+                | Q(
+                    installments__receipt_number='',
+                    installments__bill_number='',
+                    installments__bill_generated_at__isnull=True,
+                )
             ).distinct().order_by('enrollment__name', 'id')
         return qs
 
