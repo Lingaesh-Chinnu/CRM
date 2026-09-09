@@ -415,8 +415,6 @@ export default function WalkInsListPage() {
   }, [appliedFilters, visitDateFrom, visitDateTo, followUpDateFrom, followUpDateTo, focus, hasDateRangeFilter, currentPage, otherPage])
 
   const updateFilter = (key, value) => {
-    setCurrentPage(1)
-    setOtherPage(1)
     if (key === 'quick_filter') {
       setFilters((current) => {
         const nextValue = current.quick_filter === value ? '' : value
@@ -436,36 +434,14 @@ export default function WalkInsListPage() {
   }
 
   const applyQuickFilter = (value) => {
-    setCurrentPage(1)
-    setOtherPage(1)
     const active = filters.quick_filter === value
     const nextValue = active ? '' : value
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.delete('quick_filter')
-    nextParams.delete('visit_date_from')
-    nextParams.delete('visit_date_to')
-    nextParams.delete('follow_up_date_from')
-    nextParams.delete('follow_up_date_to')
-    nextParams.delete('focus')
     const range = walkInPeriodRange(nextValue)
     setFilters((current) => ({
       ...current,
       quick_filter: nextValue,
       ...range,
     }))
-    nextParams.delete('date_from')
-    nextParams.delete('date_to')
-    if (nextValue) {
-      nextParams.set('quick_filter', nextValue)
-      if (range.date_from) nextParams.set('date_from', range.date_from)
-      if (range.date_to) nextParams.set('date_to', range.date_to)
-    }
-    Object.entries(filters).forEach(([key, filterValue]) => {
-      if (key === 'branch' && !canFilterByBranch) return
-      if (['quick_filter', 'date_from', 'date_to'].includes(key)) return
-      if (filterValue.trim()) nextParams.set(key, filterValue.trim())
-    })
-    setSearchParams(nextParams)
   }
 
   const updateWalkInFollowUp = (walkinId, followUp) => {
@@ -523,22 +499,14 @@ export default function WalkInsListPage() {
   }
 
   const applyStatusFilter = (value) => {
-    setCurrentPage(1)
-    setOtherPage(1)
-    const nextParams = new URLSearchParams(searchParams)
-    nextParams.delete('visit_date_from')
-    nextParams.delete('visit_date_to')
     if (value === '__today_walkin') {
       const today = todayIsoFrom()
-      nextParams.delete('status')
-      nextParams.set('visit_date_from', today)
-      nextParams.set('visit_date_to', today)
+      setFilters((current) => ({ ...current, status: '', date_from: today, date_to: today, quick_filter: 'custom' }))
     } else if (value) {
-      nextParams.set('status', value)
+      setFilters((current) => ({ ...current, status: value }))
     } else {
-      nextParams.delete('status')
+      setFilters((current) => ({ ...current, status: '' }))
     }
-    setSearchParams(nextParams)
   }
   const activeSmartFilter = visitDateFrom === todayIsoFrom() && visitDateTo === todayIsoFrom()
     ? '__today_walkin'

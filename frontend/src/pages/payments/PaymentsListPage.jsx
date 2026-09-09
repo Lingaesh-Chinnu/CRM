@@ -166,12 +166,17 @@ export default function PaymentsListPage() {
   const [duration, setDuration] = useState(searchParams.get('duration') || '')
   const [dateFrom, setDateFrom] = useState(searchParams.get('date_from') || '')
   const [dateTo, setDateTo] = useState(searchParams.get('date_to') || '')
+  const [appliedFilters, setAppliedFilters] = useState({
+    month: searchParams.get('month') || options[0]?.value || monthValue(new Date()),
+    branch: searchParams.get('branch') || '', search: searchParams.get('search') || '',
+    counselor: searchParams.get('user') || '', status: searchParams.get('status') || '',
+    duration: searchParams.get('duration') || '', dateFrom: searchParams.get('date_from') || '', dateTo: searchParams.get('date_to') || '',
+  })
   const dueThisWeek = searchParams.get('due_this_week') || ''
-  const debouncedSearch = useDebouncedValue(search.trim())
-  const duePaymentsFilter = paymentStatus === 'due' || paymentStatus === 'pending_today'
-  const weeklyPendingFilter = paymentStatus === 'weekly_pending'
+  const duePaymentsFilter = appliedFilters.status === 'due' || appliedFilters.status === 'pending_today'
+  const weeklyPendingFilter = appliedFilters.status === 'weekly_pending'
   const reasonRequestId = searchParams.get('reason_request') || ''
-  const hasCustomDateRange = duration === 'custom' && Boolean(dateFrom || dateTo)
+  const hasCustomDateRange = appliedFilters.duration === 'custom' && Boolean(appliedFilters.dateFrom || appliedFilters.dateTo)
   const overdueCount = rows.filter(isOverduePayment).length
   const paymentSummary = [
     { label: 'Total', value: '', count: rows.length },
@@ -180,7 +185,7 @@ export default function PaymentsListPage() {
     { label: 'Overdue', value: 'due', count: overdueCount },
   ]
 
-  const activeSmartFilter = smartFilters.some((item) => item.value === duration) ? duration : ''
+  const activeSmartFilter = smartFilters.some((item) => item.value === appliedFilters.duration) ? appliedFilters.duration : ''
 
   useEffect(() => {
     if (navigationMessage) {
@@ -217,17 +222,17 @@ export default function PaymentsListPage() {
   useEffect(() => {
     const controller = new AbortController()
     const params = {}
-    if (!duration) params.month = month
-    if (paymentStatus) params.status = paymentStatus
+    if (!appliedFilters.duration) params.month = appliedFilters.month
+    if (appliedFilters.status) params.status = appliedFilters.status
     if (dueThisWeek) params.due_this_week = dueThisWeek
-    if (isSuperAdmin && branch) params.branch = branch
-    if (counselor) params.user = counselor
-    if (duration) params.duration = duration
-    if (duration === 'custom') {
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo) params.date_to = dateTo
+    if (isSuperAdmin && appliedFilters.branch) params.branch = appliedFilters.branch
+    if (appliedFilters.counselor) params.user = appliedFilters.counselor
+    if (appliedFilters.duration) params.duration = appliedFilters.duration
+    if (appliedFilters.duration === 'custom') {
+      if (appliedFilters.dateFrom) params.date_from = appliedFilters.dateFrom
+      if (appliedFilters.dateTo) params.date_to = appliedFilters.dateTo
     }
-    if (debouncedSearch) params.search = debouncedSearch
+    if (appliedFilters.search.trim()) params.search = appliedFilters.search.trim()
     params.page = page
     params.page_size = PAGE_SIZE
 
@@ -257,11 +262,7 @@ export default function PaymentsListPage() {
       .finally(() => setLoading(false))
 
     return () => controller.abort()
-  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek, navigationMessage, page])
-
-  useEffect(() => {
-    setPage(1)
-  }, [month, branch, counselor, debouncedSearch, isSuperAdmin, paymentStatus, duration, dateFrom, dateTo, dueThisWeek])
+  }, [appliedFilters, isSuperAdmin, dueThisWeek, navigationMessage, page])
 
   useEffect(() => {
     if (!reasonRequestId) return
@@ -279,7 +280,8 @@ export default function PaymentsListPage() {
   }
 
   const resetFilters = () => {
-    setMonth(options[0]?.value || monthValue(new Date()))
+    const defaultMonth = options[0]?.value || monthValue(new Date())
+    setMonth(defaultMonth)
     setBranch('')
     setSearch('')
     setCounselor('')
@@ -287,25 +289,13 @@ export default function PaymentsListPage() {
     setDuration('')
     setDateFrom('')
     setDateTo('')
+    setAppliedFilters({ month: defaultMonth, branch: '', search: '', counselor: '', status: '', duration: '', dateFrom: '', dateTo: '' })
     setPage(1)
     setSearchParams({})
   }
 
   const applyStatusFilter = (value) => {
-    const nextParams = new URLSearchParams()
-    if (month) nextParams.set('month', month)
-    if (isSuperAdmin && branch) nextParams.set('branch', branch)
-    if (counselor) nextParams.set('user', counselor)
-    if (debouncedSearch) nextParams.set('search', debouncedSearch)
-    if (duration) nextParams.set('duration', duration)
-    if (duration === 'custom') {
-      if (dateFrom) nextParams.set('date_from', dateFrom)
-      if (dateTo) nextParams.set('date_to', dateTo)
-    }
-    if (dueThisWeek && value) nextParams.set('due_this_week', dueThisWeek)
-    if (value) nextParams.set('status', value)
     setPaymentStatus(value)
-    setSearchParams(nextParams)
   }
 
   const applySmartFilter = (value) => {
@@ -318,6 +308,18 @@ export default function PaymentsListPage() {
     } else {
       setPaymentStatus('')
     }
+  }
+
+  const applyFilters = () => {
+    const next = { month, branch, search, counselor, status: paymentStatus, duration, dateFrom, dateTo }
+    setAppliedFilters(next)
+    const nextParams = new URLSearchParams()
+    Object.entries(next).forEach(([key, value]) => {
+      if (!value) return
+      nextParams.set(key === 'counselor' ? 'user' : key === 'dateFrom' ? 'date_from' : key === 'dateTo' ? 'date_to' : key, value)
+    })
+    setSearchParams(nextParams)
+    setPage(1)
   }
 
   const closeReasonModal = () => {
@@ -410,15 +412,15 @@ export default function PaymentsListPage() {
       if (decision === 'approve') {
         const refreshed = await api.get('/payments/', {
           params: {
-            month,
-            ...(paymentStatus ? { status: paymentStatus } : {}),
+            ...(appliedFilters.duration ? {} : { month: appliedFilters.month }),
+            ...(appliedFilters.status ? { status: appliedFilters.status } : {}),
             ...(dueThisWeek ? { due_this_week: dueThisWeek } : {}),
-            ...(isSuperAdmin && branch ? { branch } : {}),
-            ...(counselor ? { user: counselor } : {}),
-            ...(duration ? { duration } : {}),
-            ...(duration === 'custom' && dateFrom ? { date_from: dateFrom } : {}),
-            ...(duration === 'custom' && dateTo ? { date_to: dateTo } : {}),
-            ...(debouncedSearch ? { search: debouncedSearch } : {}),
+            ...(isSuperAdmin && appliedFilters.branch ? { branch: appliedFilters.branch } : {}),
+            ...(appliedFilters.counselor ? { user: appliedFilters.counselor } : {}),
+            ...(appliedFilters.duration ? { duration: appliedFilters.duration } : {}),
+            ...(appliedFilters.duration === 'custom' && appliedFilters.dateFrom ? { date_from: appliedFilters.dateFrom } : {}),
+            ...(appliedFilters.duration === 'custom' && appliedFilters.dateTo ? { date_to: appliedFilters.dateTo } : {}),
+            ...(appliedFilters.search.trim() ? { search: appliedFilters.search.trim() } : {}),
             page,
             page_size: PAGE_SIZE,
           },
@@ -664,7 +666,7 @@ export default function PaymentsListPage() {
             <div className="hidden lg:block" />
           )}
           <div className="flex gap-2">
-            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={applyFilters} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
             <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
           </div>
         </div>

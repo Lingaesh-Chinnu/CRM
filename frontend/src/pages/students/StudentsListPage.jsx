@@ -49,6 +49,7 @@ export default function StudentsListPage() {
     enrolledFrom: '',
     enrolledTo: '',
   })
+  const [appliedFilters, setAppliedFilters] = useState({ branch: '', course: '', status: '', search: '', enrolledFrom: '', enrolledTo: '' })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [page, setPage] = useState(1)
@@ -63,11 +64,7 @@ export default function StudentsListPage() {
 
   useEffect(() => {
     loadStudents()
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin, page])
-
-  useEffect(() => {
-    setPage(1)
-  }, [filters.branch, filters.course, filters.status, debouncedSearch, filters.enrolledFrom, filters.enrolledTo, isSuperAdmin])
+  }, [appliedFilters, isSuperAdmin, page])
 
   const loadFilterOptions = async () => {
     try {
@@ -89,20 +86,20 @@ export default function StudentsListPage() {
     try {
       const params = {}
 
-      if (isSuperAdmin && filters.branch) {
-        params.branch = filters.branch
+      if (isSuperAdmin && appliedFilters.branch) {
+        params.branch = appliedFilters.branch
       }
-      if (filters.course) {
-        params.course = filters.course
+      if (appliedFilters.course) {
+        params.course = appliedFilters.course
       }
-      if (filters.status) {
-        params.status = filters.status
+      if (appliedFilters.status) {
+        params.status = appliedFilters.status
       }
-      if (debouncedSearch) {
-        params.search = debouncedSearch
+      if (appliedFilters.search.trim()) {
+        params.search = appliedFilters.search.trim()
       }
-      if (filters.enrolledFrom) params.enrolled_from = filters.enrolledFrom
-      if (filters.enrolledTo) params.enrolled_to = filters.enrolledTo
+      if (appliedFilters.enrolledFrom) params.enrolled_from = appliedFilters.enrolledFrom
+      if (appliedFilters.enrolledTo) params.enrolled_to = appliedFilters.enrolledTo
       params.page = page
       params.page_size = PAGE_SIZE
 
@@ -126,8 +123,14 @@ export default function StudentsListPage() {
     { label: 'Completed', value: 'completed', count: statusCount('completed') },
     { label: 'Hold', value: 'on_hold', count: statusCount('on_hold') },
   ]
+  const applyFilters = () => {
+    setAppliedFilters({ ...filters })
+    setPage(1)
+  }
   const resetFilters = () => {
-    setFilters({ branch: '', course: '', status: '', search: '', enrolledFrom: '', enrolledTo: '' })
+    const defaults = { branch: '', course: '', status: '', search: '', enrolledFrom: '', enrolledTo: '' }
+    setFilters(defaults)
+    setAppliedFilters(defaults)
     setPage(1)
   }
 
@@ -219,7 +222,7 @@ export default function StudentsListPage() {
             <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
           </label>
           <div className="flex gap-2">
-            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={applyFilters} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
             <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
           </div>
         </div>

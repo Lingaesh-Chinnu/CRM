@@ -172,7 +172,9 @@ export default function LeadsListPage() {
     createdTo: '',
     importantOnly: false,
   })
-  const [appliedSearch, setAppliedSearch] = useState('')
+  const [appliedFilters, setAppliedFilters] = useState({
+    search: '', status: '', source: '', followUp: '', leadPeriod: '', followUpBy: '', branch: '', createdFrom: '', createdTo: '', importantOnly: false,
+  })
   const [loading, setLoading] = useState(true)
   const [loadMessage, setLoadMessage] = useState('')
   const [page, setPage] = useState(1)
@@ -202,28 +204,28 @@ export default function LeadsListPage() {
     const tomorrowValue = isoDate(addDays(today, 1))
     const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
-      const matchesStatus = matchesLeadStatus(lead, filters.status)
-        || (filters.status === 'converted' && lead.status === 'converted_to_walkin')
+      const matchesStatus = matchesLeadStatus(lead, appliedFilters.status)
+        || (appliedFilters.status === 'converted' && lead.status === 'converted_to_walkin')
       const leadSource = String(lead.source || '').toLowerCase()
-      const filterSource = String(filters.source || '').toLowerCase()
+      const filterSource = String(appliedFilters.source || '').toLowerCase()
       const matchesSource = !filterSource
         || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
       const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
-      const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
-      const matchesImportant = !filters.importantOnly || lead.is_important
+      const matchesFollowUpBy = !appliedFilters.followUpBy || String(assigneeId) === String(appliedFilters.followUpBy)
+      const matchesImportant = !appliedFilters.importantOnly || lead.is_important
       let matchesFollowUp = true
       const followUpDate = lead.next_follow_up_date || ''
-      if (filters.followUp === 'today') {
+      if (appliedFilters.followUp === 'today') {
         matchesFollowUp = followUpDate === todayValue
-      } else if (filters.followUp === 'tomorrow') {
+      } else if (appliedFilters.followUp === 'tomorrow') {
         matchesFollowUp = followUpDate === tomorrowValue
-      } else if (filters.followUp === 'next7') {
+      } else if (appliedFilters.followUp === 'next7') {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
       return matchesStatus && matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
-  }, [filters, leads])
+  }, [appliedFilters, leads])
 
   const statusSummaryBaseLeads = useMemo(() => {
     const today = new Date()
@@ -232,25 +234,25 @@ export default function LeadsListPage() {
     const nextSevenValue = isoDate(addDays(today, 7))
     return leads.filter((lead) => {
       const leadSource = String(lead.source || '').toLowerCase()
-      const filterSource = String(filters.source || '').toLowerCase()
+      const filterSource = String(appliedFilters.source || '').toLowerCase()
       const matchesSource = !filterSource
         || (filterSource === '__unknown__' ? !leadSource : leadSource === filterSource)
       const assigneeId = lead.follow_up_by || lead.assigned_to || lead.assigned_user?.id || ''
-      const matchesFollowUpBy = !filters.followUpBy || String(assigneeId) === String(filters.followUpBy)
-      const matchesImportant = !filters.importantOnly || lead.is_important
+      const matchesFollowUpBy = !appliedFilters.followUpBy || String(assigneeId) === String(appliedFilters.followUpBy)
+      const matchesImportant = !appliedFilters.importantOnly || lead.is_important
       let matchesFollowUp = true
       const followUpDate = lead.next_follow_up_date || ''
-      if (filters.followUp === 'today') {
+      if (appliedFilters.followUp === 'today') {
         matchesFollowUp = followUpDate === todayValue
-      } else if (filters.followUp === 'tomorrow') {
+      } else if (appliedFilters.followUp === 'tomorrow') {
         matchesFollowUp = followUpDate === tomorrowValue
-      } else if (filters.followUp === 'next7') {
+      } else if (appliedFilters.followUp === 'next7') {
         matchesFollowUp = Boolean(followUpDate) && followUpDate >= todayValue && followUpDate <= nextSevenValue
       }
 
       return matchesSource && matchesFollowUp && matchesFollowUpBy && matchesImportant
     })
-  }, [filters, leads])
+  }, [appliedFilters, leads])
 
   const hasFilters = Boolean(
     filters.search
@@ -282,16 +284,7 @@ export default function LeadsListPage() {
     nextFollowUpDateTo,
     focus,
     isSuperAdmin,
-    filters.branch,
-    filters.status,
-    filters.source,
-    filters.followUp,
-    filters.leadPeriod,
-    filters.followUpBy,
-    filters.createdFrom,
-    filters.createdTo,
-    filters.importantOnly,
-    appliedSearch,
+    appliedFilters,
     page,
   ])
 
@@ -304,7 +297,7 @@ export default function LeadsListPage() {
   useEffect(() => {
     if (location.state?.listFilters) {
       setFilters((current) => ({ ...current, ...location.state.listFilters }))
-      setAppliedSearch((location.state.listFilters.search || '').trim())
+      setAppliedFilters((current) => ({ ...current, ...location.state.listFilters }))
     }
   }, [location.state])
 
@@ -335,32 +328,32 @@ export default function LeadsListPage() {
     try {
       const params = {}
       if (statusFilter) params.status = statusFilter
-      else if (filters.status) params.status = filters.status
+      else if (appliedFilters.status) params.status = appliedFilters.status
       if (walkinDateFrom) params.walkin_date_from = walkinDateFrom
       if (walkinDateTo) params.walkin_date_to = walkinDateTo
       if (nextFollowUpDateFrom) params.next_follow_up_date_from = nextFollowUpDateFrom
       if (nextFollowUpDateTo) params.next_follow_up_date_to = nextFollowUpDateTo
-      if (isSuperAdmin && filters.branch) params.branch = filters.branch
-      if (filters.source) params.source = filters.source
-      if (filters.followUpBy) params.counselor = filters.followUpBy
-      if (appliedSearch) params.search = appliedSearch
-      if (filters.createdFrom) params.date_from = filters.createdFrom
-      if (filters.createdTo) params.date_to = filters.createdTo
-      if (filters.importantOnly) params.important_only = true
+      if (isSuperAdmin && appliedFilters.branch) params.branch = appliedFilters.branch
+      if (appliedFilters.source) params.source = appliedFilters.source
+      if (appliedFilters.followUpBy) params.counselor = appliedFilters.followUpBy
+      if (appliedFilters.search.trim()) params.search = appliedFilters.search.trim()
+      if (appliedFilters.createdFrom) params.date_from = appliedFilters.createdFrom
+      if (appliedFilters.createdTo) params.date_to = appliedFilters.createdTo
+      if (appliedFilters.importantOnly) params.important_only = true
       params.page = page
       params.page_size = PAGE_SIZE
       const today = new Date()
-      if (!isSuperAdmin && filters.followUp === 'today') {
+      if (!isSuperAdmin && appliedFilters.followUp === 'today') {
         params.next_follow_up_date_from = isoDate(today)
         params.next_follow_up_date_to = isoDate(today)
-      } else if (!isSuperAdmin && filters.followUp === 'tomorrow') {
+      } else if (!isSuperAdmin && appliedFilters.followUp === 'tomorrow') {
         const tomorrow = isoDate(addDays(today, 1))
         params.next_follow_up_date_from = tomorrow
         params.next_follow_up_date_to = tomorrow
-      } else if (!isSuperAdmin && filters.followUp === 'next7') {
+      } else if (!isSuperAdmin && appliedFilters.followUp === 'next7') {
         params.next_follow_up_date_from = isoDate(today)
         params.next_follow_up_date_to = isoDate(addDays(today, 7))
-      } else if (!isSuperAdmin && filters.followUp === 'overdue') {
+      } else if (!isSuperAdmin && appliedFilters.followUp === 'overdue') {
         params.next_follow_up_date_to = isoDate(addDays(today, -1))
       }
       const { data } = await api.get('/leads/', { params })
@@ -413,7 +406,6 @@ export default function LeadsListPage() {
   }
 
   const updateFilter = (field, value) => {
-    setPage(1)
     if (field === 'leadPeriod') {
       setFilters((current) => ({
         ...current,
@@ -428,12 +420,12 @@ export default function LeadsListPage() {
   const submitSearch = (event) => {
     event.preventDefault()
     setPage(1)
-    setAppliedSearch(filters.search.trim())
+    setAppliedFilters({ ...filters })
   }
 
   const clearFilters = () => {
     setPage(1)
-    setFilters({
+    const defaults = {
       search: '',
       status: '',
       source: '',
@@ -444,8 +436,9 @@ export default function LeadsListPage() {
       createdFrom: '',
       createdTo: '',
       importantOnly: false,
-    })
-    setAppliedSearch('')
+    }
+    setFilters(defaults)
+    setAppliedFilters(defaults)
   }
 
   const submitImport = async (event) => {

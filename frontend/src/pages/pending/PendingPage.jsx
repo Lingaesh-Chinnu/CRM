@@ -66,42 +66,38 @@ export default function PendingPage() {
     search: '',
     importantOnly: false,
   })
-  const debouncedSearch = useDebouncedValue(filters.search.trim())
+  const [appliedFilters, setAppliedFilters] = useState({ branch: '', user: '', duration: '', date_from: '', date_to: '', status: '', search: '', importantOnly: false })
   const resetFilters = () => {
-    setFilters({ branch: '', user: '', duration: '', date_from: '', date_to: '', status: '', search: '', importantOnly: false })
+    const defaults = { branch: '', user: '', duration: '', date_from: '', date_to: '', status: '', search: '', importantOnly: false }
+    setFilters(defaults)
+    setAppliedFilters(defaults)
     setPage(1)
   }
 
   useEffect(() => {
     if (location.state?.listFilters) {
       setFilters((current) => ({ ...current, ...location.state.listFilters }))
+      setAppliedFilters((current) => ({ ...current, ...location.state.listFilters }))
     }
   }, [location.state])
 
   const params = useMemo(() => {
     const next = {}
-    if (isAdmin && filters.branch) next.branch = filters.branch
-    if (filters.user) next.user = filters.user
-    if (filters.duration) next.duration = filters.duration
-    if (filters.duration === 'custom') {
-      if (filters.date_from) next.date_from = filters.date_from
-      if (filters.date_to) next.date_to = filters.date_to
+    if (isAdmin && appliedFilters.branch) next.branch = appliedFilters.branch
+    if (appliedFilters.user) next.user = appliedFilters.user
+    if (appliedFilters.duration) next.duration = appliedFilters.duration
+    if (appliedFilters.duration === 'custom') {
+      if (appliedFilters.date_from) next.date_from = appliedFilters.date_from
+      if (appliedFilters.date_to) next.date_to = appliedFilters.date_to
     }
-    if (module === 'payments' && filters.status) next.status = filters.status
-    if (debouncedSearch) next.search = debouncedSearch
-    if (filters.importantOnly) next.important_only = true
+    if (module === 'payments' && appliedFilters.status) next.status = appliedFilters.status
+    if (appliedFilters.search.trim()) next.search = appliedFilters.search.trim()
+    if (appliedFilters.importantOnly) next.important_only = true
     next.page = page
     next.page_size = PAGE_SIZE
     return next
   }, [
-    filters.branch,
-    filters.user,
-    filters.duration,
-    filters.date_from,
-    filters.date_to,
-    filters.status,
-    filters.importantOnly,
-    debouncedSearch,
+    appliedFilters,
     isAdmin,
     module,
     page,
@@ -128,10 +124,6 @@ export default function PendingPage() {
   }, [config.endpoint, params])
 
   useEffect(() => {
-    setPage(1)
-  }, [config.endpoint, filters.branch, filters.user, filters.duration, filters.date_from, filters.date_to, filters.status, filters.importantOnly, debouncedSearch, isAdmin, module])
-
-  useEffect(() => {
     Promise.all([
       isAdmin ? api.get('/branches/') : Promise.resolve({ data: [] }),
       api.get('/leads/staff-options/', { params: isAdmin && filters.branch ? { branch: filters.branch } : {} }),
@@ -148,6 +140,11 @@ export default function PendingPage() {
 
   const updateFollowUp = (id) => {
     setRows((current) => current.filter((row) => row.id !== id))
+  }
+
+  const applyFilters = () => {
+    setAppliedFilters({ ...filters })
+    setPage(1)
   }
 
   const toggleImportant = async (row, nextValue) => {
@@ -232,7 +229,7 @@ export default function PendingPage() {
             </>
           )}
           <div className="flex gap-2">
-            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={applyFilters} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
             <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
           </div>
         </div>

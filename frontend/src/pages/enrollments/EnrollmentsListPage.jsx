@@ -179,6 +179,9 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     date_to: '',
     search: '',
   })
+  const [appliedFilters, setAppliedFilters] = useState({
+    branch: '', course: '', counselor: '', status: '', source: '', date_from: '', date_to: '', search: '',
+  })
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
   const [page, setPage] = useState(1)
@@ -194,6 +197,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
   useEffect(() => {
     if (location.state?.listFilters) {
       setFilters((current) => ({ ...current, ...location.state.listFilters }))
+      setAppliedFilters((current) => ({ ...current, ...location.state.listFilters }))
     }
   }, [location.state])
 
@@ -203,11 +207,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
 
   useEffect(() => {
     loadEnrollments()
-  }, [filters.branch, filters.course, filters.counselor, filters.status, filters.source, filters.date_from, filters.date_to, debouncedSearch, isSuperAdmin, queue, page])
-
-  useEffect(() => {
-    setPage(1)
-  }, [filters.branch, filters.course, filters.counselor, filters.status, filters.source, filters.date_from, filters.date_to, debouncedSearch, isSuperAdmin, queue])
+  }, [appliedFilters, isSuperAdmin, queue, page])
 
   const loadFilterOptions = async () => {
     try {
@@ -232,29 +232,29 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     try {
       const baseParams = { queue }
 
-      if (isSuperAdmin && filters.branch) {
-        baseParams.branch = filters.branch
+      if (isSuperAdmin && appliedFilters.branch) {
+        baseParams.branch = appliedFilters.branch
       }
-      if (filters.course) {
-        baseParams.course = filters.course
+      if (appliedFilters.course) {
+        baseParams.course = appliedFilters.course
       }
-      if (filters.counselor) {
-        baseParams.counselor = filters.counselor
+      if (appliedFilters.counselor) {
+        baseParams.counselor = appliedFilters.counselor
       }
-      if (filters.status) {
-        baseParams.status = filters.status
+      if (appliedFilters.status) {
+        baseParams.status = appliedFilters.status
       }
-      if (filters.source) {
-        baseParams.source = filters.source
+      if (appliedFilters.source) {
+        baseParams.source = appliedFilters.source
       }
-      if (filters.date_from) {
-        baseParams.date_from = filters.date_from
+      if (appliedFilters.date_from) {
+        baseParams.date_from = appliedFilters.date_from
       }
-      if (filters.date_to) {
-        baseParams.date_to = filters.date_to
+      if (appliedFilters.date_to) {
+        baseParams.date_to = appliedFilters.date_to
       }
-      if (debouncedSearch) {
-        baseParams.search = debouncedSearch
+      if (appliedFilters.search.trim()) {
+        baseParams.search = appliedFilters.search.trim()
       }
       const rowParams = { ...baseParams, page, page_size: PAGE_SIZE }
       const [rowsRes, currentMetricsRes, previousMetricsRes] = await Promise.all([
@@ -311,8 +311,14 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     }
   }
 
+  const applyFilters = () => {
+    setAppliedFilters({ ...filters })
+    setPage(1)
+  }
   const resetFilters = () => {
-    setFilters({ branch: '', course: '', counselor: '', status: '', source: '', date_from: '', date_to: '', search: '' })
+    const defaults = { branch: '', course: '', counselor: '', status: '', source: '', date_from: '', date_to: '', search: '' }
+    setFilters(defaults)
+    setAppliedFilters(defaults)
     setPage(1)
   }
 
@@ -469,7 +475,7 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
             />
           </label>
           <div className="flex gap-2">
-            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={applyFilters} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
             <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
           </div>
         </div>
