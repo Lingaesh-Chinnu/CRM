@@ -679,11 +679,17 @@ def apply_enrollment_discount(data, course, branch_id=None):
     if not discount.is_available_for_course(course.id, branch_id):
         raise ValueError('Selected discount is expired or not available for this course.')
 
-    course_fee = Decimal(str(data.get('actual_fees') or course.actual_fees or 0))
-    discount_amount = discount.calculate_amount(course_fee)
+    actual_fee = Decimal(str(data.get('actual_fees') or course.actual_fees or 0))
+    course_discount_amount = min(Decimal(str(course.discount_amount or 0)), actual_fee)
+    discount_base = actual_fee
+    if discount.application_basis == Discount.ApplicationBasis.FINAL_FEES:
+        discount_base = max(actual_fee - course_discount_amount, Decimal('0'))
+    discount_amount = discount.calculate_amount(discount_base)
     data['discount'] = discount.id
     data['discount_amount'] = discount_amount
     data['discount_reason'] = discount.name
+    data['discount_application_basis'] = discount.application_basis
+    data['course_discount_amount'] = course_discount_amount if discount.application_basis == Discount.ApplicationBasis.FINAL_FEES else Decimal('0')
     return discount
 
 
@@ -9448,12 +9454,49 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(branch=self.request.user.branch)
         if getattr(self, 'action', None) == 'list' and self.request.query_params.get('queue') != 'yet_to_enroll':
             qs = official_enrollment_queryset(qs)
-        if getattr(self, 'action', None) == 'list' and self.request.query_params.get('queue') == 'enrolled':
+        if (
+            getattr(self, 'action', None) == 'list'
+            and self.request.query_params.get('queue') == 'enrolled'
+            and not self.request.user.is_super_admin
+        ):
             today = timezone.localdate()
             month_start = today.replace(day=1)
             month_end = today.replace(day=monthrange(today.year, today.month)[1])
             qs = qs.filter(enrollment_date__gte=month_start, enrollment_date__lte=month_end)
         return qs
+
+    @action(detail=True, methods=['post'], url_path='reverse-to-walkin')
+    def reverse_to_walkin(self, request, pk=None):
+        reason = str(request.data.get('reversal_reason') or '').strip()
+        with transaction.atomic():
+            enrollment = Enrollment.objects.select_for_update().select_related('walkin').get(pk=pk)
+            walkin = enrollment.walkin
+            if not walkin:
+                return Response({'detail': 'Only enrollments created from a walk-in can be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
+            if enrollment.status in Enrollment.FINAL_STATUSES or enrollment.student_number:
+                return Response({'detail': 'A finalized student enrollment cannot be reversed to a walk-in.'}, status=status.HTTP_400_BAD_REQUEST)
+            signing = RulesSigningRequest.objects.filter(enrollment=enrollment).first()
+            if signing and signing.status == RulesSigningRequest.Status.SUBMITTED:
+                return Response({'detail': 'An enrollment with signed Rules & Regulations cannot be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
+            if PaymentInstallment.objects.filter(enrollment=enrollment).exists():
+                return Response({'detail': 'An enrollment with collected installments cannot be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
+            if enrollment.status == Enrollment.Status.REVERSED_TO_WALKIN:
+                return Response({'detail': 'This enrollment has already been reversed to a walk-in.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            previous_status = enrollment.status
+            enrollment.status = Enrollment.Status.REVERSED_TO_WALKIN
+            enrollment.reversed_at = timezone.now()
+            enrollment.reversed_by = request.user
+            enrollment.reversal_reason = reason
+            enrollment.save(update_fields=['status', 'reversed_at', 'reversed_by', 'reversal_reason', 'updated_at'])
+            walkin.status = WalkIn.Status.FOLLOW_UP if walkin.follow_up_date else WalkIn.Status.NEW
+            walkin.converted_to_type = ''
+            walkin.converted_record_id = None
+            walkin.converted_at = None
+            walkin.converted_by = None
+            walkin.save(update_fields=['status', 'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at'])
+            create_status_history(enrollment, CandidateStatusHistory.RecordType.ENROLLMENT, previous_status, enrollment.status, request.user, reason)
+        return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='toggle-important')
     def toggle_important(self, request, pk=None):
@@ -11331,6 +11374,7 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsStaffOrAdmin]
     serializer_class   = PaymentInstallmentSerializer
     pagination_class   = None
+    parser_classes     = [MultiPartParser, FormParser, JSONParser]
     filterset_fields   = ['enrollment', 'payment_mode', 'payment_date']
 
     def get_queryset(self):

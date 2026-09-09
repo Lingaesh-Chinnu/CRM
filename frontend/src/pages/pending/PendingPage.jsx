@@ -67,6 +67,10 @@ export default function PendingPage() {
     importantOnly: false,
   })
   const debouncedSearch = useDebouncedValue(filters.search.trim())
+  const resetFilters = () => {
+    setFilters({ branch: '', user: '', duration: '', date_from: '', date_to: '', status: '', search: '', importantOnly: false })
+    setPage(1)
+  }
 
   useEffect(() => {
     if (location.state?.listFilters) {
@@ -227,6 +231,10 @@ export default function PendingPage() {
               <input type="date" value={filters.date_to} onChange={(event) => setFilters((current) => ({ ...current, date_to: event.target.value }))} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold" />
             </>
           )}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
+          </div>
         </div>
       </section>
 

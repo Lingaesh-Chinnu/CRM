@@ -5,6 +5,7 @@
 from django.db import IntegrityError, models, transaction
 from django.db.models.signals import post_delete
 from django.core.exceptions import ObjectDoesNotExist
+from django.core.validators import FileExtensionValidator
 from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -851,9 +852,18 @@ class Discount(TimeStampedModel):
         FIXED = 'fixed', 'Fixed Amount'
         PERCENTAGE = 'percentage', 'Percentage'
 
+    class ApplicationBasis(models.TextChoices):
+        ACTUAL_FEES = 'actual_fees', 'Actual Fees'
+        FINAL_FEES = 'final_fees', 'Final Fees'
+
     name = models.CharField(max_length=150)
     discount_type = models.CharField(max_length=20, choices=DiscountType.choices, default=DiscountType.FIXED)
     value = models.DecimalField(max_digits=10, decimal_places=2)
+    application_basis = models.CharField(
+        max_length=20,
+        choices=ApplicationBasis.choices,
+        default=ApplicationBasis.ACTUAL_FEES,
+    )
     branch = models.ForeignKey(Branch, null=True, blank=True, on_delete=models.SET_NULL,
                                related_name='legacy_discounts')
     apply_to_all_branches = models.BooleanField(default=True)
@@ -1160,6 +1170,7 @@ class Enrollment(TimeStampedModel):
         DROPPED   = 'dropped',   'Dropped'
         ON_HOLD   = 'on_hold',   'Hold'
         TRANSFERRED = 'transferred', 'Transferred'
+        REVERSED_TO_WALKIN = 'reversed_to_walkin', 'Reversed to Walk-in'
 
     FINAL_STATUSES = {'enrolled', 'active', 'completed', 'inactive', 'dropped', 'on_hold', 'transferred'}
 
@@ -1209,6 +1220,12 @@ class Enrollment(TimeStampedModel):
     # Fees
     actual_fees      = models.DecimalField(max_digits=10, decimal_places=2)
     discount_amount  = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    discount_application_basis = models.CharField(
+        max_length=20,
+        choices=Discount.ApplicationBasis.choices,
+        default=Discount.ApplicationBasis.ACTUAL_FEES,
+    )
+    course_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     discount_reason  = models.CharField(max_length=300, blank=True)
     final_fees       = models.DecimalField(max_digits=10, decimal_places=2)
     spot_conversion_discount_applied = models.BooleanField(default=False)
@@ -1235,6 +1252,10 @@ class Enrollment(TimeStampedModel):
     deleted_at       = models.DateTimeField(null=True, blank=True)
     deleted_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='deleted_enrollments')
+    reversed_at       = models.DateTimeField(null=True, blank=True, db_index=True)
+    reversed_by       = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
+                                         related_name='reversed_enrollments')
+    reversal_reason   = models.TextField(blank=True)
 
     class Meta:
         db_table = 'enrollments'
@@ -1252,8 +1273,11 @@ class Enrollment(TimeStampedModel):
             self.final_enrollment_course_id = self.course_id
         if not self.student_number and self.status in self.FINAL_STATUSES:
             self.student_number = generate_student_number(self.branch)
-        # Auto-compute payable fees. Course discount affects final_fees; spot discount affects only net_payable_fee.
-        self.final_fees = max(self.actual_fees - self.discount_amount, 0)
+        # Store the selected discount basis on the enrollment so later Discount changes never alter history.
+        fee_before_selected_discount = self.actual_fees
+        if self.discount_application_basis == Discount.ApplicationBasis.FINAL_FEES:
+            fee_before_selected_discount = max(self.actual_fees - self.course_discount_amount, 0)
+        self.final_fees = max(fee_before_selected_discount - self.discount_amount, 0)
         if self.spot_conversion_discount_applied:
             self.spot_conversion_discount_amount = Decimal('2000')
         else:
@@ -1647,6 +1671,12 @@ class PaymentInstallment(models.Model):
     bill_total       = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     document_snapshot = models.JSONField(default=dict, blank=True)
     document_html    = models.TextField(blank=True)
+    payment_proof    = models.FileField(
+        upload_to='payment_proofs/%Y/%m/',
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])],
+    )
     collected_by     = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL,
                                          related_name='collections')
     payment_date     = models.DateField(default=timezone.now)

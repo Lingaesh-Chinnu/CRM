@@ -723,6 +723,23 @@ export default function EnrollmentDetailPage() {
     navigate('/enrollments', { replace: true })
   }
 
+  const reverseToWalkIn = async () => {
+    if (!window.confirm('Are you sure you want to reverse this enrollment to Walk-in?')) return
+    const reversalReason = window.prompt('Reversal reason (optional)')
+    setSaving(true)
+    setMessage('')
+    try {
+      const { data } = await api.post(`/enrollments/${id}/reverse-to-walkin/`, { reversal_reason: String(reversalReason || '').trim() })
+      setRow(data)
+      setMessage('Enrollment reversed to Walk-in. The original walk-in history was preserved.')
+      navigate('/walkins', { state: { message: 'Enrollment reversed to Walk-in.' } })
+    } catch (error) {
+      setMessage(apiErrorMessage(error, 'Failed to reverse enrollment to Walk-in.'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const rulesStatus = row.rules_signing_status || 'pending'
   const isFinalEnrollment = ['enrolled', 'active', 'completed', 'dropped', 'on_hold'].includes(row.status)
   const canAddToPayment = ['enrolled', 'active', 'completed'].includes(row.status) && !row.payment_info
@@ -753,6 +770,7 @@ export default function EnrollmentDetailPage() {
   }[rulesStatus] || statusLabel(rulesStatus)
   const enrollmentBadge = isFinalEnrollment ? 'Enrolled' : canEnroll ? 'Ready to Enroll' : 'Pending'
   const canResetRulesProcess = isSuperAdmin && !isFinalEnrollment && (rulesSentOrBeyond || row.payment_schedule_locked)
+  const canReverseToWalkIn = Boolean(row.walkin) && !isFinalEnrollment && !row.student_number && rulesStatus !== 'submitted' && row.status !== 'reversed_to_walkin' && !row.payment_info?.installments?.length
   const enrollBlockedReason = isFinalEnrollment
     ? ''
     : !hasSavedSchedule
@@ -801,6 +819,11 @@ export default function EnrollmentDetailPage() {
             className="mt-5 w-fit rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 transition hover:bg-amber-100 disabled:opacity-60"
           >
             Reset Enrollment Workflow
+          </button>
+        )}
+        {canReverseToWalkIn && (
+          <button type="button" onClick={reverseToWalkIn} disabled={saving} className="mt-5 ml-0 w-fit rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-100 disabled:opacity-60 sm:ml-3">
+            Reverse to Walk-in
           </button>
         )}
       </section>

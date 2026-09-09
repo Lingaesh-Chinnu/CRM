@@ -278,6 +278,19 @@ export default function PaymentsListPage() {
     navigate('/payments')
   }
 
+  const resetFilters = () => {
+    setMonth(options[0]?.value || monthValue(new Date()))
+    setBranch('')
+    setSearch('')
+    setCounselor('')
+    setPaymentStatus('')
+    setDuration('')
+    setDateFrom('')
+    setDateTo('')
+    setPage(1)
+    setSearchParams({})
+  }
+
   const applyStatusFilter = (value) => {
     const nextParams = new URLSearchParams()
     if (month) nextParams.set('month', month)
@@ -650,6 +663,10 @@ export default function PaymentsListPage() {
           ) : (
             <div className="hidden lg:block" />
           )}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
+          </div>
         </div>
         {message && <p className="mt-4 text-sm font-medium text-slate-600">{message}</p>}
       </section>

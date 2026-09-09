@@ -126,6 +126,10 @@ export default function StudentsListPage() {
     { label: 'Completed', value: 'completed', count: statusCount('completed') },
     { label: 'Hold', value: 'on_hold', count: statusCount('on_hold') },
   ]
+  const resetFilters = () => {
+    setFilters({ branch: '', course: '', status: '', search: '', enrolledFrom: '', enrolledTo: '' })
+    setPage(1)
+  }
 
   return (
     <div className="space-y-6">
@@ -214,6 +218,10 @@ export default function StudentsListPage() {
             <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">To Date</span>
             <input type="date" value={filters.enrolledTo} onChange={(event) => setFilters((current) => ({ ...current, enrolledTo: event.target.value }))} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100" />
           </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
+          </div>
         </div>
       </section>
 

@@ -6,6 +6,7 @@ const branchOrder = ['Gandhipuram', 'Hopes', 'Kuniyamuthur']
 const initialForm = {
   name: '',
   value: '',
+  application_basis: 'actual_fees',
   validity: 'forever',
   apply_to_all_courses: true,
   courses: [],
@@ -169,6 +170,7 @@ export default function DiscountsPage() {
     name: discount.name,
     discount_type: 'fixed',
     value: Number(discount.value || 0),
+    application_basis: discount.application_basis || 'actual_fees',
     apply_to_all_courses: !!discount.apply_to_all_courses,
     courses: discount.apply_to_all_courses ? [] : discount.courses,
     apply_to_all_branches: !!discount.apply_to_all_branches,
@@ -280,6 +282,12 @@ export default function DiscountsPage() {
           </FormField>
           <FormField label="Discount Amount">
             <input type="number" min="0" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} placeholder="5000" className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100" required />
+          </FormField>
+          <FormField label="Discount Applied On">
+            <div className="flex gap-2">
+              <label className={`flex-1 cursor-pointer rounded-2xl border px-4 py-3 text-sm font-semibold ${form.application_basis === 'actual_fees' ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><input type="radio" name="application_basis" value="actual_fees" checked={form.application_basis === 'actual_fees'} onChange={(e) => setForm({ ...form, application_basis: e.target.value })} className="sr-only" />Actual Fees</label>
+              <label className={`flex-1 cursor-pointer rounded-2xl border px-4 py-3 text-sm font-semibold ${form.application_basis === 'final_fees' ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-slate-50 text-slate-700'}`}><input type="radio" name="application_basis" value="final_fees" checked={form.application_basis === 'final_fees'} onChange={(e) => setForm({ ...form, application_basis: e.target.value })} className="sr-only" />Final Fees</label>
+            </div>
           </FormField>
           <FormField label="Status">
             <select value={form.is_active ? 'active' : 'inactive'} onChange={(e) => setForm({ ...form, is_active: e.target.value === 'active' })} className="w-full max-w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white focus:ring-4 focus:ring-slate-100" required>
@@ -394,10 +402,11 @@ export default function DiscountsPage() {
           <div className="p-6 text-slate-500">Loading discounts...</div>
         ) : (
           <div className="overflow-x-auto">
-            <div className="min-w-[1180px]">
-              <div className="grid grid-cols-[1.25fr_0.8fr_1.35fr_1.45fr_0.85fr_0.85fr_0.75fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            <div className="min-w-[1300px]">
+              <div className="grid grid-cols-[1.25fr_0.8fr_0.9fr_1.35fr_1.45fr_0.85fr_0.85fr_0.75fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-3 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                 <div>Discount Name</div>
                 <div>Value</div>
+                <div>Applied On</div>
                 <div>Selected Courses</div>
                 <div>Branches</div>
                 <div>From Date</div>
@@ -408,9 +417,10 @@ export default function DiscountsPage() {
 
               <div className="divide-y divide-slate-200">
                 {discounts.map((discount, index) => (
-                  <div key={discount.id} className="grid grid-cols-[1.25fr_0.8fr_1.35fr_1.45fr_0.85fr_0.85fr_0.75fr_0.8fr] gap-4 px-6 py-4 text-sm">
+                  <div key={discount.id} className="grid grid-cols-[1.25fr_0.8fr_0.9fr_1.35fr_1.45fr_0.85fr_0.85fr_0.75fr_0.8fr] gap-4 px-6 py-4 text-sm">
                     <div className="font-bold text-slate-950">{discount.name}</div>
                     <div className="font-semibold text-slate-950">{formatValue(discount)}</div>
+                    <select value={discount.application_basis || 'actual_fees'} onChange={(e) => updateDiscountField(index, 'application_basis', e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm"><option value="actual_fees">Actual Fees</option><option value="final_fees">Final Fees</option></select>
                     <div className="flex flex-wrap gap-2">
                       {chipNames(discount.course_names, 'All Courses').map((name) => (
                         <span key={name} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{name}</span>

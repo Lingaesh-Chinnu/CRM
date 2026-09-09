@@ -247,6 +247,8 @@ export default function PaymentDetailPage() {
   const navigate = useNavigate()
   const [payment, setPayment] = useState(null)
   const [form, setForm] = useState(initialInstallment)
+  const [paymentProof, setPaymentProof] = useState(null)
+  const [paymentProofPreview, setPaymentProofPreview] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [billActionId, setBillActionId] = useState(null)
@@ -332,16 +334,19 @@ export default function PaymentDetailPage() {
     setSaving(true)
     setMessage('')
     try {
-      const { data } = await api.post('/installments/', {
-        payment: payment.id,
-        enrollment: payment.enrollment,
-        amount,
-        payment_mode: form.payment_mode,
-        payment_date: form.payment_date,
-        reference_number: referenceNumber,
-        notes: form.notes,
-      })
+      const payload = new FormData()
+      payload.append('payment', payment.id)
+      payload.append('enrollment', payment.enrollment)
+      payload.append('amount', amount)
+      payload.append('payment_mode', form.payment_mode)
+      payload.append('payment_date', form.payment_date)
+      payload.append('reference_number', referenceNumber)
+      payload.append('notes', form.notes)
+      if (paymentProof) payload.append('payment_proof', paymentProof)
+      const { data } = await api.post('/installments/', payload)
       setForm(initialInstallment)
+      setPaymentProof(null)
+      setPaymentProofPreview('')
       setMessage(data.detail || 'Payment entry added successfully.')
       await loadPayment()
     } catch (error) {
@@ -695,6 +700,7 @@ export default function PaymentDetailPage() {
                       <th className="w-[18%] px-4 py-3">Installment</th>
                       <th className="w-[10%] px-4 py-3">Status</th>
                       <th className="w-[14%] px-4 py-3">Reference</th>
+                      <th className="w-[10%] px-4 py-3">Proof</th>
                       <th className="w-[14%] px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -714,6 +720,9 @@ export default function PaymentDetailPage() {
                           <td className="break-words px-4 py-4 align-top text-slate-700 [word-break:break-word]">{installment.installment_label || `${installment.installment_index} Installment`}</td>
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
                           <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
+                          <td className="px-4 py-4 align-top">
+                            {installment.payment_proof ? <a href={installment.payment_proof} target="_blank" rel="noreferrer" className="text-xs font-semibold text-cyan-700 hover:text-cyan-900">View Proof</a> : <span className="text-xs text-slate-400">No proof</span>}
+                          </td>
                           <td className="px-4 py-4 align-top">
                             <div className="ml-auto flex w-full flex-col gap-2">
                               {isSuperAdmin ? (
@@ -782,6 +791,7 @@ export default function PaymentDetailPage() {
                         <div><span className="font-semibold text-slate-900">Installment: </span>{installment.installment_label || `${installment.installment_index} Installment`}</div>
                         <div><span className="font-semibold text-slate-900">Status: </span>{statusLabel(installment.installment_status)}</div>
                         <div><span className="font-semibold text-slate-900">Reference: </span>{installment.reference_number || 'Not provided'}</div>
+                        {installment.payment_proof ? <a href={installment.payment_proof} target="_blank" rel="noreferrer" className="font-semibold text-cyan-700">View payment proof</a> : null}
                         {installment.document_number ? <div><span className="font-semibold text-slate-900">Document: </span>{installment.document_number}</div> : null}
                       </div>
                       <div className="mt-4 flex w-full flex-col gap-2">
@@ -904,6 +914,21 @@ export default function PaymentDetailPage() {
               onChange={(event) => setForm({ ...form, notes: event.target.value })}
               className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
+            <label className="block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Screenshot / Proof</span>
+              <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => {
+                const file = event.target.files?.[0] || null
+                if (file && file.size > 5 * 1024 * 1024) {
+                  setPaymentProof(null)
+                  setPaymentProofPreview('')
+                  setMessage('Payment proof must be 5 MB or smaller.')
+                  return
+                }
+                setPaymentProof(file)
+                setPaymentProofPreview(file ? URL.createObjectURL(file) : '')
+              }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              {paymentProofPreview && <img src={paymentProofPreview} alt="Payment proof preview" className="mt-3 max-h-48 rounded-xl border border-slate-200 object-contain" />}
+            </label>
           </div>
 
           {previewRows.length > 0 && (

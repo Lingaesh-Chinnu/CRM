@@ -306,8 +306,9 @@ export default function WalkInDetailPage() {
 
   const selectedCourse = courses.find((course) => String(course.id) === String(form.course))
   const courseFee = toNumber(selectedCourse?.final_fees ?? form.actual_fees)
-  const discountBaseFee = toNumber(form.actual_fees || selectedCourse?.actual_fees || selectedCourse?.final_fees)
+  const actualFee = toNumber(form.actual_fees || selectedCourse?.actual_fees || selectedCourse?.final_fees)
   const selectedDiscount = availableDiscounts.find((discount) => String(discount.id) === String(form.discount))
+  const discountBaseFee = selectedDiscount?.application_basis === 'final_fees' ? courseFee : actualFee
   const appliedDiscount = discountAmount(selectedDiscount, discountBaseFee)
   const finalFees = selectedDiscount ? Math.max(discountBaseFee - appliedDiscount, 0) : courseFee
   const spotDiscountExpiry = walkin?.fees_reduction_expires_at ? new Date(walkin.fees_reduction_expires_at).getTime() : 0
@@ -480,7 +481,7 @@ export default function WalkInDetailPage() {
       course: Number(form.course),
       preferred_timing: form.preferred_timing,
       enrollment_date: form.enrollment_date,
-      actual_fees: selectedDiscount ? discountBaseFee : courseFee,
+      actual_fees: actualFee,
       discount: form.discount || null,
       spot_conversion_discount_applied: spotDiscountApplied,
       buddy_offer_applied: buddyOfferApplied,
@@ -1169,8 +1170,8 @@ export default function WalkInDetailPage() {
             </div>
             <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
               <div className="grid gap-2 text-sm text-emerald-950">
-                <p className="font-semibold">Actual Fees: Rs {formatMoney(discountBaseFee || courseFee)}</p>
-                <p className="font-semibold">Course Discount: Rs {formatMoney(appliedDiscount)}</p>
+                <p className="font-semibold">Actual Fees: Rs {formatMoney(actualFee)}</p>
+                <p className="font-semibold">Discount ({selectedDiscount?.application_basis === 'final_fees' ? 'Final Fees' : 'Actual Fees'}): Rs {formatMoney(appliedDiscount)}</p>
                 <p className="font-black">Final Fees: Rs {formatMoney(finalFees)}</p>
                 <p className="font-semibold">Fees Reduction: Rs {formatMoney(spotDiscountAmount)}</p>
                 <p className="font-semibold">Buddy Offer: Rs {formatMoney(buddyOfferAmount)}</p>

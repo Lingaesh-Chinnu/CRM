@@ -311,6 +311,11 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
     }
   }
 
+  const resetFilters = () => {
+    setFilters({ branch: '', course: '', counselor: '', status: '', source: '', date_from: '', date_to: '', search: '' })
+    setPage(1)
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -463,6 +468,10 @@ export default function EnrollmentsListPage({ queue = 'enrolled' }) {
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
           </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setPage(1)} disabled={loading} className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:opacity-60">Search</button>
+            <button type="button" onClick={resetFilters} className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50">Reset</button>
+          </div>
         </div>
       </section>
 

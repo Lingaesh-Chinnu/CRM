@@ -1475,7 +1475,7 @@ class DiscountSerializer(serializers.ModelSerializer):
     class Meta:
         model = Discount
         fields = [
-            'id', 'name', 'discount_type', 'value', 'apply_to_all_courses',
+            'id', 'name', 'discount_type', 'value', 'application_basis', 'apply_to_all_courses',
             'courses', 'course_names', 'apply_to_all_branches', 'branches', 'branch_names',
             'branch', 'valid_from', 'valid_to', 'validity', 'is_active',
             'status_label', 'created_by', 'created_at', 'updated_at',
@@ -1502,12 +1502,15 @@ class DiscountSerializer(serializers.ModelSerializer):
         apply_to_all = attrs.get('apply_to_all_courses', getattr(self.instance, 'apply_to_all_courses', False))
         courses = attrs.get('courses')
         value = attrs.get('value', getattr(self.instance, 'value', None))
+        application_basis = attrs.get('application_basis', getattr(self.instance, 'application_basis', None))
         if not attrs['name']:
             raise serializers.ValidationError({'name': 'Discount name is required.'})
         if value is None:
             raise serializers.ValidationError({'value': 'Discount amount is required.'})
         if value is not None and value < 0:
             raise serializers.ValidationError({'value': 'Discount amount cannot be negative.'})
+        if application_basis not in dict(Discount.ApplicationBasis.choices):
+            raise serializers.ValidationError({'application_basis': 'Select whether the discount applies to Actual Fees or Final Fees.'})
         if valid_from is None:
             raise serializers.ValidationError({'valid_from': 'Discount start date is required.'})
         if validity is None and self.instance is None:
@@ -2047,6 +2050,13 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        proof = attrs.get('payment_proof')
+        if proof:
+            if proof.size > 5 * 1024 * 1024:
+                raise serializers.ValidationError({'payment_proof': 'Payment proof must be 5 MB or smaller.'})
+            content_type = getattr(proof, 'content_type', '')
+            if content_type and content_type not in {'image/jpeg', 'image/png'}:
+                raise serializers.ValidationError({'payment_proof': 'Payment proof must be a JPG, JPEG, or PNG image.'})
         mode = attrs.get('payment_mode') or getattr(self.instance, 'payment_mode', PaymentInstallment.Mode.CASH)
         payment = attrs.get('payment') or getattr(self.instance, 'payment', None)
         reference = str(attrs.get('reference_number') or '').strip()
