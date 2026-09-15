@@ -302,6 +302,9 @@ _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
 RULES_SUCCESS_MESSAGE = 'Thank you for filling out the form. Your details have been submitted successfully.'
 RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
+SATHISH_RULES_RESEND_ENROLLMENT_ID = 210
+SATHISH_RULES_RESEND_PHONE = '9489484095'
+SATHISH_RULES_RESEND_COURSE_ID = 58
 PUBLIC_LEAD_COURSE_NAMES = [
     'Artificial Intelligence',
     'Data Analytics',
@@ -320,6 +323,16 @@ def rules_database_file_backups_enabled():
             return configured.strip().lower() in {'1', 'true', 'yes', 'on'}
         return bool(configured)
     return not bool(getattr(settings, 'USE_S3_STORAGE', False))
+
+
+def is_sathish_rules_resend_enrollment(enrollment):
+    """One approved resend exception for the historic fee/schedule mismatch only."""
+    return (
+        enrollment.pk == SATHISH_RULES_RESEND_ENROLLMENT_ID
+        and str(enrollment.name or '').strip().casefold() == 'sathish arjunan'
+        and str(enrollment.phone or '').strip() == SATHISH_RULES_RESEND_PHONE
+        and enrollment.course_id == SATHISH_RULES_RESEND_COURSE_ID
+    )
 
 
 def missing_model_columns(model, field_names):
@@ -9963,10 +9976,20 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 {'detail': 'Course start date and batch timing are required before sending the Rules & Regulation form.', **errors},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        try:
-            self._ensure_enrollment_schedule(enrollment, lock=False)
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        existing_signing = RulesSigningRequest.objects.filter(enrollment=enrollment).first()
+        is_approved_resend_exception = (
+            is_sathish_rules_resend_enrollment(enrollment)
+            and existing_signing is not None
+            and existing_signing.status in {
+                RulesSigningRequest.Status.SENT,
+                RulesSigningRequest.Status.VIEWED,
+            }
+        )
+        if not is_approved_resend_exception:
+            try:
+                self._ensure_enrollment_schedule(enrollment, lock=False)
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         signing, _ = RulesSigningRequest.objects.get_or_create(enrollment=enrollment)
         signing_path = f'{app_url(f"rules-sign/{signing.token}")}/'
@@ -10060,7 +10083,8 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 request.user,
                 'Rules form sent.',
             )
-        self._ensure_enrollment_schedule(enrollment, lock=True)
+        if not is_approved_resend_exception:
+            self._ensure_enrollment_schedule(enrollment, lock=True)
         return Response({
             'detail': 'Rules & Regulations link generated successfully.',
             'signing_link': signing_link,

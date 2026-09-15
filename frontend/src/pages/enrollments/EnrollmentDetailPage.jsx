@@ -35,6 +35,13 @@ const enrollmentStatusOptions = [
   { value: 'transferred', label: 'Transferred' },
 ]
 
+function isSathishRulesResendException(row) {
+  return Number(row?.id) === 210
+    && String(row?.name || '').trim().toLowerCase() === 'sathish arjunan'
+    && String(row?.phone || '').trim() === '9489484095'
+    && Number(row?.course) === 58
+}
+
 const competitorStatusOptions = [
   ['not_enquired_elsewhere', 'Not Enquired Elsewhere'], ['enquired_1', 'Enquired at 1 Institute'],
   ['enquired_2_3', 'Enquired at 2-3 Institutes'], ['enquired_more_3', 'Enquired at More Than 3 Institutes'],
@@ -751,6 +758,7 @@ export default function EnrollmentDetailPage() {
   const plannedTotal = Math.round(scheduleTotal(schedule) * 100) / 100
   const remainingPlanned = Math.round((finalFees - plannedTotal) * 100) / 100
   const currentScheduleError = scheduleValidation(schedule, finalFees)
+  const allowsRulesResendWithHistoricalSchedule = isSathishRulesResendException(row) && ['sent', 'viewed'].includes(rulesStatus)
   const hasSavedSchedule = Boolean(row.payment_schedule?.length)
   const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
   const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
@@ -1084,7 +1092,7 @@ export default function EnrollmentDetailPage() {
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <button
             onClick={sendRulesForm}
-            disabled={saving || isFinalEnrollment || rulesStatus === 'submitted' || Boolean(currentScheduleError)}
+            disabled={saving || isFinalEnrollment || rulesStatus === 'submitted' || (Boolean(currentScheduleError) && !allowsRulesResendWithHistoricalSchedule)}
             className="inline-flex min-w-[230px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
             {saving ? 'Sending...' : rulesSentOrBeyond && rulesStatus !== 'submitted' ? 'Resend Rules & Regulation Form' : 'Send Rules & Regulation Form'}
