@@ -313,7 +313,7 @@ export default function RulesSigningPage() {
                 View Signed PDF
               </a>
               <a
-                href={data.signed_pdf_url}
+                href={`${data.signed_pdf_url}?download=1`}
                 download
                 className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900"
               >

@@ -14,6 +14,7 @@ from django.utils.dateparse import parse_date
 from django.core.files.storage import default_storage
 from django.db.models import BooleanField, Case, Q, Value, When
 from django.db.utils import OperationalError, ProgrammingError
+from django.urls import reverse
 from crm.models import Branch, UserTarget, UserMonthlyRating, BranchTarget, HistoricalAnalyticsEntry, UserSessionLog, TeamNotice, TeamNoticeReply
 
 User = get_user_model()
@@ -2027,6 +2028,7 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
     document_status = serializers.SerializerMethodField()
     document_status_display = serializers.SerializerMethodField()
     installment_status = serializers.SerializerMethodField()
+    payment_proof_url = serializers.SerializerMethodField()
 
     class Meta:
         model  = PaymentInstallment
@@ -2036,6 +2038,11 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
             'document_type', 'receipt_number', 'bill_number', 'bill_generated_at',
             'bill_generated_by', 'bill_total', 'document_snapshot', 'document_html',
         ]
+        extra_kwargs = {
+            # Files are served via the permission-checked endpoint below, rather
+            # than returning a direct storage URL in API responses.
+            'payment_proof': {'write_only': True, 'required': False},
+        }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -2057,9 +2064,43 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
             content_type = getattr(proof, 'content_type', '')
             if content_type and content_type not in {'image/jpeg', 'image/png'}:
                 raise serializers.ValidationError({'payment_proof': 'Payment proof must be a JPG, JPEG, or PNG image.'})
+            extension = str(getattr(proof, 'name', '')).rsplit('.', 1)[-1].lower()
+            if extension not in {'jpg', 'jpeg', 'png'}:
+                raise serializers.ValidationError({'payment_proof': 'Payment proof must use a .jpg, .jpeg, or .png extension.'})
+            # The client supplied filename and content type can be forged.  Verify the
+            # actual image container as well, and only allow the supported formats.
+            try:
+                from PIL import Image
+                proof.seek(0)
+                with Image.open(proof) as image:
+                    image.verify()
+                    image_format = (image.format or '').upper()
+                proof.seek(0)
+            except Exception:
+                try:
+                    proof.seek(0)
+                except Exception:
+                    pass
+                raise serializers.ValidationError({'payment_proof': 'Payment proof must be a valid JPG, JPEG, or PNG image.'})
+            if image_format not in {'JPEG', 'PNG'}:
+                raise serializers.ValidationError({'payment_proof': 'Payment proof must be a JPG, JPEG, or PNG image.'})
         mode = attrs.get('payment_mode') or getattr(self.instance, 'payment_mode', PaymentInstallment.Mode.CASH)
         payment = attrs.get('payment') or getattr(self.instance, 'payment', None)
         reference = str(attrs.get('reference_number') or '').strip()
+
+        proof_required_modes = {
+            PaymentInstallment.Mode.CASH,
+            PaymentInstallment.Mode.UPI,
+            PaymentInstallment.Mode.CASH_UPI,
+        }
+        # Apply the rule to new records and when a payment mode/proof is being
+        # edited.  This deliberately leaves historical records valid.
+        existing_proof = getattr(self.instance, 'payment_proof', None) if self.instance else None
+        changing_payment_details = not self.instance or 'payment_mode' in attrs or 'payment_proof' in attrs
+        if mode in proof_required_modes and changing_payment_details and not (proof or existing_proof):
+            raise serializers.ValidationError({
+                'payment_proof': 'Payment proof is required for Cash, UPI, and Cash + UPI payments.'
+            })
 
         if mode == PaymentInstallment.Mode.CASH:
             if self.instance:
@@ -2157,6 +2198,13 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
             if item['index'] == obj.installment_index:
                 return item['status']
         return 'pending'
+
+    def get_payment_proof_url(self, obj):
+        if not obj.payment_proof:
+            return None
+        url = reverse('installment-payment-proof', kwargs={'pk': obj.pk})
+        request = self.context.get('request')
+        return request.build_absolute_uri(url) if request else url
 
 
 class PaymentReasonMessageSerializer(serializers.ModelSerializer):

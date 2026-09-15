@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import AdminDeleteButton from '../../components/common/AdminDeleteButton'
+import { openProtectedFile } from '../../utils/protectedFiles'
 
 const LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
 
@@ -141,6 +142,22 @@ function referenceConfig(mode) {
     },
   }
   return config[mode] || config.other
+}
+
+function paymentProofLabel(mode) {
+  if (mode === 'cash') return 'Payment Proof *'
+  if (mode === 'upi' || mode === 'cash_upi') return 'Payment Screenshot *'
+  return 'Payment Screenshot / Proof'
+}
+
+function paymentProofRequired(mode) {
+  return ['cash', 'upi', 'cash_upi'].includes(mode)
+}
+
+function isAllowedPaymentProof(file) {
+  if (!file) return true
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  return ['jpg', 'jpeg', 'png'].includes(extension) && ['image/jpeg', 'image/png'].includes(file.type)
 }
 
 function nextCashReference(payment) {
@@ -328,6 +345,11 @@ export default function PaymentDetailPage() {
 
     if (form.payment_mode === 'card' && !/^\d{4}$/.test(referenceNumber)) {
       setMessage('Card Last 4 Digits must be exactly 4 digits.')
+      return
+    }
+
+    if (paymentProofRequired(form.payment_mode) && !paymentProof) {
+      setMessage(`${paymentProofLabel(form.payment_mode).replace(' *', '')} is required for this payment mode.`)
       return
     }
 
@@ -721,7 +743,7 @@ export default function PaymentDetailPage() {
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
                           <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
                           <td className="px-4 py-4 align-top">
-                            {installment.payment_proof ? <a href={installment.payment_proof} target="_blank" rel="noreferrer" className="text-xs font-semibold text-cyan-700 hover:text-cyan-900">View Proof</a> : <span className="text-xs text-slate-400">No proof</span>}
+                            {installment.payment_proof_url ? <button type="button" onClick={() => openProtectedFile(api, installment.payment_proof_url, 'Payment proof is not available.', setMessage)} className="text-left text-xs font-semibold text-cyan-700 hover:text-cyan-900">View Payment Proof</button> : <span className="text-xs text-slate-400">No proof</span>}
                           </td>
                           <td className="px-4 py-4 align-top">
                             <div className="ml-auto flex w-full flex-col gap-2">
@@ -791,7 +813,7 @@ export default function PaymentDetailPage() {
                         <div><span className="font-semibold text-slate-900">Installment: </span>{installment.installment_label || `${installment.installment_index} Installment`}</div>
                         <div><span className="font-semibold text-slate-900">Status: </span>{statusLabel(installment.installment_status)}</div>
                         <div><span className="font-semibold text-slate-900">Reference: </span>{installment.reference_number || 'Not provided'}</div>
-                        {installment.payment_proof ? <a href={installment.payment_proof} target="_blank" rel="noreferrer" className="font-semibold text-cyan-700">View payment proof</a> : null}
+                        {installment.payment_proof_url ? <button type="button" onClick={() => openProtectedFile(api, installment.payment_proof_url, 'Payment proof is not available.', setMessage)} className="text-left font-semibold text-cyan-700">View Payment Proof</button> : null}
                         {installment.document_number ? <div><span className="font-semibold text-slate-900">Document: </span>{installment.document_number}</div> : null}
                       </div>
                       <div className="mt-4 flex w-full flex-col gap-2">
@@ -873,14 +895,20 @@ export default function PaymentDetailPage() {
 
             <select
               value={form.payment_mode}
-              onChange={(event) => setForm({ ...form, payment_mode: event.target.value, reference_number: '' })}
+              onChange={(event) => {
+                setForm({ ...form, payment_mode: event.target.value, reference_number: '' })
+                setPaymentProof(null)
+                setPaymentProofPreview('')
+              }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             >
               <option value="cash">Cash</option>
               <option value="upi">UPI</option>
               <option value="cash_upi">Cash + UPI</option>
               <option value="bank_transfer">Bank Transfer</option>
+              <option value="cheque">Cheque</option>
               <option value="card">Card</option>
+              <option value="other">Other</option>
             </select>
 
             <input
@@ -914,10 +942,17 @@ export default function PaymentDetailPage() {
               onChange={(event) => setForm({ ...form, notes: event.target.value })}
               className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
-            <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Payment Screenshot / Proof</span>
+            {paymentProofRequired(form.payment_mode) && <label className="block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{paymentProofLabel(form.payment_mode)}</span>
               <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => {
                 const file = event.target.files?.[0] || null
+                if (file && !isAllowedPaymentProof(file)) {
+                  event.target.value = ''
+                  setPaymentProof(null)
+                  setPaymentProofPreview('')
+                  setMessage('Payment proof must be a JPG, JPEG, or PNG image.')
+                  return
+                }
                 if (file && file.size > 5 * 1024 * 1024) {
                   setPaymentProof(null)
                   setPaymentProofPreview('')
@@ -926,9 +961,9 @@ export default function PaymentDetailPage() {
                 }
                 setPaymentProof(file)
                 setPaymentProofPreview(file ? URL.createObjectURL(file) : '')
-              }} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              }} required className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
               {paymentProofPreview && <img src={paymentProofPreview} alt="Payment proof preview" className="mt-3 max-h-48 rounded-xl border border-slate-200 object-contain" />}
-            </label>
+            </label>}
           </div>
 
           {previewRows.length > 0 && (

@@ -8867,7 +8867,10 @@ class PublicRulesSignedPdfView(APIView):
         if not pdf_bytes:
             return proof_unavailable_response()
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'inline; filename="{proof_filename(signing.enrollment)}"'
+        # The random, enrollment-bound signing token is the candidate's access
+        # credential.  It can safely request an attachment without exposing a
+        # staff-only enrollment endpoint.
+        response['Content-Disposition'] = proof_content_disposition(request, signing.enrollment)
         return response
 
 
@@ -11456,6 +11459,19 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer, save_kwargs=None):
         serializer.save(**(save_kwargs or {'collected_by': self.request.user}))
+
+    @action(detail=True, methods=['get'], url_path='payment-proof')
+    def payment_proof(self, request, pk=None):
+        """Serve the payment image only after the normal branch permission check."""
+        installment = self.get_object()
+        if not installment.payment_proof:
+            return Response({'detail': 'Payment proof is not available.'}, status=404)
+        content_type = mimetypes.guess_type(installment.payment_proof.name)[0] or 'image/jpeg'
+        response = file_response_from_field(installment.payment_proof, content_type)
+        if not response:
+            return Response({'detail': 'Payment proof is not available.'}, status=404)
+        response['Content-Disposition'] = f'inline; filename="{Path(installment.payment_proof.name).name}"'
+        return response
 
     def _notify_admins_payment_added(self, installment):
         creator_name = notification_actor_name(getattr(installment, 'collected_by', None))

@@ -782,6 +782,65 @@ class PaymentScheduleSyncTests(APITestCase):
             payment_date='2026-05-02',
         )
 
+    def _payment_proof(self, name='proof.png', image_format='PNG', content_type='image/png'):
+        from PIL import Image
+        image = io.BytesIO()
+        Image.new('RGB', (20, 20), (17, 24, 39)).save(image, format=image_format)
+        return SimpleUploadedFile(name, image.getvalue(), content_type=content_type)
+
+    def _add_installment(self, payment_mode, proof=None):
+        payload = {
+            'payment': self.payment.id,
+            'enrollment': self.enrollment.id,
+            'amount': '1000',
+            'payment_mode': payment_mode,
+            'payment_date': '2026-05-03',
+            'reference_number': 'UPI-TEST-001' if payment_mode != 'cash' else '',
+        }
+        if proof is not None:
+            payload['payment_proof'] = proof
+        self.client.force_authenticate(self.staff)
+        return self.client.post('/api/installments/', payload, format='multipart')
+
+    def test_payment_proof_is_required_for_cash_upi_and_cash_modes(self):
+        for mode in ('cash', 'upi', 'cash_upi'):
+            with self.subTest(mode=mode):
+                response = self._add_installment(mode)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('payment_proof', response.data)
+
+    def test_payment_proof_accepts_jpg_jpeg_and_png_images(self):
+        for name in ('proof.jpg', 'proof.jpeg', 'proof.png'):
+            with self.subTest(name=name):
+                response = self._add_installment('upi', self._payment_proof(name))
+                self.assertEqual(response.status_code, 201)
+
+    def test_authorized_admin_can_view_payment_proof_through_api(self):
+        response = self._add_installment('upi', self._payment_proof())
+        self.assertEqual(response.status_code, 201)
+        proof_url = response.data['installment']['payment_proof_url']
+        self.assertIn('/api/installments/', proof_url)
+        self.client.force_authenticate(self.admin)
+        proof_response = self.client.get(proof_url)
+        self.assertEqual(proof_response.status_code, 200)
+        self.assertEqual(proof_response['Content-Type'], 'image/png')
+
+    def test_payment_proof_rejects_disguised_and_unsupported_files(self):
+        response = self._add_installment(
+            'upi',
+            SimpleUploadedFile('proof.pdf', b'%PDF-not-an-image', content_type='application/pdf'),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('payment_proof', response.data)
+
+        response = self._add_installment('upi', self._payment_proof('proof.webp', 'PNG', 'image/webp'))
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('payment_proof', response.data)
+
+    def test_other_payment_mode_remains_valid_without_proof(self):
+        response = self._add_installment('bank_transfer')
+        self.assertEqual(response.status_code, 201)
+
     def test_update_schedule_splits_only_unpaid_rows_without_changing_course_fee(self):
         self.client.force_authenticate(self.admin)
 
