@@ -268,6 +268,14 @@ export default function RulesSigningPage() {
       }, 1800)
     } catch (error) {
       submittingRef.current = false
+      // Keep the technical response available in browser diagnostics without
+      // exposing internal failures to the candidate-facing page.
+      console.error('Rules signing submission failed', {
+        token,
+        status: error.response?.status,
+        response: error.response?.data,
+        message: error.message,
+      })
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
     } finally {
       setSubmitting(false)

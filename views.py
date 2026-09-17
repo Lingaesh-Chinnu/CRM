@@ -325,6 +325,21 @@ def rules_database_file_backups_enabled():
     return not bool(getattr(settings, 'USE_S3_STORAGE', False))
 
 
+def rules_external_proof_storage_enabled():
+    """Return whether Rules proof files have durable file storage available.
+
+    Render's application filesystem is ephemeral. The signed proof is kept in
+    PostgreSQL in that configuration, so a local-media write must never make a
+    valid public signing fail. S3/R2 and an explicitly mounted MEDIA_ROOT are
+    durable file-storage options and continue to receive proof files.
+    """
+    if bool(getattr(settings, 'USE_S3_STORAGE', False)):
+        return True
+    if not bool(getattr(settings, 'RUNNING_ON_RENDER', False)):
+        return True
+    return not bool(getattr(settings, 'MEDIA_ROOT_IS_DEFAULT_LOCAL', True))
+
+
 def is_sathish_rules_resend_enrollment(enrollment):
     """One approved resend exception for the historic fee/schedule mismatch only."""
     return (
@@ -8263,9 +8278,17 @@ class PublicRulesSigningView(APIView):
     def post(self, request, token):
         signing = self.get_signing(token)
         if not signing:
+            logger.warning('Rules signing rejected: invalid token=%s.', token)
             return Response({'detail': 'Invalid signing link.'}, status=404)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
+            logger.info('Rules signing replay returned immutable submission: token=%s enrollment_id=%s.', token, signing.enrollment_id)
             return self.submitted_response(request, signing)
+
+        logger.info(
+            'Rules signing submission received: token=%s enrollment_id=%s status=%s content_type=%s fields=%s files=%s.',
+            token, signing.enrollment_id, signing.status, request.content_type,
+            sorted(request.data.keys()), sorted(request.FILES.keys()),
+        )
 
         try:
             selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
@@ -8302,21 +8325,6 @@ class PublicRulesSigningView(APIView):
                 selfie_extension = image_storage_extension(selfie_bytes)
                 signature_extension = image_storage_extension(signature_bytes)
                 proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S%f}'
-                save_rules_proof_file(
-                    signing.selfie_image,
-                    proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
-                    selfie_bytes,
-                )
-                save_rules_proof_file(
-                    signing.signature_image,
-                    proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
-                    signature_bytes,
-                )
-                save_rules_proof_file(
-                    signing.signed_pdf,
-                    proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
-                    pdf_bytes,
-                )
                 if rules_database_file_backups_enabled():
                     signing.selfie_image_file = selfie_bytes
                     signing.signature_image_file = signature_bytes
@@ -8325,10 +8333,26 @@ class PublicRulesSigningView(APIView):
                     signing.selfie_image_file = None
                     signing.signature_image_file = None
                     signing.signed_pdf_file = None
+                if rules_external_proof_storage_enabled():
+                    save_rules_proof_file(
+                        signing.selfie_image,
+                        proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
+                        selfie_bytes,
+                    )
+                    save_rules_proof_file(
+                        signing.signature_image,
+                        proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
+                        signature_bytes,
+                    )
+                    save_rules_proof_file(
+                        signing.signed_pdf,
+                        proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
+                        pdf_bytes,
+                    )
                 if (
-                    not stored_rules_file_exists(signing, 'selfie_image')
-                    or not stored_rules_file_exists(signing, 'signature_image')
-                    or not stored_rules_file_exists(signing, 'signed_pdf')
+                    not stored_rules_file_exists(signing, 'selfie_image', 'selfie_image_file')
+                    or not stored_rules_file_exists(signing, 'signature_image', 'signature_image_file')
+                    or not stored_rules_file_exists(signing, 'signed_pdf', 'signed_pdf_file')
                 ):
                     raise RuntimeError('Rules proof files were not verified after storage.')
                 signing.status = RulesSigningRequest.Status.SUBMITTED
@@ -8349,6 +8373,10 @@ class PublicRulesSigningView(APIView):
                     'updated_at',
                 ])
                 persist_rules_regulations_document(signing)
+                logger.info(
+                    'Rules signing proof persisted: token=%s enrollment_id=%s database_backup=%s external_storage=%s.',
+                    token, enrollment.id, rules_database_file_backups_enabled(), rules_external_proof_storage_enabled(),
+                )
                 if enrollment.status != Enrollment.Status.ENROLLED:
                     old_status = enrollment.status
                     enrollment.status = Enrollment.Status.RULES_SUBMITTED

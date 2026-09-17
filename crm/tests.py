@@ -8,6 +8,7 @@ from decimal import Decimal
 from datetime import timedelta
 import base64
 import io
+import uuid
 import tempfile
 
 from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
@@ -3003,6 +3004,87 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(pdf_response.status_code, 200)
         self.assertTrue(pdf_response.content.startswith(b'%PDF'))
+
+    def test_public_rules_signing_on_render_uses_database_proofs_when_local_media_is_unavailable(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Render Durable Proof Candidate',
+            phone='9000000143',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        with override_settings(RUNNING_ON_RENDER=True, MEDIA_ROOT_IS_DEFAULT_LOCAL=True, USE_S3_STORAGE=False):
+            with mock.patch('views.save_rules_proof_file', side_effect=AssertionError('ephemeral media must not be used')):
+                response = self.client.post(
+                    f'/api/public/rules-sign/{signing.token}/',
+                    {'selfie': image_data, 'signature': image_data},
+                    format='json',
+                )
+
+        self.assertEqual(response.status_code, 200)
+        signing.refresh_from_db()
+        document = RulesRegulationsDocument.objects.get(signing_request=signing)
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertFalse(signing.selfie_image)
+        self.assertFalse(signing.signature_image)
+        self.assertFalse(signing.signed_pdf)
+        self.assertTrue(bytes(signing.selfie_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(signing.signature_image_file).startswith(b'\x89PNG'))
+        self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
+        self.assertTrue(bytes(document.signed_pdf_file).startswith(b'%PDF'))
+
+    def test_public_rules_signing_rejects_an_invalid_token(self):
+        response = self.client.post(
+            f'/api/public/rules-sign/{uuid.uuid4()}/',
+            {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data['detail'], 'Invalid signing link.')
+
+    def test_public_rules_signing_accepts_an_already_enrolled_candidate(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Eligible Enrolled Candidate',
+            phone='9000000144',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.ENROLLED,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+        response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'selfie': image_data, 'signature': image_data},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        signing.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(enrollment.status, Enrollment.Status.ENROLLED)
 
     def test_public_rules_signing_hides_dependency_errors(self):
         enrollment = Enrollment.objects.create(
