@@ -341,7 +341,7 @@ def rules_external_proof_storage_enabled():
 
 
 def is_sathish_rules_resend_enrollment(enrollment):
-    """One approved resend exception for the historic fee/schedule mismatch only."""
+    """One approved fee/schedule regeneration and Rules resend exception."""
     return (
         enrollment.pk == SATHISH_RULES_RESEND_ENROLLMENT_ID
         and str(enrollment.name or '').strip().casefold() == 'sathish arjunan'
@@ -9887,13 +9887,28 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             RulesSigningRequest.Status.VIEWED,
             RulesSigningRequest.Status.SUBMITTED,
         }
-        if enrollment.payment_schedule_locked and rules_already_sent:
+        # This identity-checked exception permits only Sathish Arjunan's
+        # historic, unsigned Rules form to regenerate the existing schedule.
+        # It deliberately excludes submitted forms and never edits payment
+        # records or collected installments.
+        is_approved_sathish_regeneration = (
+            is_sathish_rules_resend_enrollment(enrollment)
+            and signing_status in {
+                RulesSigningRequest.Status.SENT,
+                RulesSigningRequest.Status.VIEWED,
+            }
+        )
+        if enrollment.payment_schedule_locked and rules_already_sent and not is_approved_sathish_regeneration:
             return Response({'detail': 'Payment schedule is locked after Rules & Regulation sending.'}, status=status.HTTP_403_FORBIDDEN)
+        if is_approved_sathish_regeneration and PaymentInstallment.objects.filter(enrollment=enrollment).exists():
+            return Response({'detail': 'Payment schedule cannot be regenerated after a payment has been collected.'}, status=status.HTTP_403_FORBIDDEN)
         if enrollment.status in Enrollment.FINAL_STATUSES and not request.user.is_super_admin:
             return Response({'detail': 'Only admin can override payment schedules after enrollment confirmation.'}, status=status.HTTP_403_FORBIDDEN)
         if not enrollment.start_date:
             return Response({'detail': 'Course start date is required before finalizing payment schedule.'}, status=status.HTTP_400_BAD_REQUEST)
         if request.data.get('payment_schedule') is not None:
+            if is_approved_sathish_regeneration:
+                return Response({'detail': 'Use the approved Regenerate Fees / Installments option for this enrollment.'}, status=status.HTTP_403_FORBIDDEN)
             schedule, error = self._clean_manual_payment_schedule(enrollment, request.data.get('payment_schedule'))
             if error:
                 return Response({'detail': error}, status=status.HTTP_400_BAD_REQUEST)

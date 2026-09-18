@@ -966,6 +966,54 @@ class PaymentScheduleSyncTests(APITestCase):
         pending_receipt_installment.refresh_from_db()
         self.assertTrue(pending_receipt_installment.receipt_number)
 
+    def test_only_sathish_can_regenerate_an_unsigned_locked_rules_schedule(self):
+        special_course = Course.objects.create(id=58, name='Az-900 & Az-104', actual_fees=Decimal('30900'))
+        sathish = Enrollment.objects.create(
+            id=210,
+            branch=self.branch,
+            course=special_course,
+            name='Sathish Arjunan',
+            phone='9489484095',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=Decimal('30900'),
+            discount_amount=Decimal('9900'),
+            status=Enrollment.Status.PENDING_RULES,
+            payment_schedule_locked=True,
+            payment_schedule=[{'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'}],
+        )
+        RulesSigningRequest.objects.create(enrollment=sathish, status=RulesSigningRequest.Status.SENT)
+        other = Enrollment.objects.create(
+            branch=self.branch,
+            course=special_course,
+            name='Other Candidate',
+            phone='9000000199',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=Decimal('30900'),
+            discount_amount=Decimal('9900'),
+            status=Enrollment.Status.PENDING_RULES,
+            payment_schedule_locked=True,
+        )
+        RulesSigningRequest.objects.create(enrollment=other, status=RulesSigningRequest.Status.SENT)
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(f'/api/enrollments/{sathish.id}/payment-schedule/', {'split_count': 2}, format='json')
+        blocked_response = self.client.post(f'/api/enrollments/{other.id}/payment-schedule/', {'split_count': 2}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(blocked_response.status_code, 403)
+        sathish.refresh_from_db()
+        self.assertEqual(sathish.actual_fees, Decimal('30900.00'))
+        self.assertEqual(sathish.final_fees, Decimal('21000.00'))
+        self.assertEqual(sathish.net_payable_fee, Decimal('21000.00'))
+        self.assertEqual(sum(Decimal(str(item['amount'])) for item in sathish.payment_schedule), Decimal('21000'))
+        self.assertEqual(Payment.objects.filter(enrollment=sathish).count(), 0)
+        self.assertEqual(PaymentInstallment.objects.filter(enrollment=sathish).count(), 0)
+
 
 @override_settings(
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],

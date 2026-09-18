@@ -763,6 +763,10 @@ export default function EnrollmentDetailPage() {
   const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
   const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
   const canManageSchedule = !scheduleIsReadOnly
+  // The backend repeats this exact identity and unsigned-Rules status check.
+  // This only exposes the pre-existing regeneration flow; it does not unlock
+  // manual schedule editing, payment collection, or fee changes.
+  const canRegenerateSchedule = canManageSchedule || allowsRulesResendWithHistoricalSchedule
   const canAddInstallment = schedule.length < 13 && canManageSchedule
   const canEnroll = hasSavedSchedule && rulesStatus === 'submitted'
   const scheduleBadge = scheduleIsReadOnly || row.payment_schedule_locked
@@ -998,14 +1002,14 @@ export default function EnrollmentDetailPage() {
                   Edit Schedule
                 </button>
               )}
-              {canManageSchedule && (
+              {canRegenerateSchedule && (
                 <button
                   type="button"
                   onClick={regenerateSchedule}
                   disabled={saving}
                   className="w-fit rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 disabled:opacity-60"
                 >
-                  Regenerate Schedule
+                  {allowsRulesResendWithHistoricalSchedule ? 'Regenerate Fees / Installments' : 'Regenerate Schedule'}
                 </button>
               )}
               {canAddInstallment && (
