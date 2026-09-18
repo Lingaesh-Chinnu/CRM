@@ -364,7 +364,9 @@ export default function PaymentDetailPage() {
       payload.append('payment_date', form.payment_date)
       payload.append('reference_number', referenceNumber)
       payload.append('notes', form.notes)
-      if (paymentProof) payload.append('payment_proof', paymentProof)
+      // Append the selected File itself.  Do not append its filename or JSON
+      // representation: DRF must receive this part in request.FILES.
+      if (paymentProof) payload.append('payment_proof', paymentProof, paymentProof.name)
       const { data } = await api.post('/installments/', payload)
       setForm(initialInstallment)
       setPaymentProof(null)

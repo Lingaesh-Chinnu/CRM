@@ -31,6 +31,14 @@ function retryDelay(ms = 700) {
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
+    // Let the browser add the multipart boundary for FormData requests.  The
+    // JSON default is appropriate for normal API calls, but retaining it here
+    // makes DRF receive a string value instead of the uploaded file.
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      config.headers?.delete?.('Content-Type')
+      delete config.headers?.['Content-Type']
+      delete config.headers?.['content-type']
+    }
     if (config.skipAuth) {
       return config
     }
