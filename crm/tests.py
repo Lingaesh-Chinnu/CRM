@@ -1050,6 +1050,47 @@ class PaymentScheduleSyncTests(APITestCase):
         self.assertEqual(RulesSigningRequest.objects.filter(enrollment=sneka).count(), 1)
         self.assertEqual(Payment.objects.filter(enrollment=sneka).count(), 0)
 
+    @override_settings(WATI_API_URL='', WATI_ACCESS_TOKEN='')
+    def test_sneka_rules_resend_creates_one_pending_signing_request_with_saved_schedule(self):
+        special_course = Course.objects.create(id=29, name='Py Cloud Architect', actual_fees=Decimal('37900'))
+        sneka = Enrollment.objects.create(
+            id=213,
+            branch=self.branch,
+            course=special_course,
+            name='Sneka Ramaswamy',
+            phone='9360181767',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-09-18',
+            start_date='2026-09-23',
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=Decimal('37900'),
+            discount_amount=Decimal('9000'),
+            spot_conversion_discount_applied=True,
+            status=Enrollment.Status.PENDING_RULES,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-09-18'},
+                {'label': '1st Installment', 'amount': 10950, 'due_date': '2026-09-23'},
+                {'label': '2nd Installment', 'amount': 10950, 'due_date': '2026-10-23'},
+            ],
+        )
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(f'/api/enrollments/{sneka.id}/send-rules-form/', format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], RulesSigningRequest.Status.SENT)
+        self.assertTrue(response.data['whatsapp_url'])
+        sneka.refresh_from_db()
+        self.assertEqual(sneka.net_payable_fee, Decimal('26900.00'))
+        self.assertTrue(sneka.payment_schedule_locked)
+        self.assertEqual(sneka.payment_schedule, [
+            {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-09-18'},
+            {'label': '1st Installment', 'amount': 10950, 'due_date': '2026-09-23'},
+            {'label': '2nd Installment', 'amount': 10950, 'due_date': '2026-10-23'},
+        ])
+        self.assertEqual(RulesSigningRequest.objects.filter(enrollment=sneka).count(), 1)
+        self.assertEqual(Payment.objects.filter(enrollment=sneka).count(), 0)
+
 
 @override_settings(
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],

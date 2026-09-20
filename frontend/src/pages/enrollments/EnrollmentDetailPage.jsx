@@ -445,11 +445,18 @@ export default function EnrollmentDetailPage() {
       }
     } catch (error) {
       const data = error.response?.data
+      const errorMessage = apiErrorMessage(error, 'Failed to send Rules & Regulation form.')
+      // Keep the API validation payload available while investigating send failures.
+      console.error('Rules & Regulation form send failed', {
+        enrollmentId: id,
+        status: error.response?.status,
+        response: data,
+      })
       setRulesErrors({
         start_date: data?.start_date || '',
         batch_timing: data?.batch_timing || '',
       })
-      setMessage(data?.detail ? `Failed to send Rules & Regulation form. ${data.detail}` : error.message || 'Failed to send Rules & Regulation form.')
+      setMessage(`Failed to send Rules & Regulation form. ${errorMessage}`)
     } finally {
       setSaving(false)
     }
