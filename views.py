@@ -305,6 +305,9 @@ RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 SATHISH_RULES_RESEND_ENROLLMENT_ID = 210
 SATHISH_RULES_RESEND_PHONE = '9489484095'
 SATHISH_RULES_RESEND_COURSE_ID = 58
+SNEKA_RULES_RESEND_ENROLLMENT_ID = 213
+SNEKA_RULES_RESEND_PHONE = '9360181767'
+SNEKA_RULES_RESEND_COURSE_ID = 29
 PUBLIC_LEAD_COURSE_NAMES = [
     'Artificial Intelligence',
     'Data Analytics',
@@ -347,6 +350,16 @@ def is_sathish_rules_resend_enrollment(enrollment):
         and str(enrollment.name or '').strip().casefold() == 'sathish arjunan'
         and str(enrollment.phone or '').strip() == SATHISH_RULES_RESEND_PHONE
         and enrollment.course_id == SATHISH_RULES_RESEND_COURSE_ID
+    )
+
+
+def is_sneka_rules_resend_enrollment(enrollment):
+    """Strictly scope Sneka's approved Rules-form resend label/workflow."""
+    return (
+        enrollment.pk == SNEKA_RULES_RESEND_ENROLLMENT_ID
+        and str(enrollment.name or '').strip().casefold() == 'sneka ramaswamy'
+        and str(enrollment.phone or '').strip() == SNEKA_RULES_RESEND_PHONE
+        and enrollment.course_id == SNEKA_RULES_RESEND_COURSE_ID
     )
 
 
@@ -10020,6 +10033,15 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         existing_signing = RulesSigningRequest.objects.filter(enrollment=enrollment).first()
+        if (
+            is_sneka_rules_resend_enrollment(enrollment)
+            and existing_signing is not None
+            and existing_signing.status == RulesSigningRequest.Status.SUBMITTED
+        ):
+            return Response(
+                {'detail': 'The officially signed Rules & Regulations form cannot be resent or overwritten.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         is_approved_resend_exception = (
             is_sathish_rules_resend_enrollment(enrollment)
             and existing_signing is not None

@@ -1014,6 +1014,42 @@ class PaymentScheduleSyncTests(APITestCase):
         self.assertEqual(Payment.objects.filter(enrollment=sathish).count(), 0)
         self.assertEqual(PaymentInstallment.objects.filter(enrollment=sathish).count(), 0)
 
+    def test_sneka_rules_resend_never_overwrites_a_signed_form(self):
+        special_course = Course.objects.create(id=29, name='Py Cloud Architect', actual_fees=Decimal('37900'))
+        sneka = Enrollment.objects.create(
+            id=213,
+            branch=self.branch,
+            course=special_course,
+            name='Sneka Ramaswamy',
+            phone='9360181767',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-09-18',
+            start_date='2026-09-23',
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=Decimal('37900'),
+            discount_amount=Decimal('9000'),
+            spot_conversion_discount_applied=True,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-09-18'},
+                {'label': '1st Installment', 'amount': 10950, 'due_date': '2026-09-23'},
+                {'label': '2nd Installment', 'amount': 10950, 'due_date': '2026-10-23'},
+            ],
+        )
+        signed = RulesSigningRequest.objects.create(
+            enrollment=sneka,
+            status=RulesSigningRequest.Status.SUBMITTED,
+        )
+
+        self.client.force_authenticate(self.staff)
+        response = self.client.post(f'/api/enrollments/{sneka.id}/send-rules-form/', format='json')
+
+        self.assertEqual(response.status_code, 403)
+        signed.refresh_from_db()
+        self.assertEqual(signed.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(RulesSigningRequest.objects.filter(enrollment=sneka).count(), 1)
+        self.assertEqual(Payment.objects.filter(enrollment=sneka).count(), 0)
+
 
 @override_settings(
     ALLOWED_HOSTS=['testserver', 'localhost', '127.0.0.1'],

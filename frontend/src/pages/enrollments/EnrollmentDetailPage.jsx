@@ -42,6 +42,13 @@ function isSathishRulesResendException(row) {
     && Number(row?.course) === 58
 }
 
+function isSnekaRulesResendException(row) {
+  return Number(row?.id) === 213
+    && String(row?.name || '').trim().toLowerCase() === 'sneka ramaswamy'
+    && String(row?.phone || '').trim() === '9360181767'
+    && Number(row?.course) === 29
+}
+
 const competitorStatusOptions = [
   ['not_enquired_elsewhere', 'Not Enquired Elsewhere'], ['enquired_1', 'Enquired at 1 Institute'],
   ['enquired_2_3', 'Enquired at 2-3 Institutes'], ['enquired_more_3', 'Enquired at More Than 3 Institutes'],
@@ -759,6 +766,7 @@ export default function EnrollmentDetailPage() {
   const remainingPlanned = Math.round((finalFees - plannedTotal) * 100) / 100
   const currentScheduleError = scheduleValidation(schedule, finalFees)
   const allowsRulesResendWithHistoricalSchedule = isSathishRulesResendException(row) && ['sent', 'viewed'].includes(rulesStatus)
+  const isSnekaRulesResend = isSnekaRulesResendException(row) && rulesStatus !== 'submitted'
   const hasSavedSchedule = Boolean(row.payment_schedule?.length)
   const rulesSentOrBeyond = ['sent', 'viewed', 'submitted'].includes(rulesStatus)
   const scheduleIsReadOnly = isFinalEnrollment || rulesSentOrBeyond
@@ -1099,7 +1107,7 @@ export default function EnrollmentDetailPage() {
             disabled={saving || isFinalEnrollment || rulesStatus === 'submitted' || (Boolean(currentScheduleError) && !allowsRulesResendWithHistoricalSchedule)}
             className="inline-flex min-w-[230px] justify-center whitespace-nowrap rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
           >
-            {saving ? 'Sending...' : rulesSentOrBeyond && rulesStatus !== 'submitted' ? 'Resend Rules & Regulation Form' : 'Send Rules & Regulation Form'}
+            {saving ? 'Sending...' : (isSnekaRulesResend || (rulesSentOrBeyond && rulesStatus !== 'submitted')) ? 'Resend Rules & Regulation Form' : 'Send Rules & Regulation Form'}
           </button>
           <button
             onClick={enrollStudent}
