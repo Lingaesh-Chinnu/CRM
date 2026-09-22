@@ -83,7 +83,7 @@ from crm.models import (
     RulesSigningRequest, RulesRegulationsDocument, UserSessionLog, WhatsAppMessage, WhatsAppTemplate, Notification, Lead, WalkIn, Payment,
     TeamNotice, TeamNoticeReply,
     PhoneNumberChangeHistory,
-    PaymentInstallment, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
+    PaymentInstallment, PaymentProof, PaymentReasonRequest, PaymentReasonMessage, AdminReceipt, FollowUp, Enrollment, CourseChangeHistory,
     EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory,
     CounselorChangeRequest, CourseChangeRequest, LeadTransferHistory, WalkInAssignmentChangeRequest,
     CandidateStatusHistory,
@@ -11560,6 +11560,24 @@ class PaymentInstallmentViewSet(viewsets.ModelViewSet):
         if not response:
             return Response({'detail': 'Payment proof is not available.'}, status=404)
         response['Content-Disposition'] = f'inline; filename="{Path(installment.payment_proof.name).name}"'
+        return response
+
+    @action(detail=True, methods=['get'], url_path=r'payment-proofs/(?P<proof_pk>[^/.]+)')
+    def payment_proofs(self, request, pk=None, proof_pk=None):
+        """Serve every proof for an installment, including durable DB backups."""
+        installment = self.get_object()
+        proof = installment.payment_proofs.filter(pk=proof_pk).first()
+        if not proof:
+            return Response({'detail': 'Payment proof is not available.'}, status=404)
+        content_type = proof.content_type or mimetypes.guess_type(proof.image.name)[0] or 'image/jpeg'
+        if proof.image_file:
+            response = FileResponse(io.BytesIO(bytes(proof.image_file)), content_type=content_type)
+        else:
+            response = file_response_from_field(proof.image, content_type)
+            if not response:
+                return Response({'detail': 'Payment proof is not available.'}, status=404)
+        filename = proof.original_name or Path(proof.image.name).name or f'payment-proof-{proof.pk}.jpg'
+        response['Content-Disposition'] = f'inline; filename="{Path(filename).name}"'
         return response
 
     def _notify_admins_payment_added(self, installment):

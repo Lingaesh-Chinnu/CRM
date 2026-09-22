@@ -11,7 +11,7 @@ import io
 import uuid
 import tempfile
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
 
 
 User = get_user_model()
@@ -803,12 +803,13 @@ class PaymentScheduleSyncTests(APITestCase):
         self.client.force_authenticate(self.staff)
         return self.client.post('/api/installments/', payload, format='multipart')
 
-    def test_payment_proof_is_required_for_cash_upi_and_cash_modes(self):
-        for mode in ('cash', 'upi', 'cash_upi'):
+    def test_payment_proof_is_required_only_for_upi_modes(self):
+        for mode in ('upi', 'cash_upi'):
             with self.subTest(mode=mode):
                 response = self._add_installment(mode)
                 self.assertEqual(response.status_code, 400)
-                self.assertIn('payment_proof', response.data)
+                self.assertIn('uploaded_payment_proofs', response.data)
+        self.assertEqual(self._add_installment('cash').status_code, 201)
 
     def test_payment_proof_accepts_jpg_jpeg_and_png_images(self):
         for name in ('proof.jpg', 'proof.jpeg', 'proof.png'):
@@ -825,6 +826,31 @@ class PaymentScheduleSyncTests(APITestCase):
         proof_response = self.client.get(proof_url)
         self.assertEqual(proof_response.status_code, 200)
         self.assertEqual(proof_response['Content-Type'], 'image/png')
+
+    def test_upi_accepts_and_returns_multiple_payment_proofs(self):
+        self.client.force_authenticate(self.staff)
+        response = self.client.post('/api/installments/', {
+            'payment': self.payment.id,
+            'enrollment': self.enrollment.id,
+            'amount': '1000',
+            'payment_mode': 'upi',
+            'payment_date': '2026-05-03',
+            'reference_number': 'UPI-SPLIT-001',
+            'uploaded_payment_proofs': [
+                self._payment_proof('upi-3000.png'),
+                self._payment_proof('upi-2000.png'),
+            ],
+        }, format='multipart')
+        self.assertEqual(response.status_code, 201, response.data)
+        installment = PaymentInstallment.objects.get(pk=response.data['installment']['id'])
+        self.assertEqual(PaymentProof.objects.filter(installment=installment).count(), 2)
+        proofs = response.data['installment']['payment_proofs']
+        self.assertEqual(len(proofs), 2)
+        self.client.force_authenticate(self.admin)
+        for proof in proofs:
+            proof_response = self.client.get(proof['url'])
+            self.assertEqual(proof_response.status_code, 200)
+            self.assertEqual(proof_response['Content-Type'], 'image/png')
 
     def test_payment_proof_rejects_disguised_and_unsupported_files(self):
         response = self._add_installment(
@@ -1090,6 +1116,41 @@ class PaymentScheduleSyncTests(APITestCase):
         ])
         self.assertEqual(RulesSigningRequest.objects.filter(enrollment=sneka).count(), 1)
         self.assertEqual(Payment.objects.filter(enrollment=sneka).count(), 0)
+
+    @override_settings(WATI_API_URL='', WATI_ACCESS_TOKEN='')
+    def test_rules_resend_reuses_the_existing_unsigned_request(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Resend Candidate',
+            phone='9000000299',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=Decimal('10000'),
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            ],
+            payment_schedule_locked=True,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/send-rules-form/', format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['status'], RulesSigningRequest.Status.SENT)
+        self.assertIn(str(signing.token), response.data['signing_link'])
+        self.assertEqual(RulesSigningRequest.objects.filter(enrollment=enrollment).count(), 1)
+        self.assertEqual(Payment.objects.filter(enrollment=enrollment).count(), 0)
 
 
 @override_settings(

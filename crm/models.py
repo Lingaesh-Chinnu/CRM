@@ -1700,6 +1700,35 @@ class PaymentInstallment(models.Model):
         return f'₹{self.amount} on {self.payment_date}'
 
 
+class PaymentProof(models.Model):
+    """One immutable screenshot attached to a single payment installment."""
+
+    installment = models.ForeignKey(
+        PaymentInstallment,
+        on_delete=models.CASCADE,
+        related_name='payment_proofs',
+    )
+    image = models.FileField(
+        upload_to='payment_proofs/%Y/%m/',
+        null=True,
+        blank=True,
+        validators=[FileExtensionValidator(allowed_extensions=['jpg', 'jpeg', 'png'])],
+    )
+    # Render's default filesystem is ephemeral. Keeping bytes in the database
+    # when object storage is not configured keeps proofs durable.
+    image_file = models.BinaryField(null=True, blank=True)
+    original_name = models.CharField(max_length=255, blank=True)
+    content_type = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'payment_proofs'
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return f'Payment proof {self.id} for installment {self.installment_id}'
+
+
 def build_payment_installment_summary_from_records(payment):
     schedule = get_payment_installment_schedule(payment)
     summary = []

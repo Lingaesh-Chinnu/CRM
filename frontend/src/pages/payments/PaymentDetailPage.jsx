@@ -145,13 +145,12 @@ function referenceConfig(mode) {
 }
 
 function paymentProofLabel(mode) {
-  if (mode === 'cash') return 'Payment Proof *'
   if (mode === 'upi' || mode === 'cash_upi') return 'Payment Screenshot *'
-  return 'Payment Screenshot / Proof'
+  return 'Payment Screenshot'
 }
 
 function paymentProofRequired(mode) {
-  return ['cash', 'upi', 'cash_upi'].includes(mode)
+  return ['upi', 'cash_upi'].includes(mode)
 }
 
 function isAllowedPaymentProof(file) {
@@ -264,8 +263,7 @@ export default function PaymentDetailPage() {
   const navigate = useNavigate()
   const [payment, setPayment] = useState(null)
   const [form, setForm] = useState(initialInstallment)
-  const [paymentProof, setPaymentProof] = useState(null)
-  const [paymentProofPreview, setPaymentProofPreview] = useState('')
+  const [paymentProofs, setPaymentProofs] = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [billActionId, setBillActionId] = useState(null)
@@ -348,7 +346,7 @@ export default function PaymentDetailPage() {
       return
     }
 
-    if (paymentProofRequired(form.payment_mode) && !paymentProof) {
+    if (paymentProofRequired(form.payment_mode) && paymentProofs.length === 0) {
       setMessage(`${paymentProofLabel(form.payment_mode).replace(' *', '')} is required for this payment mode.`)
       return
     }
@@ -366,11 +364,10 @@ export default function PaymentDetailPage() {
       payload.append('notes', form.notes)
       // Append the selected File itself.  Do not append its filename or JSON
       // representation: DRF must receive this part in request.FILES.
-      if (paymentProof) payload.append('payment_proof', paymentProof, paymentProof.name)
+      paymentProofs.forEach((file) => payload.append('uploaded_payment_proofs', file, file.name))
       const { data } = await api.post('/installments/', payload)
       setForm(initialInstallment)
-      setPaymentProof(null)
-      setPaymentProofPreview('')
+      setPaymentProofs([])
       setMessage(data.detail || 'Payment entry added successfully.')
       await loadPayment()
     } catch (error) {
@@ -745,7 +742,7 @@ export default function PaymentDetailPage() {
                           <td className="px-4 py-4 align-top text-slate-700">{statusLabel(installment.installment_status)}</td>
                           <td className="break-words px-4 py-4 align-top text-slate-500 [word-break:break-word]">{installment.reference_number || 'Not provided'}</td>
                           <td className="px-4 py-4 align-top">
-                            {installment.payment_proof_url ? <button type="button" onClick={() => openProtectedFile(api, installment.payment_proof_url, 'Payment proof is not available.', setMessage)} className="text-left text-xs font-semibold text-cyan-700 hover:text-cyan-900">View Payment Proof</button> : <span className="text-xs text-slate-400">No proof</span>}
+                            {(installment.payment_proofs || []).length ? <div className="flex flex-col gap-1">{installment.payment_proofs.map((proof, index) => <button key={proof.id || index} type="button" onClick={() => openProtectedFile(api, proof.url, 'Payment proof is not available.', setMessage)} className="text-left text-xs font-semibold text-cyan-700 hover:text-cyan-900">View Screenshot {index + 1}</button>)}</div> : <span className="text-xs text-slate-400">No proof</span>}
                           </td>
                           <td className="px-4 py-4 align-top">
                             <div className="ml-auto flex w-full flex-col gap-2">
@@ -815,7 +812,7 @@ export default function PaymentDetailPage() {
                         <div><span className="font-semibold text-slate-900">Installment: </span>{installment.installment_label || `${installment.installment_index} Installment`}</div>
                         <div><span className="font-semibold text-slate-900">Status: </span>{statusLabel(installment.installment_status)}</div>
                         <div><span className="font-semibold text-slate-900">Reference: </span>{installment.reference_number || 'Not provided'}</div>
-                        {installment.payment_proof_url ? <button type="button" onClick={() => openProtectedFile(api, installment.payment_proof_url, 'Payment proof is not available.', setMessage)} className="text-left font-semibold text-cyan-700">View Payment Proof</button> : null}
+                        {(installment.payment_proofs || []).map((proof, index) => <button key={proof.id || index} type="button" onClick={() => openProtectedFile(api, proof.url, 'Payment proof is not available.', setMessage)} className="text-left font-semibold text-cyan-700">View Screenshot {index + 1}</button>)}
                         {installment.document_number ? <div><span className="font-semibold text-slate-900">Document: </span>{installment.document_number}</div> : null}
                       </div>
                       <div className="mt-4 flex w-full flex-col gap-2">
@@ -899,8 +896,7 @@ export default function PaymentDetailPage() {
               value={form.payment_mode}
               onChange={(event) => {
                 setForm({ ...form, payment_mode: event.target.value, reference_number: '' })
-                setPaymentProof(null)
-                setPaymentProofPreview('')
+                setPaymentProofs([])
               }}
               className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             >
@@ -944,28 +940,31 @@ export default function PaymentDetailPage() {
               onChange={(event) => setForm({ ...form, notes: event.target.value })}
               className="min-h-[120px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
             />
-            {paymentProofRequired(form.payment_mode) && <label className="block">
+            {paymentProofRequired(form.payment_mode) && <div className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{paymentProofLabel(form.payment_mode)}</span>
-              <input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => {
-                const file = event.target.files?.[0] || null
-                if (file && !isAllowedPaymentProof(file)) {
+              <input type="file" multiple accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={(event) => {
+                const files = Array.from(event.target.files || [])
+                const invalid = files.find((file) => !isAllowedPaymentProof(file))
+                if (invalid) {
                   event.target.value = ''
-                  setPaymentProof(null)
-                  setPaymentProofPreview('')
                   setMessage('Payment proof must be a JPG, JPEG, or PNG image.')
                   return
                 }
-                if (file && file.size > 5 * 1024 * 1024) {
-                  setPaymentProof(null)
-                  setPaymentProofPreview('')
+                if (files.some((file) => file.size > 5 * 1024 * 1024)) {
+                  event.target.value = ''
                   setMessage('Payment proof must be 5 MB or smaller.')
                   return
                 }
-                setPaymentProof(file)
-                setPaymentProofPreview(file ? URL.createObjectURL(file) : '')
-              }} required className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-              {paymentProofPreview && <img src={paymentProofPreview} alt="Payment proof preview" className="mt-3 max-h-48 rounded-xl border border-slate-200 object-contain" />}
-            </label>}
+                setPaymentProofs((current) => [...current, ...files])
+                event.target.value = ''
+              }} required={paymentProofs.length === 0} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
+              {paymentProofs.length > 0 && <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {paymentProofs.map((file, index) => <div key={`${file.name}-${file.lastModified}-${index}`} className="rounded-xl border border-slate-200 p-3">
+                  <div className="flex items-center justify-between gap-2"><span className="truncate text-xs font-semibold text-slate-700">Screenshot {index + 1}</span><button type="button" onClick={() => setPaymentProofs((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="text-xs font-bold text-rose-700">Remove</button></div>
+                  <img src={URL.createObjectURL(file)} alt={`Payment proof preview ${index + 1}`} className="mt-2 max-h-40 w-full rounded-lg object-contain" />
+                </div>)}
+              </div>}
+            </div>}
           </div>
 
           {previewRows.length > 0 && (
