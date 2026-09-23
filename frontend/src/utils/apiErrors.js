@@ -49,6 +49,9 @@ export function apiErrorMessage(error, fallback = 'Unable to load this page.') {
   if (status === 403) return 'You do not have permission to view this page.'
   if (status === 404) return 'This record was not found.'
   if (status >= 500) return 'The server returned an error. Please try again later.'
+  if (error?.code === 'ECONNABORTED' || /timeout/i.test(error?.message || '')) {
+    return 'The request took too long. Please try again.'
+  }
   if (error?.request) return 'Could not reach the server. Please check your connection and try again.'
   return fallback
 }

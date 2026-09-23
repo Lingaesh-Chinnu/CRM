@@ -2012,7 +2012,11 @@ from crm.models import Payment, PaymentInstallment, PaymentProof, PaymentReasonR
 
 
 def payment_installment_summary(payment):
-    return build_payment_installment_summary_from_records(payment)
+    cached = getattr(payment, '_payment_installment_summary_cache', None)
+    if cached is None:
+        cached = build_payment_installment_summary_from_records(payment)
+        payment._payment_installment_summary_cache = cached
+    return cached
 
 
 class PaymentInstallmentSerializer(serializers.ModelSerializer):
@@ -2162,6 +2166,8 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
     def _latest_bill_send(self, obj):
         if not obj.bill_number:
             return None
+        if hasattr(obj, '_latest_bill_send_cache'):
+            return obj._latest_bill_send_cache
         return (
             WhatsAppMessage.objects
             .filter(
@@ -2222,7 +2228,8 @@ class PaymentInstallmentSerializer(serializers.ModelSerializer):
         }.get(self.get_document_status(obj), 'Pending Approval')
 
     def get_installment_status(self, obj):
-        for item in payment_installment_summary(obj.payment):
+        payment = getattr(obj, '_payment_for_list_serializer', None) or obj.payment
+        for item in payment_installment_summary(payment):
             if item['index'] == obj.installment_index:
                 return item['status']
         return 'pending'

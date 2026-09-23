@@ -54,7 +54,7 @@ from django.http import FileResponse, HttpResponse
 from django.shortcuts import render
 from django.db import IntegrityError, connection, transaction
 from django.db.utils import OperationalError, ProgrammingError
-from django.db.models import Sum, Count, Q, F, Exists, OuterRef, Subquery
+from django.db.models import Sum, Count, Q, F, Exists, OuterRef, Subquery, Prefetch
 from django.db.models.functions import TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -11064,6 +11064,16 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     ]
     id_search_fields   = ['id', 'enrollment__id']
 
+    def handle_exception(self, exc):
+        logger.exception(
+            'PAYMENTS_API_FAILED action=%s user_id=%s query_params=%s exception_type=%s',
+            getattr(self, 'action', None),
+            getattr(self.request.user, 'id', None),
+            dict(self.request.query_params),
+            type(exc).__name__,
+        )
+        return super().handle_exception(exc)
+
     def _month_bounds(self):
         raw_month = self.request.query_params.get('month')
         today = timezone.localdate()
@@ -11079,10 +11089,14 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         return start, end
 
     def get_queryset(self):
+        installments = PaymentInstallment.objects.select_related(
+            'collected_by', 'bill_generated_by',
+        ).prefetch_related('payment_proofs').order_by('payment_date', 'id')
         qs = visible_payment_queryset(Payment.objects.select_related(
-            'payment_branch','enrollment__branch','enrollment__course','enrollment__counselor','enrollment__enrolled_by','enrollment__created_by'
+            'payment_branch','enrollment__branch','enrollment__course',
+            'enrollment__counselor__branch','enrollment__enrolled_by__branch','enrollment__created_by__branch',
         ).prefetch_related(
-            'installments',
+            Prefetch('installments', queryset=installments),
             'reason_requests__admin_user',
             'reason_requests__branch_staff',
             'reason_requests__messages__sender',
@@ -11168,6 +11182,36 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
             return date_range_from_request(self.request)
         return self._month_bounds()
 
+    def prepare_list_rows(self, rows):
+        """Attach list-only caches to prevent serializer N+1 queries.
+
+        The Payments page renders nested installments and their status.  Each
+        installment previously reloaded its parent Payment and recomputed the
+        same schedule, making a 100-row page exceed the browser's 20-second
+        API timeout on Render.
+        """
+        rows = list(rows)
+        installment_ids = []
+        for payment in rows:
+            payment._payment_installment_summary_cache = payment_installment_summary(payment)
+            for installment in payment.installments.all():
+                installment._payment_for_list_serializer = payment
+                installment_ids.append(installment.id)
+
+        latest_bill_sends = {}
+        if installment_ids:
+            messages = WhatsAppMessage.objects.filter(
+                related_model='payment_installment',
+                related_id__in=installment_ids,
+                status=WhatsAppMessage.MsgStatus.SENT,
+            ).select_related('sent_by').order_by('related_id', '-sent_at', '-created_at')
+            for message in messages:
+                latest_bill_sends.setdefault(message.related_id, message)
+        for payment in rows:
+            for installment in payment.installments.all():
+                installment._latest_bill_send_cache = latest_bill_sends.get(installment.id)
+        return rows
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         total_records = queryset.count()
@@ -11179,7 +11223,8 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
         if month_end:
             installment_queryset = installment_queryset.filter(payment_date__lte=month_end)
         collection = installment_queryset.aggregate(total=Sum('amount'))['total'] or Decimal('0')
-        partial_payments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.RECEIPT).count()
+        paid_payments = queryset.filter(status=Payment.Status.PAID).count()
+        partial_payments = queryset.filter(status=Payment.Status.PARTIAL).count()
         completed_installments = installment_queryset.filter(document_type=PaymentInstallment.DocumentType.BILL).count()
         totals = queryset.aggregate(total=Sum('total_fees'), paid=Sum('paid_amount'))
         pending = (totals['total'] or Decimal('0')) - (totals['paid'] or Decimal('0'))
@@ -11207,7 +11252,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 **({'next_payment_date__lte': month_end} if month_end else {}),
             ).count()
         page = self.paginate_queryset(queryset)
-        rows = page if page is not None else queryset
+        rows = self.prepare_list_rows(page if page is not None else queryset)
         serializer = self.get_serializer(rows, many=True)
         response_data = {
             'results': serializer.data,
@@ -11221,6 +11266,7 @@ class PaymentViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
                 'total_due': total_due,
                 'total_balance': pending,
                 'pending_amount': pending,
+                'paid_payments': paid_payments,
                 'partial_payments': partial_payments,
                 'completed_installments': completed_installments,
                 'upcoming_payments': upcoming,

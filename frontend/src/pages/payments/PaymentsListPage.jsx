@@ -71,7 +71,10 @@ const smartFilters = [
   { value: 'month', label: 'This Month' },
   { value: 'last_month', label: 'Last Month' },
 ]
-const PAGE_SIZE = 100
+// The API returns nested schedules, proofs and reason history.  Keep each
+// page small enough to complete within the shared API timeout on Render; the
+// existing pagination control continues to expose every matching record.
+const PAGE_SIZE = 20
 
 function orderedInstallments(row) {
   return [...(row.installments || [])].sort((a, b) => {
@@ -179,10 +182,10 @@ export default function PaymentsListPage() {
   const hasCustomDateRange = appliedFilters.duration === 'custom' && Boolean(appliedFilters.dateFrom || appliedFilters.dateTo)
   const overdueCount = rows.filter(isOverduePayment).length
   const paymentSummary = [
-    { label: 'Total', value: '', count: rows.length },
-    { label: 'Paid', value: 'paid', count: rows.filter((row) => row.status === 'paid').length },
-    { label: 'Partial', value: 'partial', count: rows.filter((row) => row.status === 'partial').length },
-    { label: 'Overdue', value: 'due', count: overdueCount },
+    { label: 'Total', value: '', count: summary.total_records || 0 },
+    { label: 'Paid', value: 'paid', count: summary.paid_payments || 0 },
+    { label: 'Partial', value: 'partial', count: summary.partial_payments || 0 },
+    { label: 'Overdue', value: 'due', count: summary.overdue_payments ?? overdueCount },
   ]
 
   const activeSmartFilter = smartFilters.some((item) => item.value === appliedFilters.duration) ? appliedFilters.duration : ''
@@ -255,6 +258,14 @@ export default function PaymentsListPage() {
       })
       .catch((error) => {
         if (error.name === 'CanceledError') return
+        console.error('Payments list request failed', {
+          url: `${error.config?.baseURL || ''}${error.config?.url || '/payments/'}`,
+          params,
+          status: error.response?.status,
+          response: error.response?.data,
+          code: error.code,
+          message: error.message,
+        })
         setRows([])
         setTotalCount(0)
         setMessage(apiErrorMessage(error, 'Failed to load payments.'))
