@@ -756,6 +756,15 @@ LOGGING: dict = {
                 'DEBUG' if DEBUG else 'INFO',
         },
 
+        # Rules signing is implemented in the top-level views module.  Route
+        # it explicitly so exceptions are emitted to Render stdout instead of
+        # being reduced to Django's final generic 503 request line.
+        'views': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+
         'celery': {
             'handlers': ['console', 'file'],
             'level': 'INFO',

@@ -8215,6 +8215,40 @@ class PublicRulesSigningView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
 
+    def trace_id(self, request):
+        """Browser/server correlation ID; deliberately never derived from the token."""
+        return (request.META.get('HTTP_X_RULES_SUBMIT_TRACE') or '').strip()[:80] or 'not-provided'
+
+    def log_stage(self, stage, request, signing=None, **extra):
+        fields = {
+            'trace_id': self.trace_id(request),
+            'signing_request_id': getattr(signing, 'id', None),
+            'enrollment_id': getattr(signing, 'enrollment_id', None),
+        }
+        fields.update(extra)
+        logger.info('RULES_SUBMIT_STAGE=%s %s', stage, fields)
+
+    def processing_failure(self, request, signing, stage, exc):
+        failure_label = (
+            'Rules signing image validation failed'
+            if stage == 'RULES_IMAGE_VALIDATION_FAILED'
+            else 'Rules signing submission failed'
+        )
+        logger.exception(
+            'RULES_SUBMIT_FAILED %s stage=%s trace_id=%s signing_request_id=%s enrollment_id=%s exception_type=%s.',
+            failure_label, stage, self.trace_id(request), getattr(signing, 'id', None),
+            getattr(signing, 'enrollment_id', None), type(exc).__name__,
+        )
+        response = Response(
+            {
+                'detail': FORM_PROCESSING_ERROR_MESSAGE,
+                'code': stage,
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        response['X-Rules-Submit-Trace'] = self.trace_id(request)
+        return response
+
     def get_signing(self, token):
         return RulesSigningRequest.objects.defer(
             'selfie_image_file',
@@ -8291,29 +8325,37 @@ class PublicRulesSigningView(APIView):
     def post(self, request, token):
         signing = self.get_signing(token)
         if not signing:
-            logger.warning('Rules signing rejected: invalid token=%s.', token)
+            self.log_stage('RULES_SUBMIT_TOKEN_INVALID', request)
             return Response({'detail': 'Invalid signing link.'}, status=404)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
-            logger.info('Rules signing replay returned immutable submission: token=%s enrollment_id=%s.', token, signing.enrollment_id)
+            self.log_stage('RULES_SUBMIT_REPLAY', request, signing, status=signing.status)
             return self.submitted_response(request, signing)
 
-        logger.info(
-            'Rules signing submission received: token=%s enrollment_id=%s status=%s content_type=%s fields=%s files=%s.',
-            token, signing.enrollment_id, signing.status, request.content_type,
-            sorted(request.data.keys()), sorted(request.FILES.keys()),
+        self.log_stage('RULES_TOKEN_VALIDATED', request, signing, status=signing.status)
+        self.log_stage(
+            'RULES_SUBMIT_START', request, signing,
+            status=signing.status, content_type=request.content_type,
+            fields=sorted(request.data.keys()), files=sorted(request.FILES.keys()),
         )
 
         try:
             selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
             signature_bytes = validate_data_image(request.data.get('signature'), 'Signature')
+            self.log_stage(
+                'RULES_SIGNATURE_RECEIVED', request, signing,
+                selfie_bytes=len(selfie_bytes), signature_bytes=len(signature_bytes),
+            )
+            self.log_stage('RULES_SELFIE_VALIDATED', request, signing)
         except RuntimeError as exc:
-            logger.exception('Rules signing image validation failed for token=%s.', token)
-            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
+            return self.processing_failure(request, signing, 'RULES_IMAGE_VALIDATION_FAILED', exc)
         except ValueError as exc:
             detail = str(exc)
             if detail == 'Identity photo is required.':
                 detail = 'Identity photo is required before signing the form.'
-            return Response({'detail': detail}, status=400)
+            self.log_stage('RULES_SUBMIT_VALIDATION_FAILED', request, signing, validation_detail=detail)
+            response = Response({'detail': detail}, status=400)
+            response['X-Rules-Submit-Trace'] = self.trace_id(request)
+            return response
 
         try:
             with transaction.atomic():
@@ -8325,16 +8367,14 @@ class PublicRulesSigningView(APIView):
                     return self.submitted_response(request, signing)
 
                 enrollment = signing.enrollment
+                self.log_stage('RULES_ENROLLMENT_FOUND', request, signing, enrollment_status=enrollment.status)
                 submitted_at = timezone.now()
                 try:
+                    self.log_stage('RULES_PDF_GENERATION_START', request, signing)
                     pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
+                    self.log_stage('RULES_PDF_GENERATION_SUCCESS', request, signing, pdf_bytes=len(pdf_bytes))
                 except RuntimeError as exc:
-                    logger.exception(
-                        'Rules signing PDF generation failed for token=%s enrollment_id=%s.',
-                        token,
-                        enrollment.id,
-                    )
-                    return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
+                    return self.processing_failure(request, signing, 'RULES_PDF_GENERATION_FAILED', exc)
                 selfie_extension = image_storage_extension(selfie_bytes)
                 signature_extension = image_storage_extension(signature_bytes)
                 proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S%f}'
@@ -8362,6 +8402,11 @@ class PublicRulesSigningView(APIView):
                         proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
                         pdf_bytes,
                     )
+                self.log_stage(
+                    'RULES_FILE_STORAGE_SUCCESS', request, signing,
+                    database_backup=rules_database_file_backups_enabled(),
+                    external_storage=rules_external_proof_storage_enabled(),
+                )
                 if (
                     not stored_rules_file_exists(signing, 'selfie_image', 'selfie_image_file')
                     or not stored_rules_file_exists(signing, 'signature_image', 'signature_image_file')
@@ -8386,10 +8431,7 @@ class PublicRulesSigningView(APIView):
                     'updated_at',
                 ])
                 persist_rules_regulations_document(signing)
-                logger.info(
-                    'Rules signing proof persisted: token=%s enrollment_id=%s database_backup=%s external_storage=%s.',
-                    token, enrollment.id, rules_database_file_backups_enabled(), rules_external_proof_storage_enabled(),
-                )
+                self.log_stage('RULES_DB_SAVE_SUCCESS', request, signing)
                 if enrollment.status != Enrollment.Status.ENROLLED:
                     old_status = enrollment.status
                     enrollment.status = Enrollment.Status.RULES_SUBMITTED
@@ -8401,20 +8443,10 @@ class PublicRulesSigningView(APIView):
                         enrollment.status,
                         remarks='Rules form submitted.',
                     )
-        except (OperationalError, ProgrammingError):
-            logger.exception(
-                'Rules signing storage failed for token=%s enrollment_id=%s.',
-                token,
-                signing.enrollment_id,
-            )
-            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
-        except Exception:
-            logger.exception(
-                'Rules signing submission failed for token=%s enrollment_id=%s.',
-                token,
-                signing.enrollment_id,
-            )
-            return Response({'detail': FORM_PROCESSING_ERROR_MESSAGE}, status=503)
+        except (OperationalError, ProgrammingError) as exc:
+            return self.processing_failure(request, signing, 'RULES_STORAGE_OR_DATABASE_FAILED', exc)
+        except Exception as exc:
+            return self.processing_failure(request, signing, 'RULES_SUBMISSION_FAILED', exc)
         try:
             notify_rules_signed(enrollment, signing.submitted_at)
         except Exception:
@@ -8423,7 +8455,10 @@ class PublicRulesSigningView(APIView):
                 token,
                 enrollment.id,
             )
-        return self.submitted_response(request, signing)
+        self.log_stage('RULES_SUBMIT_SUCCESS', request, signing)
+        response = self.submitted_response(request, signing)
+        response['X-Rules-Submit-Trace'] = self.trace_id(request)
+        return response
 
 
 def proof_filename(enrollment):

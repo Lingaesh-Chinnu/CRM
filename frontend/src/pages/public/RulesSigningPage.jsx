@@ -247,12 +247,20 @@ export default function RulesSigningPage() {
     submittingRef.current = true
     setSubmitting(true)
     setMessage('')
+    // Correlates the browser error to the server log; contains no candidate
+    // data or signing token.
+    const submitTraceId = typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `rules-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     try {
       const signature = canvasRef.current.toDataURL('image/png')
       const { data: response } = await api.post(
         `/public/rules-sign/${token}/`,
         { selfie, signature },
-        { timeout: 90000 },
+        {
+          timeout: 90000,
+          headers: { 'X-Rules-Submit-Trace': submitTraceId },
+        },
       )
       setData((current) => ({
         ...current,
@@ -271,9 +279,16 @@ export default function RulesSigningPage() {
       // Keep the technical response available in browser diagnostics without
       // exposing internal failures to the candidate-facing page.
       console.error('Rules signing submission failed', {
-        token,
+        traceId: submitTraceId,
+        method: error.config?.method?.toUpperCase(),
+        url: `${error.config?.baseURL || ''}${error.config?.url || ''}`,
         status: error.response?.status,
         response: error.response?.data,
+        detail: error.response?.data?.detail,
+        validationErrors: error.response?.data?.errors || error.response?.data,
+        responseTraceId: error.response?.headers?.['x-rules-submit-trace'],
+        requestContentType: error.config?.headers?.['Content-Type'] || error.config?.headers?.['content-type'],
+        requestFields: Object.keys(error.config?.data || {}),
         message: error.message,
       })
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
