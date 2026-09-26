@@ -57,7 +57,7 @@ const competitorStatusOptions = [
 const priorityOptions = [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]
 const probabilityOptions = [['90', '90%'], ['75', '75%'], ['50', '50%'], ['25', '25%'], ['10', '10%']]
 
-const SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
+const SINGLE_INSTALLMENT_MAX_COURSE_FEE = 20000
 const LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
 
 function addOneMonth(value) {
@@ -161,6 +161,7 @@ function recalculateInstallmentPlan(row, startDate, rows, installmentCount) {
       paid_amount: existing.paid_amount || 0,
       pending_amount: amount,
       status: existing.status || 'pending',
+      is_new: Boolean(existing.is_new),
     })
     dueDate = addOneMonth(existing.due_date || dueDate) || dueDate
   })
@@ -211,6 +212,7 @@ function cloneSchedule(schedule) {
     paid_amount: item.paid_amount || 0,
     pending_amount: item.pending_amount ?? item.amount ?? 0,
     status: item.status || 'pending',
+    is_new: Boolean(item.is_new),
   }))
 }
 
@@ -700,9 +702,24 @@ export default function EnrollmentDetailPage() {
       setMessage('Remaining pending amount cannot be split into another valid installment.')
       return
     }
+    const nextRows = recalculateInstallmentPlan(row, startDate, currentRows, nextSplitCount)
+    // UI-only: allows removal before this newly added row is saved.
+    nextRows[nextRows.length - 1] = { ...nextRows[nextRows.length - 1], is_new: true }
     setSplitCount(nextSplitCount)
-    setScheduleDraft(recalculateInstallmentPlan(row, startDate, currentRows, nextSplitCount))
+    setScheduleDraft(nextRows)
     setEditingSchedule(true)
+    setMessage('')
+  }
+
+  const deleteNewInstallment = (index) => {
+    const currentRows = scheduleDraft.length ? scheduleDraft : schedule
+    const item = currentRows[index]
+    if (!item?.is_new || index === 0 || Number(item.paid_amount || 0) > 0) return
+    if (!window.confirm(`Remove ${item.label}?`)) return
+    const remainingRows = currentRows.filter((_, rowIndex) => rowIndex !== index)
+    const nextSplitCount = Math.max(remainingRows.length - 1, 1)
+    setSplitCount(nextSplitCount)
+    setScheduleDraft(recalculateInstallmentPlan(row, startDate, remainingRows, nextSplitCount))
     setMessage('')
   }
 
@@ -1094,6 +1111,15 @@ export default function EnrollmentDetailPage() {
                   <p>Pending: {formatCurrency(item.pending_amount ?? item.amount)}</p>
                   <p>Status: {item.status || 'pending'}</p>
                 </div>
+                {editingSchedule && item.is_new && index > 0 && Number(item.paid_amount || 0) === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => deleteNewInstallment(index)}
+                    className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-800 transition hover:bg-rose-100"
+                  >
+                    Delete Installment
+                  </button>
+                )}
               </div>
             ))}
           </div>

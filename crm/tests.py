@@ -11,7 +11,7 @@ import io
 import uuid
 import tempfile
 
-from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage
+from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage, get_default_installment_schedule
 
 
 User = get_user_model()
@@ -782,6 +782,48 @@ class PaymentScheduleSyncTests(APITestCase):
             reference_number='CASH-001',
             payment_date='2026-05-02',
         )
+
+    def test_default_schedule_uses_one_installment_at_or_below_twenty_thousand_net_payable(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            actual_fees=Decimal('20000'),
+            discount_amount=Decimal('0'),
+            name='Twenty Thousand Candidate',
+            phone='9000000288',
+            enrollment_date='2026-05-01',
+            start_date='2026-05-15',
+        )
+
+        schedule = get_default_installment_schedule(enrollment)
+
+        self.assertEqual([(row['label'], row['amount']) for row in schedule], [
+            ('Enrollment', 5000),
+            ('1st Installment', 15000),
+        ])
+
+    def test_default_schedule_splits_net_payable_above_twenty_thousand_in_two(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            actual_fees=Decimal('26000'),
+            discount_amount=Decimal('0'),
+            spot_conversion_discount_applied=True,
+            buddy_offer_applied=True,
+            name='Discounted Schedule Candidate',
+            phone='9000000289',
+            enrollment_date='2026-05-01',
+            start_date='2026-05-15',
+        )
+
+        schedule = get_default_installment_schedule(enrollment)
+
+        self.assertEqual(enrollment.net_payable_fee, Decimal('22500.00'))
+        self.assertEqual([(row['label'], row['amount']) for row in schedule], [
+            ('Enrollment', 5000),
+            ('1st Installment', 8750),
+            ('2nd Installment', 8750),
+        ])
 
     def _payment_proof(self, name='proof.png', image_format='PNG', content_type='image/png'):
         from PIL import Image

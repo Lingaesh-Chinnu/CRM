@@ -1031,7 +1031,9 @@ def enrollment_payable_fee(enrollment):
 ENROLLMENT_PAYMENT_AMOUNT = 5000
 MIN_INSTALLMENT_AMOUNT = 5000
 LOW_FEE_SINGLE_PAYMENT_MAX_COURSE_FEE = 6900
-SINGLE_INSTALLMENT_MAX_COURSE_FEE = 18900
+# Net payable fees up to Rs 20,000 have one post-enrollment installment.
+# Fees above that threshold use the normal two-installment default.
+SINGLE_INSTALLMENT_MAX_COURSE_FEE = 20000
 
 
 def _split_integer_amount(total_amount, parts):
