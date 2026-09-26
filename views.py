@@ -706,10 +706,19 @@ def touch_user_session(request):
 
 
 def apply_enrollment_discount(data, course, branch_id=None):
+    # An enrollment always snapshots the selected course's original fee and
+    # standard discount.  This is the single entry point used by conversions;
+    # later Course Master edits therefore cannot alter historical fees.
+    actual_fee = Decimal(str(course.actual_fees or 0))
+    course_discount_amount = min(Decimal(str(course.discount_amount or 0)), actual_fee)
+    data['actual_fees'] = actual_fee
+    data['course_discount_amount'] = course_discount_amount
     discount_id = data.get('discount') or data.get('discount_id')
     if not discount_id:
         data['discount'] = None
-        data['discount_amount'] = data.get('discount_amount') or 0
+        data['discount_amount'] = Decimal('0')
+        data['discount_reason'] = ''
+        data['discount_application_basis'] = Discount.ApplicationBasis.ACTUAL_FEES
         return None
 
     try:
@@ -720,8 +729,6 @@ def apply_enrollment_discount(data, course, branch_id=None):
     if not discount.is_available_for_course(course.id, branch_id):
         raise ValueError('Selected discount is expired or not available for this course.')
 
-    actual_fee = Decimal(str(data.get('actual_fees') or course.actual_fees or 0))
-    course_discount_amount = min(Decimal(str(course.discount_amount or 0)), actual_fee)
     discount_base = actual_fee
     if discount.application_basis == Discount.ApplicationBasis.FINAL_FEES:
         discount_base = max(actual_fee - course_discount_amount, Decimal('0'))
@@ -730,7 +737,6 @@ def apply_enrollment_discount(data, course, branch_id=None):
     data['discount_amount'] = discount_amount
     data['discount_reason'] = discount.name
     data['discount_application_basis'] = discount.application_basis
-    data['course_discount_amount'] = course_discount_amount if discount.application_basis == Discount.ApplicationBasis.FINAL_FEES else Decimal('0')
     return discount
 
 
@@ -2091,12 +2097,16 @@ def create_enrollment_from_transfer_request(transfer_request, reviewer):
     missing = [field for field in required_fields if payload.get(field) in (None, '')]
     if missing:
         raise ValueError(f'Please complete all mandatory fields: {", ".join(missing)}.')
+    course = Course.objects.filter(pk=payload.get('course')).first()
+    if not course:
+        raise ValueError('Please select a valid course.')
+    apply_enrollment_discount(payload, course, payload.get('branch'))
     serializer = EnrollmentDetailSerializer(data=payload)
     serializer.is_valid(raise_exception=True)
     enrollment = serializer.save(
         walkin=transfer_request.walkin,
         original_walkin_course=transfer_request.walkin.course,
-        final_enrollment_course_id=payload.get('course'),
+        final_enrollment_course=course,
         enrolled_by=reviewer,
         created_by=reviewer,
         status=Enrollment.Status.PENDING_RULES,
@@ -4709,6 +4719,8 @@ class LeadViewSet(viewsets.ModelViewSet):
                 source=source,
                 actual_fees=data.get('actual_fees'),
                 discount_amount=data.get('discount_amount') or 0,
+                discount_application_basis=data.get('discount_application_basis') or Discount.ApplicationBasis.ACTUAL_FEES,
+                course_discount_amount=data.get('course_discount_amount') or 0,
                 discount_reason=data.get('discount_reason') or '',
                 discount_id=data.get('discount') or None,
                 spot_conversion_discount_applied=data.get('spot_conversion_discount_applied', False),
@@ -9417,10 +9429,17 @@ def apply_enrollment_course_change(enrollment, new_course, user, reason='', effe
     enrollment.course = new_course
     enrollment.final_enrollment_course = new_course
     enrollment.actual_fees = new_course.actual_fees
-    enrollment.discount_amount = new_course.discount_amount
+    enrollment.discount = None
+    enrollment.discount_amount = Decimal('0')
+    enrollment.discount_application_basis = Discount.ApplicationBasis.ACTUAL_FEES
+    enrollment.course_discount_amount = min(
+        Decimal(str(new_course.discount_amount or 0)),
+        Decimal(str(new_course.actual_fees or 0)),
+    )
     enrollment.custom_payable_fee = None
     enrollment.save(update_fields=[
-        'course', 'final_enrollment_course', 'actual_fees', 'discount_amount',
+        'course', 'final_enrollment_course', 'actual_fees', 'discount', 'discount_amount',
+        'discount_application_basis', 'course_discount_amount',
         'custom_payable_fee', 'final_fees', 'net_payable_fee', 'spot_conversion_discount_amount', 'updated_at',
     ])
     new_fee = enrollment_payable_fee(enrollment)
@@ -9743,6 +9762,25 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         return enrollment.payment_schedule
 
     def perform_create(self, serializer):
+        # Direct enrollment creation uses the same snapshot/calculation path
+        # as lead and walk-in conversions.
+        course = serializer.validated_data['course']
+        fee_data = {
+            'discount': getattr(serializer.validated_data.get('discount'), 'id', None),
+        }
+        try:
+            apply_enrollment_discount(
+                fee_data,
+                course,
+                getattr(serializer.validated_data.get('branch'), 'id', None),
+            )
+        except ValueError as exc:
+            raise serializers.ValidationError({'discount': str(exc)})
+        for field_name in (
+            'actual_fees', 'discount', 'discount_amount', 'discount_reason',
+            'discount_application_basis', 'course_discount_amount',
+        ):
+            serializer.validated_data[field_name] = fee_data.get(field_name)
         enrollment = serializer.save(
             enrolled_by=self.request.user,
             created_by=self.request.user,

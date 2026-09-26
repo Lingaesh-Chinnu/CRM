@@ -4,6 +4,7 @@
 import re
 from calendar import monthrange
 from datetime import date, timedelta
+from decimal import Decimal
 
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -1663,11 +1664,14 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
     qualification_display = serializers.SerializerMethodField()
     rules_signing_status = serializers.SerializerMethodField()
     payment_schedule_status = serializers.SerializerMethodField()
+    total_discount_amount = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
         fields = ['id','student_number','name','dob','phone','email','location','pincode',
-                  'course_name','branch_name','final_fees','enrollment_date','status',
+                  'course_name','branch_name','actual_fees','course_discount_amount','discount_amount',
+                  'total_discount_amount','final_fees','spot_conversion_discount_amount','buddy_offer_amount',
+                  'enrollment_date','status',
                   'original_walkin_course','original_walkin_course_name',
                   'final_enrollment_course','final_enrollment_course_name',
                   'payment_status','payment_balance','paid_amount','counselor_name',
@@ -1677,7 +1681,7 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
                   'expected_course_budget','planned_joining_time','primary_goal','other_institutes_considering',
                   'counselor_status','competitor_status','follow_up_priority','conversion_probability',
                   'demo_class','interested_global_certification','admin_notes','rules_signing_status',
-                  'payment_schedule_status']
+                  'payment_schedule_status','total_discount_amount']
 
     def get_fields(self):
         fields = super().get_fields()
@@ -1722,6 +1726,12 @@ class EnrollmentListSerializer(serializers.ModelSerializer):
             return 'saved'
         return 'draft'
 
+    def get_total_discount_amount(self, obj):
+        return max(
+            Decimal(str(obj.course_discount_amount or 0)) + Decimal(str(obj.discount_amount or 0)),
+            Decimal('0'),
+        )
+
 
 class EnrollmentDetailSerializer(serializers.ModelSerializer):
     course_name  = serializers.CharField(source='course.name', read_only=True)
@@ -1751,6 +1761,7 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
     walkin_date = serializers.SerializerMethodField()
     first_payment_date = serializers.SerializerMethodField()
     status_history = serializers.SerializerMethodField()
+    total_discount_amount = serializers.SerializerMethodField()
 
     class Meta:
         model  = Enrollment
@@ -1779,6 +1790,12 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
                     'spot_conversion_discount_applied': 'Spot conversion discount is available only for walk-in enrollments.'
                 })
         return attrs
+
+    def get_total_discount_amount(self, obj):
+        return max(
+            Decimal(str(obj.course_discount_amount or 0)) + Decimal(str(obj.discount_amount or 0)),
+            Decimal('0'),
+        )
 
     def _rules_signing_data(self, obj):
         if hasattr(obj, '_rules_signing_data_cache'):

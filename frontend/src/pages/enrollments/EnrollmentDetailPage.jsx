@@ -889,7 +889,7 @@ export default function EnrollmentDetailPage() {
         </div>
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Discount</p>
-          <p className="mt-3 text-2xl font-black text-slate-950">{row.discount_amount}</p>
+          <p className="mt-3 text-2xl font-black text-slate-950">{row.total_discount_amount ?? (Number(row.course_discount_amount || 0) + Number(row.discount_amount || 0))}</p>
         </div>
         <div className="rounded-[24px] bg-white p-5 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)]">
           <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Final Fees</p>

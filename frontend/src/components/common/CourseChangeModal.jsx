@@ -61,8 +61,9 @@ export default function CourseChangeModal({ enrollment, courses, saving, onCance
   )
   const paidAmount = Number(enrollment?.payment_info?.paid_amount || 0)
   const spotDiscount = Number(enrollment?.spot_conversion_discount_amount || 0)
+  const buddyDiscount = Number(enrollment?.buddy_offer_amount || 0)
   const newFinalFee = courseFinalFee(selectedCourse)
-  const newNetPayable = Math.max(newFinalFee - spotDiscount, 0)
+  const newNetPayable = Math.max(newFinalFee - spotDiscount - buddyDiscount, 0)
   const newBalance = newNetPayable - paidAmount
 
   const submit = () => {

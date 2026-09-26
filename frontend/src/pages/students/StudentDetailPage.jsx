@@ -343,7 +343,7 @@ export default function StudentDetailPage() {
   const nextPending = nextPendingInstallment(row.payment_info)
   const originalCourseFee = Number(row.actual_fees || 0)
   const finalNetPayableFee = Number(row.net_payable_fee || row.final_fees || 0)
-  const totalDiscountAmount = Math.max(originalCourseFee - finalNetPayableFee, 0)
+  const standardDiscountAmount = Number(row.total_discount_amount ?? (Number(row.course_discount_amount || 0) + Number(row.discount_amount || 0)))
 
   return (
     <div className="space-y-6">
@@ -519,8 +519,11 @@ export default function StudentDetailPage() {
               <p className="mt-2 text-xs font-semibold text-slate-500">{statusSaving ? 'Saving...' : studentStatusLabel(row.status)}</p>
             </div>
             <DetailCard label="Batch Timing" value={prettyValue(row.batch_timing)} />
+            <DetailCard label="Actual Fees" value={`Rs ${Number(row.actual_fees || 0).toLocaleString('en-IN')}`} />
+            <DetailCard label="Course / Standard Discount" value={`Rs ${standardDiscountAmount.toLocaleString('en-IN')}`} />
             <DetailCard label="Final Fees" value={`Rs ${Number(row.final_fees || 0).toLocaleString('en-IN')}`} />
             <DetailCard label="Spot Discount" value={`Rs ${Number(row.spot_conversion_discount_amount || 0).toLocaleString('en-IN')}`} />
+            <DetailCard label="Buddy Discount" value={`Rs ${Number(row.buddy_offer_amount || 0).toLocaleString('en-IN')}`} />
             <DetailCard label="Net Payable Fees" value={`Rs ${Number(row.net_payable_fee || row.final_fees || 0).toLocaleString('en-IN')}`} />
             <DetailCard
               label="Payment Status"
@@ -536,7 +539,7 @@ export default function StudentDetailPage() {
           <DetailCard label="Original Course Fee" value={`Rs ${money(originalCourseFee)}`} />
           <DetailCard label="Fees Reduction Applied" value={row.spot_conversion_discount_applied ? 'Yes' : 'No'} />
           <DetailCard label="Buddy Offer Applied" value={row.buddy_offer_applied ? 'Yes' : 'No'} />
-          <DetailCard label="Discount Amount" value={`Rs ${money(totalDiscountAmount)}`} />
+          <DetailCard label="Course / Standard Discount" value={`Rs ${money(standardDiscountAmount)}`} />
           <DetailCard label="Final Net Payable Fee" value={`Rs ${money(finalNetPayableFee)}`} />
         </div>
       </section>

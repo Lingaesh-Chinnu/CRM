@@ -1275,17 +1275,30 @@ class Enrollment(TimeStampedModel):
             self.final_enrollment_course_id = self.course_id
         if not self.student_number and self.status in self.FINAL_STATUSES:
             self.student_number = generate_student_number(self.branch)
-        # Store the selected discount basis on the enrollment so later Discount changes never alter history.
-        fee_before_selected_discount = self.actual_fees
-        if self.discount_application_basis == Discount.ApplicationBasis.FINAL_FEES:
-            fee_before_selected_discount = max(self.actual_fees - self.course_discount_amount, 0)
-        self.final_fees = max(fee_before_selected_discount - self.discount_amount, 0)
+        # Both discounts are stored snapshots.  ``course_discount_amount`` is
+        # the selected course's standard discount, while ``discount_amount``
+        # is an optional additional Discounts-module discount.  Never use the
+        # mutable Course or Discount records here: historical enrollments must
+        # retain the values that were accepted at conversion/creation time.
+        actual_fees = max(Decimal(str(self.actual_fees or 0)), Decimal('0'))
+        course_discount = min(max(Decimal(str(self.course_discount_amount or 0)), Decimal('0')), actual_fees)
+        additional_discount = min(
+            max(Decimal(str(self.discount_amount or 0)), Decimal('0')),
+            max(actual_fees - course_discount, Decimal('0')),
+        )
+        self.actual_fees = actual_fees
+        self.course_discount_amount = course_discount
+        self.discount_amount = additional_discount
+        self.final_fees = max(actual_fees - course_discount - additional_discount, Decimal('0'))
         if self.spot_conversion_discount_applied:
-            self.spot_conversion_discount_amount = Decimal('2000')
+            self.spot_conversion_discount_amount = min(Decimal('2000'), self.final_fees)
         else:
             self.spot_conversion_discount_amount = Decimal('0')
         if self.buddy_offer_applied:
-            self.buddy_offer_amount = Decimal('1500')
+            self.buddy_offer_amount = min(
+                Decimal('1500'),
+                max(self.final_fees - self.spot_conversion_discount_amount, Decimal('0')),
+            )
         else:
             self.buddy_offer_amount = Decimal('0')
         calculated_payable_fee = max(self.final_fees - self.spot_conversion_discount_amount - self.buddy_offer_amount, 0)

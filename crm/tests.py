@@ -12,6 +12,7 @@ import uuid
 import tempfile
 
 from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage, get_default_installment_schedule
+from views import apply_enrollment_discount
 
 
 User = get_user_model()
@@ -824,6 +825,63 @@ class PaymentScheduleSyncTests(APITestCase):
             ('1st Installment', 8750),
             ('2nd Installment', 8750),
         ])
+
+    def test_course_discount_and_spot_buddy_discounts_have_one_stored_fee_hierarchy(self):
+        course = Course.objects.create(
+            name='Fee Hierarchy Course',
+            actual_fees=Decimal('34900'),
+            discount_amount=Decimal('5000'),
+        )
+        data = {'discount': None}
+        apply_enrollment_discount(data, course, self.branch.id)
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=course,
+            name='Fee Hierarchy Candidate',
+            phone='9000000290',
+            enrollment_date='2026-05-01',
+            start_date='2026-05-15',
+            actual_fees=data['actual_fees'],
+            course_discount_amount=data['course_discount_amount'],
+            discount_amount=data['discount_amount'],
+            spot_conversion_discount_applied=True,
+            buddy_offer_applied=True,
+        )
+
+        self.assertEqual(enrollment.actual_fees, Decimal('34900.00'))
+        self.assertEqual(enrollment.course_discount_amount, Decimal('5000.00'))
+        self.assertEqual(enrollment.discount_amount, Decimal('0.00'))
+        self.assertEqual(enrollment.final_fees, Decimal('29900.00'))
+        self.assertEqual(enrollment.spot_conversion_discount_amount, Decimal('2000.00'))
+        self.assertEqual(enrollment.buddy_offer_amount, Decimal('1500.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('26400.00'))
+        self.assertEqual(sum(Decimal(str(row['amount'])) for row in get_default_installment_schedule(enrollment)), Decimal('26400'))
+
+    def test_direct_enrollment_snapshots_course_fee_and_standard_discount(self):
+        course = Course.objects.create(
+            name='Direct Enrollment Fee Course',
+            actual_fees=Decimal('34900'),
+            discount_amount=Decimal('5000'),
+        )
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post('/api/enrollments/', {
+            'branch': self.branch.id,
+            'course': course.id,
+            'name': 'Direct Fee Candidate',
+            'phone': '9000000291',
+            # This stale/client value must never become the enrollment's
+            # original fee snapshot.
+            'actual_fees': '1',
+            'enrollment_date': '2026-05-01',
+        }, format='json')
+
+        self.assertEqual(response.status_code, 201, response.data)
+        enrollment = Enrollment.objects.get(pk=response.data['id'])
+        self.assertEqual(enrollment.actual_fees, Decimal('34900.00'))
+        self.assertEqual(enrollment.course_discount_amount, Decimal('5000.00'))
+        self.assertEqual(enrollment.final_fees, Decimal('29900.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('29900.00'))
 
     def _payment_proof(self, name='proof.png', image_format='PNG', content_type='image/png'):
         from PIL import Image
