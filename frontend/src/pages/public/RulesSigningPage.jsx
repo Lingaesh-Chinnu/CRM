@@ -307,7 +307,7 @@ export default function RulesSigningPage() {
 
   const details = data.candidate || {}
   const submitted = data.status === 'submitted'
-  const finalPayableFees = details.final_payable_fees ?? details.net_payable_fee ?? details.total_course_fee ?? details.final_fees
+  const finalPayableFees = details.net_payable_fee ?? details.final_payable_fees ?? details.final_fees
 
   if (submitted) {
     return (
@@ -373,11 +373,30 @@ export default function RulesSigningPage() {
             ['Batch Timing', details.batch_timing],
             ['Batch Start Date', formatDate(details.batch_start_date)],
             ['Duration', formatDuration(details.duration)],
-            ['Final Payable Fees', formatCurrency(finalPayableFees)],
           ].map(([label, value]) => (
             <div key={label} className="rounded-xl bg-slate-50 p-4">
               <p className={labelClass}>{label}</p>
               <p className={valueClass}>{value || 'Not set'}</p>
+            </div>
+          ))}
+        </section>
+
+        <section className={`grid gap-4 sm:grid-cols-2 ${documentCardClass}`}>
+          <div className="sm:col-span-2">
+            <h2 className={sectionHeadingClass}>Fee Breakdown</h2>
+          </div>
+          {[
+            ['Course / Actual Fee', details.course_fee ?? details.total_course_fee],
+            ['Normal Discount', details.normal_discount ?? 0],
+            ...(Number(details.course_discount || 0) ? [['Course Discount', details.course_discount]] : []),
+            ['Final Fees', details.final_fees],
+            ['Spot Discount', details.spot_discount ?? 0],
+            ['Buddy Discount', details.buddy_discount ?? 0],
+            ['Net Payable', finalPayableFees],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-xl bg-slate-50 p-4">
+              <p className={labelClass}>{label}</p>
+              <p className={valueClass}>{formatCurrency(value)}</p>
             </div>
           ))}
         </section>

@@ -1845,6 +1845,22 @@ def rules_pdf_date(value):
     return str(value)
 
 
+def rules_fee_breakdown(enrollment):
+    """Return the saved enrollment fee values used by every Rules surface."""
+    course_fee = enrollment.actual_fees
+    if course_fee is None and enrollment.course:
+        course_fee = enrollment.course.actual_fees
+    return {
+        'course_fee': Decimal(str(course_fee or 0)),
+        'normal_discount': Decimal(str(enrollment.discount_amount or 0)),
+        'course_discount': Decimal(str(enrollment.course_discount_amount or 0)),
+        'final_fees': Decimal(str(enrollment.final_fees or 0)),
+        'spot_discount': Decimal(str(enrollment.spot_conversion_discount_amount or 0)),
+        'buddy_discount': Decimal(str(enrollment.buddy_offer_amount or 0)),
+        'net_payable': Decimal(str(enrollment_payable_fee(enrollment) or 0)),
+    }
+
+
 def validate_data_image(image_data, label):
     if not image_data or ',' not in image_data:
         raise ValueError(f'{label} is required.')
@@ -2002,6 +2018,7 @@ def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, 
         )
         draw.text((image_x, image_y + image_height + 18), 'Student Identity Photo', fill=muted, font=label_font)
         y = max(y, card_y + card_height + 34)
+    fees = rules_fee_breakdown(enrollment)
     details = [
         ('Name', enrollment.name),
         ('Phone', enrollment.phone),
@@ -2009,10 +2026,24 @@ def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, 
         ('Batch Timing', enrollment.batch_timing or enrollment.get_preferred_timing_display() or ''),
         ('Batch Start Date', rules_pdf_date(enrollment.start_date)),
         ('Duration', rules_duration_label(enrollment.course.duration_months if enrollment.course else None)),
-        ('Final Payable Fees', f'Rs {Decimal(str(enrollment_payable_fee(enrollment) or 0)):,.0f}'),
     ]
     write_section('Candidate Details')
     write_detail_grid(details)
+
+    write_section('Fee Breakdown')
+    fee_details = [
+        ('Course / Actual Fee', f"Rs {fees['course_fee']:,.0f}"),
+        ('Normal Discount', f"Rs {fees['normal_discount']:,.0f}"),
+    ]
+    if fees['course_discount']:
+        fee_details.append(('Course Discount', f"Rs {fees['course_discount']:,.0f}"))
+    fee_details.extend([
+        ('Final Fees', f"Rs {fees['final_fees']:,.0f}"),
+        ('Spot Discount', f"Rs {fees['spot_discount']:,.0f}"),
+        ('Buddy Discount', f"Rs {fees['buddy_discount']:,.0f}"),
+        ('Net Payable', f"Rs {fees['net_payable']:,.0f}"),
+    ])
+    write_detail_grid(fee_details)
 
     write_section('Payment Schedule')
     for item in build_rules_installment_plan(enrollment):
@@ -8284,6 +8315,7 @@ class PublicRulesSigningView(APIView):
         enrollment = signing.enrollment
         installments = build_rules_installment_plan(enrollment)
         rules_paragraphs = extract_rules_template_text()
+        fees = rules_fee_breakdown(enrollment)
         return Response({
             'status': signing.status,
             'candidate': {
@@ -8294,8 +8326,15 @@ class PublicRulesSigningView(APIView):
                 'batch_timing': enrollment.batch_timing or enrollment.get_preferred_timing_display() or '',
                 'batch_start_date': enrollment.start_date,
                 'duration': enrollment.course.duration_months if enrollment.course else None,
-                'final_payable_fees': enrollment_payable_fee(enrollment),
-                'total_course_fee': enrollment_payable_fee(enrollment),
+                'course_fee': fees['course_fee'],
+                'normal_discount': fees['normal_discount'],
+                'course_discount': fees['course_discount'],
+                'final_fees': fees['final_fees'],
+                'spot_discount': fees['spot_discount'],
+                'buddy_discount': fees['buddy_discount'],
+                'net_payable_fee': fees['net_payable'],
+                'final_payable_fees': fees['net_payable'],
+                'total_course_fee': fees['course_fee'],
                 'enrollment_date': enrollment.enrollment_date,
             },
             'installments': installments,

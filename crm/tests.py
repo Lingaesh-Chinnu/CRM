@@ -2699,6 +2699,77 @@ class PublicWalkInFormTests(APITestCase):
             ],
         )
 
+    @override_settings(WATI_API_URL='', WATI_ACCESS_TOKEN='')
+    def test_rules_resend_after_spot_window_keeps_saved_discount(self):
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Late Rules Candidate',
+            phone='9000000188',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            source=WalkIn.Source.DIRECT,
+        )
+        WalkIn.objects.filter(pk=walkin.pk).update(created_at=timezone.now() - timedelta(hours=25))
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            walkin=walkin,
+            name=walkin.name,
+            phone=walkin.phone,
+            preferred_timing=walkin.preferred_timing,
+            enrollment_date=timezone.localdate(),
+            start_date=timezone.localdate(),
+            batch_timing='Weekdays 10 AM - 12 PM',
+            actual_fees=10000,
+            discount_amount=0,
+            spot_conversion_discount_applied=True,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': timezone.localdate().isoformat()},
+                {'label': 'Final Installment', 'amount': 3000, 'due_date': timezone.localdate().isoformat()},
+            ],
+            payment_schedule_locked=True,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+        self.client.force_authenticate(self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/send-rules-form/', format='json')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIn(str(signing.token), response.data['signing_link'])
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.spot_conversion_discount_amount, Decimal('2000.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('8000.00'))
+
+    def test_public_rules_form_returns_saved_fee_breakdown(self):
+        course = Course.objects.create(name='Fee Breakdown Course', actual_fees=Decimal('30900'))
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=course,
+            name='Fee Breakdown Candidate',
+            phone='9000000189',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date=timezone.localdate(),
+            start_date=timezone.localdate(),
+            actual_fees=Decimal('30900'),
+            discount_amount=Decimal('4000'),
+            spot_conversion_discount_applied=True,
+            buddy_offer_applied=True,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+
+        response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+
+        self.assertEqual(response.status_code, 200)
+        candidate = response.data['candidate']
+        self.assertEqual(Decimal(str(candidate['course_fee'])), Decimal('30900.00'))
+        self.assertEqual(Decimal(str(candidate['normal_discount'])), Decimal('4000.00'))
+        self.assertEqual(Decimal(str(candidate['final_fees'])), Decimal('26900.00'))
+        self.assertEqual(Decimal(str(candidate['spot_discount'])), Decimal('2000.00'))
+        self.assertEqual(Decimal(str(candidate['buddy_discount'])), Decimal('1500.00'))
+        self.assertEqual(Decimal(str(candidate['net_payable_fee'])), Decimal('23400.00'))
+
     def test_signed_rules_pdf_view_uses_stored_pdf_without_rebuild(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,

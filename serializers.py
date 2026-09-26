@@ -1769,20 +1769,14 @@ class EnrollmentDetailSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        spot_applied = attrs.get(
-            'spot_conversion_discount_applied',
-            getattr(self.instance, 'spot_conversion_discount_applied', False),
-        )
-        if spot_applied:
-            walkin = attrs.get('walkin') or getattr(self.instance, 'walkin', None) or self.context.get('walkin')
+        # Eligibility is decided by the walk-in conversion endpoint before an
+        # enrollment is created.  Do not re-check an already stored spot
+        # discount on later enrollment edits (including Rules workflows).
+        if self.instance is None and attrs.get('spot_conversion_discount_applied'):
+            walkin = attrs.get('walkin') or self.context.get('walkin')
             if not walkin:
                 raise serializers.ValidationError({
                     'spot_conversion_discount_applied': 'Spot conversion discount is available only for walk-in enrollments.'
-                })
-            expires_at = walkin.created_at + timedelta(hours=24) if walkin.created_at else None
-            if not expires_at or timezone.now() > expires_at:
-                raise serializers.ValidationError({
-                    'spot_conversion_discount_applied': 'Fees Reduction is available only for 24 hours from walk-in creation.'
                 })
         return attrs
 
