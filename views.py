@@ -70,6 +70,7 @@ import logging
 import mimetypes
 import re
 import textwrap
+import unicodedata
 import uuid
 import zipfile
 from urllib.parse import unquote, urlparse
@@ -8846,6 +8847,27 @@ def rules_repository_document_status(document):
     return 'available' if rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf') else 'document_unavailable'
 
 
+def rules_package_name_component(value, fallback):
+    """Create a readable, traversal-safe component for a ZIP path or filename."""
+    normalized = unicodedata.normalize('NFKC', str(value or '')).strip()
+    safe_value = ''.join(
+        character if (character.isalnum() or character in {'-', '_'}) else '_'
+        for character in normalized
+    )
+    safe_value = re.sub(r'_+', '_', safe_value).strip('_.-')
+    return safe_value or fallback
+
+
+def rules_package_image_extension(document, field_name, image_bytes):
+    """Prefer the verified image content type, falling back to the stored suffix."""
+    detected_extension = image_storage_extension(image_bytes)
+    if detected_extension:
+        return detected_extension
+    stored_name = getattr(getattr(document, field_name, None), 'name', '') or ''
+    stored_extension = Path(stored_name).suffix.lower().lstrip('.')
+    return stored_extension if re.fullmatch(r'[a-z0-9]{1,10}', stored_extension or '') else 'jpg'
+
+
 def serialize_rules_document(document, request, include_detail=False):
     enrollment = document.enrollment
     counselor = enrollment_counselor(enrollment) if enrollment else None
@@ -8856,6 +8878,11 @@ def serialize_rules_document(document, request, include_detail=False):
     pdf_url = f'{base_path}/api/rules-regulations/{document.id}/pdf/' if pdf_available else None
     selfie_url = f'{base_path}/api/rules-regulations/{document.id}/selfie/' if selfie_available else None
     signature_url = f'{base_path}/api/rules-regulations/{document.id}/signature/' if signature_available else None
+    package_download_url = f'{base_path}/api/rules-regulations/{document.id}/download/' if pdf_available else None
+    package_filename = (
+        f'{rules_package_name_component(document.candidate_name, "Candidate")}_'
+        f'{rules_package_name_component(document.student_number, "StudentID_Pending")}_Rules_Package.zip'
+    )
     if request:
         pdf_url = request.build_absolute_uri(pdf_url) if pdf_url else None
         selfie_url = request.build_absolute_uri(selfie_url) if selfie_url else None
@@ -8876,6 +8903,8 @@ def serialize_rules_document(document, request, include_detail=False):
         'rules_status': RulesSigningRequest.Status.SUBMITTED,
         'pdf_url': pdf_url,
         'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
+        'package_download_url': package_download_url,
+        'package_filename': package_filename,
         'selfie_url': selfie_url,
         'signature_url': signature_url,
     }
@@ -8896,6 +8925,8 @@ def serialize_rules_document(document, request, include_detail=False):
                 'signature_available': signature_available,
                 'pdf_url': pdf_url,
                 'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
+                'package_download_url': package_download_url,
+                'package_filename': package_filename,
                 'selfie_url': selfie_url,
                 'signature_url': signature_url,
             },
@@ -8944,6 +8975,151 @@ class RulesRegulationsPdfView(APIView):
             return proof_unavailable_response()
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = proof_content_disposition(request, document)
+        return response
+
+
+class RulesRegulationsPackageDownloadView(APIView):
+    """Download the immutable, submitted Rules evidence as one ZIP archive."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request, pk):
+        # This is the same branch-scoped lookup used by the list, detail, and
+        # individual-file endpoints. A foreign document is indistinguishable
+        # from a missing one to a counselor.
+        document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
+        if not document:
+            return Response({'detail': 'Rules & Regulations document was not found.'}, status=404)
+
+        pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+        if not pdf_bytes:
+            logger.warning(
+                'Rules package download rejected because the signed PDF is unavailable: document_id=%s user_id=%s.',
+                document.id,
+                request.user.id,
+            )
+            return Response(
+                {'detail': 'The signed Rules & Regulations PDF is not available for this package.'},
+                status=404,
+            )
+
+        candidate_name = rules_package_name_component(document.candidate_name, 'Candidate')
+        student_number = rules_package_name_component(document.student_number, 'StudentID_Pending')
+        package_stem = f'{candidate_name}_{student_number}'
+        folder_name = f'{package_stem}/'
+        archive = io.BytesIO()
+
+        with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as package:
+            package.writestr(
+                f'{folder_name}{package_stem}_Rules_and_Regulations.pdf',
+                pdf_bytes,
+            )
+            for binary_field, file_field, label in (
+                ('selfie_image_file', 'selfie_image', 'Photo'),
+                ('signature_image_file', 'signature_image', 'Signature'),
+            ):
+                if not getattr(document, binary_field, None) and not getattr(document, file_field, None):
+                    continue
+                image_bytes = binary_or_legacy_file(document, binary_field, file_field)
+                if not image_bytes:
+                    continue
+                extension = rules_package_image_extension(document, file_field, image_bytes)
+                package.writestr(
+                    f'{folder_name}{package_stem}_{label}.{extension}',
+                    image_bytes,
+                )
+
+        response = HttpResponse(archive.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = f'attachment; filename="{package_stem}_Rules_Package.zip"'
+        return response
+
+
+class RulesRegulationsBulkPackageDownloadView(APIView):
+    """Export accessible, completed Rules packages into one branch-safe ZIP."""
+    permission_classes = [IsStaffOrAdmin]
+
+    def get(self, request):
+        requested_branch = str(request.query_params.get('branch') or '').strip()
+        documents = rules_document_queryset_for_user(request.user)
+
+        if request.user.is_super_admin:
+            if requested_branch and requested_branch.lower() not in {'all', '*'}:
+                try:
+                    branch_id = int(requested_branch)
+                except (TypeError, ValueError):
+                    return Response({'detail': 'Select a valid branch or All Branches.'}, status=400)
+                if not Branch.objects.filter(pk=branch_id).exists():
+                    return Response({'detail': 'Selected branch was not found.'}, status=404)
+                documents = documents.filter(branch_id=branch_id)
+        else:
+            # Do not silently ignore a manipulated branch query. The request is
+            # explicitly denied before any package data is read.
+            if requested_branch and requested_branch != str(request.user.branch_id or ''):
+                return Response({'detail': 'You may download Rules packages only for your assigned branch.'}, status=403)
+            if not request.user.branch_id:
+                return Response({'detail': 'Your account is not assigned to a branch.'}, status=403)
+
+        documents = documents.order_by('branch_id', 'candidate_name', 'student_number', 'id')
+        archive = io.BytesIO()
+        included_count = 0
+        skipped_pdf_count = 0
+        used_stems = set()
+
+        with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as package:
+            for document in documents.iterator():
+                pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+                if not pdf_bytes:
+                    skipped_pdf_count += 1
+                    logger.warning(
+                        'Rules bulk package skipped a submitted document with no signed PDF: document_id=%s branch_id=%s user_id=%s.',
+                        document.id,
+                        document.branch_id,
+                        request.user.id,
+                    )
+                    continue
+
+                candidate_name = rules_package_name_component(document.candidate_name, 'Candidate')
+                student_number = rules_package_name_component(document.student_number, 'StudentID_Pending')
+                package_stem = f'{candidate_name}_{student_number}'
+                unique_stem = package_stem
+                suffix = 2
+                while unique_stem in used_stems:
+                    unique_stem = f'{package_stem}_{suffix}'
+                    suffix += 1
+                used_stems.add(unique_stem)
+                folder_name = f'{unique_stem}/'
+
+                package.writestr(
+                    f'{folder_name}{unique_stem}_Rules_and_Regulations.pdf',
+                    pdf_bytes,
+                )
+                for binary_field, file_field, label in (
+                    ('selfie_image_file', 'selfie_image', 'Photo'),
+                    ('signature_image_file', 'signature_image', 'Signature'),
+                ):
+                    if not getattr(document, binary_field, None) and not getattr(document, file_field, None):
+                        continue
+                    image_bytes = binary_or_legacy_file(document, binary_field, file_field)
+                    if not image_bytes:
+                        logger.warning(
+                            'Rules bulk package omitted unavailable optional file: document_id=%s field=%s.',
+                            document.id,
+                            file_field,
+                        )
+                        continue
+                    extension = rules_package_image_extension(document, file_field, image_bytes)
+                    package.writestr(f'{folder_name}{unique_stem}_{label}.{extension}', image_bytes)
+                included_count += 1
+
+        if not included_count:
+            detail = 'No Rules & Regulations packages with an available signed PDF were found.'
+            if skipped_pdf_count:
+                detail = 'Rules submissions were found, but their signed PDFs are unavailable.'
+            return Response({'detail': detail}, status=404)
+
+        response = HttpResponse(archive.getvalue(), content_type='application/zip')
+        response['Content-Disposition'] = 'attachment; filename="Rules_and_Regulations.zip"'
+        if skipped_pdf_count:
+            response['X-Rules-Package-Skipped'] = str(skipped_pdf_count)
         return response
 
 

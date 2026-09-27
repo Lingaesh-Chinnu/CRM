@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { api } from '../../services/api'
 import { apiErrorMessage } from '../../utils/apiErrors'
 import { openProtectedFile } from '../../utils/protectedFiles'
@@ -27,9 +28,10 @@ function fileNameFor(row) {
   return `IIE-Rules-Regulations-${identifier}.pdf`
 }
 
-async function downloadProtectedFile(url, filename, setMessage) {
+async function downloadProtectedFile(url, filename, setMessage, params) {
   try {
-    const { data } = await api.get(url, { responseType: 'blob' })
+    const response = await api.get(url, { responseType: 'blob', params })
+    const { data } = response
     const objectUrl = window.URL.createObjectURL(data)
     const link = document.createElement('a')
     link.href = objectUrl
@@ -38,6 +40,7 @@ async function downloadProtectedFile(url, filename, setMessage) {
     link.click()
     link.remove()
     window.URL.revokeObjectURL(objectUrl)
+    return response
   } catch (error) {
     let detail = error.response?.data?.detail
     if (!detail && error.response?.data instanceof Blob) {
@@ -48,6 +51,7 @@ async function downloadProtectedFile(url, filename, setMessage) {
       }
     }
     setMessage(detail || 'Document is not available.')
+    return null
   }
 }
 
@@ -58,11 +62,28 @@ function RulesRegulationsList() {
   const [totalCount, setTotalCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
+  const [downloadingId, setDownloadingId] = useState(null)
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [branches, setBranches] = useState([])
+  const [bulkBranch, setBulkBranch] = useState('all')
+  const { user } = useSelector((state) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const debouncedSearch = useDebouncedValue(search.trim())
 
   useEffect(() => {
     setPage(1)
   }, [debouncedSearch])
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setBranches([])
+      setBulkBranch('all')
+      return
+    }
+    api.get('/branches/')
+      .then(({ data }) => setBranches(normaliseListResponse(data).filter((branch) => branch.is_active !== false)))
+      .catch(() => setBranches([]))
+  }, [isSuperAdmin])
 
   useEffect(() => {
     loadRows()
@@ -84,6 +105,42 @@ function RulesRegulationsList() {
       setMessage(apiErrorMessage(error, 'Failed to load Rules & Regulations documents.'))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const downloadPackage = async (row) => {
+    if (!row.package_download_url || downloadingId) return
+    setDownloadingId(row.id)
+    setMessage('')
+    try {
+      await downloadProtectedFile(
+        row.package_download_url,
+        row.package_filename || 'Rules_Package.zip',
+        setMessage,
+      )
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  const downloadBulkPackage = async () => {
+    if (bulkDownloading) return
+    setBulkDownloading(true)
+    setMessage('')
+    try {
+      const params = isSuperAdmin && bulkBranch !== 'all' ? { branch: bulkBranch } : undefined
+      const response = await downloadProtectedFile(
+        '/rules-regulations/download/',
+        'Rules_and_Regulations.zip',
+        setMessage,
+        params,
+      )
+      const skipped = Number(response?.headers?.['x-rules-package-skipped'] || 0)
+      if (skipped) {
+        setMessage(`${skipped} submission${skipped === 1 ? '' : 's'} was skipped because its signed PDF is unavailable.`)
+      }
+    } finally {
+      setBulkDownloading(false)
     }
   }
 
@@ -121,6 +178,21 @@ function RulesRegulationsList() {
         </Link>
       ),
     },
+    {
+      key: 'download',
+      header: 'Download',
+      width: 'minmax(100px,0.6fr)',
+      render: (row) => (
+        <button
+          type="button"
+          disabled={!row.package_download_url || downloadingId === row.id}
+          onClick={() => downloadPackage(row)}
+          className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+        >
+          {downloadingId === row.id ? 'Downloading...' : 'Download'}
+        </button>
+      ),
+    },
   ]
 
   return (
@@ -145,6 +217,31 @@ function RulesRegulationsList() {
             className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
           />
         </label>
+        <div className="mt-5 flex flex-wrap items-end gap-3">
+          {isSuperAdmin && (
+            <label className="block min-w-[220px]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Branch
+              </span>
+              <select
+                value={bulkBranch}
+                onChange={(event) => setBulkBranch(event.target.value)}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+              >
+                <option value="all">All Branches</option>
+                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+              </select>
+            </label>
+          )}
+          <button
+            type="button"
+            disabled={bulkDownloading}
+            onClick={downloadBulkPackage}
+            className="rounded-2xl border border-cyan-200 bg-cyan-50 px-5 py-3 text-sm font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {bulkDownloading ? 'Downloading...' : 'Download Rules & Regulations'}
+          </button>
+        </div>
       </section>
 
       {message && (
@@ -177,6 +274,7 @@ function RulesRegulationsDetail() {
   const [selfieObjectUrl, setSelfieObjectUrl] = useState('')
   const [signatureObjectUrl, setSignatureObjectUrl] = useState('')
   const [pdfObjectUrl, setPdfObjectUrl] = useState('')
+  const [downloadingPackage, setDownloadingPackage] = useState(false)
 
   useEffect(() => {
     loadDetail()
@@ -266,6 +364,21 @@ function RulesRegulationsDetail() {
 
   const candidate = row.candidate || {}
 
+  const downloadPackage = async () => {
+    if (!row.files?.package_download_url || downloadingPackage) return
+    setDownloadingPackage(true)
+    setMessage('')
+    try {
+      await downloadProtectedFile(
+        row.files.package_download_url,
+        row.files.package_filename || 'Rules_Package.zip',
+        setMessage,
+      )
+    } finally {
+      setDownloadingPackage(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <section className="rounded-[28px] bg-white p-6 shadow-[0_18px_45px_-30px_rgba(15,23,42,0.35)] sm:p-8">
@@ -350,6 +463,14 @@ function RulesRegulationsDetail() {
                 className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
               >
                 Download PDF
+              </button>
+              <button
+                type="button"
+                disabled={!row.files?.package_download_url || downloadingPackage}
+                onClick={downloadPackage}
+                className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {downloadingPackage ? 'Downloading...' : 'Download'}
               </button>
             </div>
           </div>

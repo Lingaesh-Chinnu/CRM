@@ -10,6 +10,7 @@ import base64
 import io
 import uuid
 import tempfile
+import zipfile
 
 from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage, get_default_installment_schedule
 from views import apply_enrollment_discount
@@ -3016,6 +3017,211 @@ class PublicWalkInFormTests(APITestCase):
         signature_response = self.client.get(f'/api/rules-regulations/{document.id}/signature/')
         self.assertEqual(signature_response.status_code, 200)
         self.assertEqual(signature_response.content, b'\x89PNG-signature')
+
+    def test_rules_regulations_package_download_contains_signed_rules_photo_and_signature(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='C Subash',
+            phone='9000000150',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+            student_number='STU202609-0012',
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+        )
+        from PIL import Image
+        image_buffer = io.BytesIO()
+        Image.new('RGB', (20, 20), (17, 24, 39)).save(image_buffer, format='PNG')
+        image_bytes = image_buffer.getvalue()
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number,
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+            selfie_image_file=image_bytes,
+            signature_image_file=image_bytes,
+            signed_pdf_file=b'%PDF-signed-rules',
+            source_token=signing.token,
+        )
+        self.client.force_authenticate(user=self.admin)
+
+        response = self.client.get(f'/api/rules-regulations/{document.id}/download/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/zip')
+        self.assertIn('C_Subash_STU202609-0012_Rules_Package.zip', response['Content-Disposition'])
+        with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+            self.assertEqual(package.namelist(), [
+                'C_Subash_STU202609-0012/C_Subash_STU202609-0012_Rules_and_Regulations.pdf',
+                'C_Subash_STU202609-0012/C_Subash_STU202609-0012_Photo.png',
+                'C_Subash_STU202609-0012/C_Subash_STU202609-0012_Signature.png',
+            ])
+            self.assertEqual(
+                package.read('C_Subash_STU202609-0012/C_Subash_STU202609-0012_Rules_and_Regulations.pdf'),
+                b'%PDF-signed-rules',
+            )
+
+    def test_rules_regulations_package_download_uses_pending_student_id_and_skips_missing_optional_files(self):
+        document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='../C\\Subash',
+            student_number='',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-signed-rules',
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        response = self.client.get(f'/api/rules-regulations/{document.id}/download/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('C_Subash_StudentID_Pending_Rules_Package.zip', response['Content-Disposition'])
+        with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+            self.assertEqual(package.namelist(), [
+                'C_Subash_StudentID_Pending/C_Subash_StudentID_Pending_Rules_and_Regulations.pdf',
+            ])
+            self.assertFalse(any('..' in entry or '\\' in entry for entry in package.namelist()))
+
+    def test_rules_regulations_package_download_respects_branch_access_and_requires_pdf(self):
+        document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='Protected Package Candidate',
+            student_number='STU-001',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-signed-rules',
+        )
+        missing_pdf = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='Missing Package PDF',
+            student_number='STU-002',
+            submitted_at=timezone.now(),
+        )
+
+        self.client.force_authenticate(user=self.other_staff)
+        denied_response = self.client.get(f'/api/rules-regulations/{document.id}/download/')
+        self.assertEqual(denied_response.status_code, 404)
+
+        self.client.force_authenticate(user=self.staff)
+        allowed_response = self.client.get(f'/api/rules-regulations/{document.id}/download/')
+        self.assertEqual(allowed_response.status_code, 200)
+        missing_response = self.client.get(f'/api/rules-regulations/{missing_pdf.id}/download/')
+        self.assertEqual(missing_response.status_code, 404)
+        self.assertEqual(
+            missing_response.data['detail'],
+            'The signed Rules & Regulations PDF is not available for this package.',
+        )
+
+    def test_rules_regulations_bulk_download_limits_counselor_to_assigned_branch(self):
+        branch_document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='Gandhipuram Candidate',
+            student_number='STU-G-001',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-gandhipuram',
+        )
+        other_document = RulesRegulationsDocument.objects.create(
+            branch=self.other_branch,
+            candidate_name='Hopes Candidate',
+            student_number='STU-H-001',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-hopes',
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        response = self.client.get('/api/rules-regulations/download/')
+        manipulated_response = self.client.get(
+            '/api/rules-regulations/download/',
+            {'branch': self.other_branch.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Disposition'], 'attachment; filename="Rules_and_Regulations.zip"')
+        with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+            names = package.namelist()
+        self.assertTrue(any('Gandhipuram_Candidate_STU-G-001/' in name for name in names))
+        self.assertFalse(any('Hopes_Candidate_STU-H-001/' in name for name in names))
+        self.assertEqual(manipulated_response.status_code, 403)
+        self.assertEqual(
+            manipulated_response.data['detail'],
+            'You may download Rules packages only for your assigned branch.',
+        )
+        branch_document.refresh_from_db()
+        other_document.refresh_from_db()
+        self.assertEqual(branch_document.signed_pdf_file, b'%PDF-gandhipuram')
+        self.assertEqual(other_document.signed_pdf_file, b'%PDF-hopes')
+
+    def test_rules_regulations_bulk_download_filters_admin_branch_or_all_branches(self):
+        kuniyamuthur = Branch.objects.create(name='Kuniyamuthur', city='Coimbatore')
+        gandhipuram_document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='Gandhipuram Candidate',
+            student_number='STU-G-002',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-gandhipuram',
+        )
+        hopes_document = RulesRegulationsDocument.objects.create(
+            branch=self.other_branch,
+            candidate_name='Hopes Candidate',
+            student_number='STU-H-002',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-hopes',
+        )
+        kuniyamuthur_document = RulesRegulationsDocument.objects.create(
+            branch=kuniyamuthur,
+            candidate_name='Kuniyamuthur Candidate',
+            student_number='STU-K-002',
+            submitted_at=timezone.now(),
+            signed_pdf_file=b'%PDF-kuniyamuthur',
+        )
+        missing_pdf_document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='Missing PDF Candidate',
+            student_number='STU-M-002',
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(user=self.admin)
+
+        def package_names(branch=None):
+            response = self.client.get('/api/rules-regulations/download/', {'branch': branch} if branch else {})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response['Content-Disposition'], 'attachment; filename="Rules_and_Regulations.zip"')
+            with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+                return response, package.namelist()
+
+        gandhipuram_response, gandhipuram_names = package_names(self.branch.id)
+        _hopes_response, hopes_names = package_names(self.other_branch.id)
+        _kuniyamuthur_response, kuniyamuthur_names = package_names(kuniyamuthur.id)
+        all_response, all_names = package_names('all')
+
+        self.assertTrue(any('Gandhipuram_Candidate_STU-G-002/' in name for name in gandhipuram_names))
+        self.assertFalse(any('Hopes_Candidate_STU-H-002/' in name for name in gandhipuram_names))
+        self.assertEqual(gandhipuram_response['X-Rules-Package-Skipped'], '1')
+        self.assertTrue(any('Hopes_Candidate_STU-H-002/' in name for name in hopes_names))
+        self.assertTrue(any('Kuniyamuthur_Candidate_STU-K-002/' in name for name in kuniyamuthur_names))
+        self.assertTrue(any('Gandhipuram_Candidate_STU-G-002/' in name for name in all_names))
+        self.assertTrue(any('Hopes_Candidate_STU-H-002/' in name for name in all_names))
+        self.assertTrue(any('Kuniyamuthur_Candidate_STU-K-002/' in name for name in all_names))
+        self.assertFalse(any('Missing_PDF_Candidate_STU-M-002/' in name for name in all_names))
+        self.assertEqual(all_response['X-Rules-Package-Skipped'], '1')
+        for document in (gandhipuram_document, hopes_document, kuniyamuthur_document, missing_pdf_document):
+            document.refresh_from_db()
+        self.assertEqual(gandhipuram_document.signed_pdf_file, b'%PDF-gandhipuram')
+        self.assertEqual(hopes_document.signed_pdf_file, b'%PDF-hopes')
+        self.assertEqual(kuniyamuthur_document.signed_pdf_file, b'%PDF-kuniyamuthur')
+        self.assertIsNone(missing_pdf_document.signed_pdf_file)
 
     def test_rules_regulations_document_history_survives_signing_reset_and_deleted_enrollment(self):
         enrollment = Enrollment.objects.create(
