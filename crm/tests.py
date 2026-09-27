@@ -3311,6 +3311,48 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(retry_response.data['submitted_at'], response.data['submitted_at'])
         self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
 
+    def test_public_rules_signing_accepts_an_existing_viewed_request(self):
+        """Opening a previously sent link must never make it ineligible to sign."""
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Viewed Rules Signing Candidate',
+            phone='9000000145',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        image_buffer = io.BytesIO()
+        from PIL import Image
+        Image.new('RGB', (20, 20), (17, 24, 39)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        opened_response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+        self.assertEqual(opened_response.status_code, 200)
+        signing.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.VIEWED)
+
+        response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'selfie': image_data, 'signature': image_data},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        signing.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertTrue(signing.selfie_image_file)
+        self.assertTrue(signing.signature_image_file)
+        self.assertTrue(signing.signed_pdf_file)
+
     def test_public_rules_signing_with_s3_storage_does_not_store_database_media(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
