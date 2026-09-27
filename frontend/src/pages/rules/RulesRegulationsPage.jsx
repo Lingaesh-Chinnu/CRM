@@ -52,6 +52,17 @@ async function downloadProtectedFile(url, filename, setMessage, params) {
         detail = ''
       }
     }
+    // Candidate-facing UI stays concise, while browser diagnostics retain the
+    // actual response needed to correlate a failed authenticated download.
+    console.error('Rules document download failed', {
+      method: error.config?.method?.toUpperCase(),
+      url: `${error.config?.baseURL || ''}${error.config?.url || ''}`,
+      status: error.response?.status,
+      contentType: error.response?.headers?.['content-type'],
+      detail,
+      responseBodyType: error.response?.data?.constructor?.name,
+      message: error.message,
+    })
     setMessage(detail || 'Unable to download the document. Please try again.')
     return null
   }

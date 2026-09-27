@@ -8909,6 +8909,20 @@ def rules_document_image_content_type(document, field_name):
     return 'image/jpeg'
 
 
+def rules_document_download_filename(document):
+    """Use the stored PDF name when it is safe; otherwise use the legacy name."""
+    for source in rules_document_file_sources(document):
+        field = getattr(source, 'signed_pdf', None)
+        raw_name = str(getattr(field, 'name', '') or '')
+        if not raw_name:
+            continue
+        filename = Path(unquote(urlparse(raw_name).path)).name
+        filename = filename.replace('"', '').replace('\r', '').replace('\n', '')
+        if filename:
+            return filename
+    return proof_filename(document)
+
+
 def rules_repository_document_status(document):
     return 'available' if rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf') else 'document_unavailable'
 
@@ -9041,7 +9055,17 @@ class RulesRegulationsPdfView(APIView):
             logger.warning('Rules document PDF download unavailable: document_id=%s user_id=%s.', document.id, request.user.id)
             return Response({'detail': 'The signed Rules & Regulations PDF is unavailable in storage.'}, status=404)
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = proof_content_disposition(request, document)
+        response['Content-Disposition'] = f'attachment; filename="{rules_document_download_filename(document)}"'
+        logger.info(
+            'Rules document PDF download served: document_id=%s user_id=%s branch_id=%s bytes=%s repository_path=%s signing_path=%s.',
+            document.id,
+            request.user.id,
+            document.branch_id,
+            len(pdf_bytes),
+            getattr(document.signed_pdf, 'name', ''),
+            getattr(getattr(document, 'signing_request', None).signed_pdf, 'name', '')
+            if getattr(document, 'signing_request', None) else '',
+        )
         return response
 
 
