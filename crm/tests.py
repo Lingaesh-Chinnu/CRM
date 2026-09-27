@@ -19,6 +19,10 @@ from views import apply_enrollment_discount
 User = get_user_model()
 
 
+def response_file_bytes(response):
+    return b''.join(response.streaming_content) if getattr(response, 'streaming', False) else response.content
+
+
 @override_settings(ALLOWED_HOSTS=['testserver'], SECURE_SSL_REDIRECT=False)
 class CommonCandidateFilterAndStatusTests(APITestCase):
     def setUp(self):
@@ -3127,9 +3131,9 @@ class PublicWalkInFormTests(APITestCase):
                 'Linked_Source_Candidate_STU-LINK-001/Linked_Source_Candidate_STU-LINK-001_Rules_and_Regulations.pdf',
                 package.namelist(),
             )
-        with zipfile.ZipFile(io.BytesIO(bulk_response.content)) as package:
+        with zipfile.ZipFile(io.BytesIO(response_file_bytes(bulk_response))) as package:
             self.assertIn(
-                'Linked_Source_Candidate_STU-LINK-001/Linked_Source_Candidate_STU-LINK-001_Rules_and_Regulations.pdf',
+                'Rules_and_Regulations/Gandhipuram/Linked_Source_Candidate_STU-LINK-001/Linked_Source_Candidate_STU-LINK-001_Rules_and_Regulations.pdf',
                 package.namelist(),
             )
 
@@ -3147,7 +3151,7 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('C_Subash_StudentID_Pending_Rules_Package.zip', response['Content-Disposition'])
-        with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+        with zipfile.ZipFile(io.BytesIO(response_file_bytes(response))) as package:
             self.assertEqual(package.namelist(), [
                 'C_Subash_StudentID_Pending/C_Subash_StudentID_Pending_Rules_and_Regulations.pdf',
             ])
@@ -3207,10 +3211,10 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response['Content-Disposition'], 'attachment; filename="Rules_and_Regulations.zip"')
-        with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+        with zipfile.ZipFile(io.BytesIO(response_file_bytes(response))) as package:
             names = package.namelist()
-        self.assertTrue(any('Gandhipuram_Candidate_STU-G-001/' in name for name in names))
-        self.assertFalse(any('Hopes_Candidate_STU-H-001/' in name for name in names))
+        self.assertTrue(any('Rules_and_Regulations/Gandhipuram/Gandhipuram_Candidate_STU-G-001/' in name for name in names))
+        self.assertFalse(any('Rules_and_Regulations/Hopes/Hopes_Candidate_STU-H-001/' in name for name in names))
         self.assertEqual(manipulated_response.status_code, 403)
         self.assertEqual(
             manipulated_response.data['detail'],
@@ -3255,8 +3259,9 @@ class PublicWalkInFormTests(APITestCase):
         def package_names(branch=None):
             response = self.client.get('/api/rules-regulations/download/', {'branch': branch} if branch else {})
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response['Content-Disposition'], 'attachment; filename="Rules_and_Regulations.zip"')
-            with zipfile.ZipFile(io.BytesIO(response.content)) as package:
+            expected_filename = 'Rules_and_Regulations_All_Branches.zip' if branch in {None, 'all'} else 'Rules_and_Regulations.zip'
+            self.assertEqual(response['Content-Disposition'], f'attachment; filename="{expected_filename}"')
+            with zipfile.ZipFile(io.BytesIO(response_file_bytes(response))) as package:
                 return response, package.namelist()
 
         gandhipuram_response, gandhipuram_names = package_names(self.branch.id)
@@ -3264,14 +3269,14 @@ class PublicWalkInFormTests(APITestCase):
         _kuniyamuthur_response, kuniyamuthur_names = package_names(kuniyamuthur.id)
         all_response, all_names = package_names('all')
 
-        self.assertTrue(any('Gandhipuram_Candidate_STU-G-002/' in name for name in gandhipuram_names))
-        self.assertFalse(any('Hopes_Candidate_STU-H-002/' in name for name in gandhipuram_names))
+        self.assertTrue(any('Rules_and_Regulations/Gandhipuram/Gandhipuram_Candidate_STU-G-002/' in name for name in gandhipuram_names))
+        self.assertFalse(any('Rules_and_Regulations/Hopes/Hopes_Candidate_STU-H-002/' in name for name in gandhipuram_names))
         self.assertEqual(gandhipuram_response['X-Rules-Package-Skipped'], '1')
-        self.assertTrue(any('Hopes_Candidate_STU-H-002/' in name for name in hopes_names))
-        self.assertTrue(any('Kuniyamuthur_Candidate_STU-K-002/' in name for name in kuniyamuthur_names))
-        self.assertTrue(any('Gandhipuram_Candidate_STU-G-002/' in name for name in all_names))
-        self.assertTrue(any('Hopes_Candidate_STU-H-002/' in name for name in all_names))
-        self.assertTrue(any('Kuniyamuthur_Candidate_STU-K-002/' in name for name in all_names))
+        self.assertTrue(any('Rules_and_Regulations/Hopes/Hopes_Candidate_STU-H-002/' in name for name in hopes_names))
+        self.assertTrue(any('Rules_and_Regulations/Kuniyamuthur/Kuniyamuthur_Candidate_STU-K-002/' in name for name in kuniyamuthur_names))
+        self.assertTrue(any('Rules_and_Regulations/Gandhipuram/Gandhipuram_Candidate_STU-G-002/' in name for name in all_names))
+        self.assertTrue(any('Rules_and_Regulations/Hopes/Hopes_Candidate_STU-H-002/' in name for name in all_names))
+        self.assertTrue(any('Rules_and_Regulations/Kuniyamuthur/Kuniyamuthur_Candidate_STU-K-002/' in name for name in all_names))
         self.assertFalse(any('Missing_PDF_Candidate_STU-M-002/' in name for name in all_names))
         self.assertEqual(all_response['X-Rules-Package-Skipped'], '1')
         for document in (gandhipuram_document, hopes_document, kuniyamuthur_document, missing_pdf_document):

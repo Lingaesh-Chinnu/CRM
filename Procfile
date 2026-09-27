@@ -1,1 +1,1 @@
-web: python manage.py migrate --noinput && gunicorn wsgi:application
+web: python manage.py migrate --noinput && gunicorn --timeout 180 wsgi:application

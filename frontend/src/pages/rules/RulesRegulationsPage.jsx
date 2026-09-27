@@ -28,14 +28,28 @@ function fileNameFor(row) {
   return `IIE-Rules-Regulations-${identifier}.pdf`
 }
 
-async function downloadProtectedFile(url, filename, setMessage, params) {
+function responseFilename(response, fallback) {
+  const disposition = response?.headers?.['content-disposition'] || ''
+  const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (encodedMatch) {
+    try {
+      return decodeURIComponent(encodedMatch[1])
+    } catch {
+      return fallback
+    }
+  }
+  const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
+  return filenameMatch?.[1] || fallback
+}
+
+async function downloadProtectedFile(url, filename, setMessage, params, timeout = 20000) {
   try {
-    const response = await api.get(url, { responseType: 'blob', params })
+    const response = await api.get(url, { responseType: 'blob', params, timeout })
     const { data } = response
     const objectUrl = window.URL.createObjectURL(data)
     const link = document.createElement('a')
     link.href = objectUrl
-    link.download = filename
+    link.download = responseFilename(response, filename)
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -61,6 +75,7 @@ async function downloadProtectedFile(url, filename, setMessage, params) {
       contentType: error.response?.headers?.['content-type'],
       detail,
       responseBodyType: error.response?.data?.constructor?.name,
+      code: error.code,
       message: error.message,
     })
     setMessage(detail || 'Unable to download the document. Please try again.')
@@ -144,9 +159,10 @@ function RulesRegulationsList() {
       const params = isSuperAdmin && bulkBranch !== 'all' ? { branch: bulkBranch } : undefined
       const response = await downloadProtectedFile(
         '/rules-regulations/download/',
-        'Rules_and_Regulations.zip',
+        bulkBranch === 'all' ? 'Rules_and_Regulations_All_Branches.zip' : 'Rules_and_Regulations.zip',
         setMessage,
         params,
+        300000,
       )
       const skipped = Number(response?.headers?.['x-rules-package-skipped'] || 0)
       if (skipped) {

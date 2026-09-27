@@ -69,6 +69,7 @@ import io
 import logging
 import mimetypes
 import re
+import tempfile
 import textwrap
 import unicodedata
 import uuid
@@ -9131,9 +9132,12 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
     def get(self, request):
         requested_branch = str(request.query_params.get('branch') or '').strip()
         documents = rules_document_queryset_for_user(request.user)
+        all_branches = request.user.is_super_admin and (
+            not requested_branch or requested_branch.lower() in {'all', '*'}
+        )
 
         if request.user.is_super_admin:
-            if requested_branch and requested_branch.lower() not in {'all', '*'}:
+            if not all_branches:
                 try:
                     branch_id = int(requested_branch)
                 except (TypeError, ValueError):
@@ -9150,12 +9154,24 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                 return Response({'detail': 'Your account is not assigned to a branch.'}, status=403)
 
         documents = documents.order_by('branch_id', 'candidate_name', 'student_number', 'id')
-        archive = io.BytesIO()
+        document_count = documents.count()
+        logger.info(
+            'Rules bulk package requested: user_id=%s is_super_admin=%s requested_branch=%s all_branches=%s document_count=%s.',
+            request.user.id,
+            request.user.is_super_admin,
+            requested_branch or 'all',
+            all_branches,
+            document_count,
+        )
+        # PDFs are already compressed. Avoid deflating them again and avoid
+        # copying a large archive into HttpResponse memory; Render can stream
+        # the spooled file after the archive has been assembled.
+        archive = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode='w+b')
         included_count = 0
         skipped_pdf_count = 0
         used_stems = set()
 
-        with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as package:
+        with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_STORED) as package:
             for document in documents.iterator():
                 pdf_bytes = rules_document_file_bytes(document, 'signed_pdf_file', 'signed_pdf')
                 if not pdf_bytes:
@@ -9177,7 +9193,11 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                     unique_stem = f'{package_stem}_{suffix}'
                     suffix += 1
                 used_stems.add(unique_stem)
-                folder_name = f'{unique_stem}/'
+                branch_name = rules_package_name_component(
+                    getattr(getattr(document, 'branch', None), 'name', '') or document.branch_name,
+                    'Unassigned_Branch',
+                )
+                folder_name = f'Rules_and_Regulations/{branch_name}/{unique_stem}/'
 
                 package.writestr(
                     f'{folder_name}{unique_stem}_Rules_and_Regulations.pdf',
@@ -9202,15 +9222,26 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                 included_count += 1
 
         if not included_count:
+            archive.close()
             detail = 'No Rules & Regulations packages with an available signed PDF were found.'
             if skipped_pdf_count:
                 detail = 'Rules submissions were found, but their signed PDFs are unavailable.'
             return Response({'detail': detail}, status=404)
 
-        response = HttpResponse(archive.getvalue(), content_type='application/zip')
-        response['Content-Disposition'] = 'attachment; filename="Rules_and_Regulations.zip"'
+        archive.seek(0)
+        output_name = 'Rules_and_Regulations_All_Branches.zip' if all_branches else 'Rules_and_Regulations.zip'
+        response = FileResponse(archive, as_attachment=True, filename=output_name, content_type='application/zip')
         if skipped_pdf_count:
             response['X-Rules-Package-Skipped'] = str(skipped_pdf_count)
+        logger.info(
+            'Rules bulk package ready: user_id=%s requested_branch=%s documents_found=%s included=%s skipped_pdf=%s filename=%s.',
+            request.user.id,
+            requested_branch or 'all',
+            document_count,
+            included_count,
+            skipped_pdf_count,
+            output_name,
+        )
         return response
 
 
