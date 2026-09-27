@@ -39,7 +39,9 @@ async function downloadProtectedFile(url, filename, setMessage, params) {
     document.body.appendChild(link)
     link.click()
     link.remove()
-    window.URL.revokeObjectURL(objectUrl)
+    // Keep the blob alive briefly: some browsers start attachment downloads
+    // asynchronously and can fail if the URL is revoked in the click turn.
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000)
     return response
   } catch (error) {
     let detail = error.response?.data?.detail
@@ -50,7 +52,7 @@ async function downloadProtectedFile(url, filename, setMessage, params) {
         detail = ''
       }
     }
-    setMessage(detail || 'Document is not available.')
+    setMessage(detail || 'Unable to download the document. Please try again.')
     return null
   }
 }
@@ -108,14 +110,14 @@ function RulesRegulationsList() {
     }
   }
 
-  const downloadPackage = async (row) => {
-    if (!row.package_download_url || downloadingId) return
+  const downloadDocument = async (row) => {
+    if (!row.download_pdf_url || downloadingId) return
     setDownloadingId(row.id)
     setMessage('')
     try {
       await downloadProtectedFile(
-        row.package_download_url,
-        row.package_filename || 'Rules_Package.zip',
+        row.download_pdf_url,
+        fileNameFor(row),
         setMessage,
       )
     } finally {
@@ -185,8 +187,8 @@ function RulesRegulationsList() {
       render: (row) => (
         <button
           type="button"
-          disabled={!row.package_download_url || downloadingId === row.id}
-          onClick={() => downloadPackage(row)}
+          disabled={!row.download_pdf_url || downloadingId === row.id}
+          onClick={() => downloadDocument(row)}
           className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
         >
           {downloadingId === row.id ? 'Downloading...' : 'Download'}
@@ -470,7 +472,7 @@ function RulesRegulationsDetail() {
                 onClick={downloadPackage}
                 className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-bold text-cyan-800 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-400"
               >
-                {downloadingPackage ? 'Downloading...' : 'Download'}
+                {downloadingPackage ? 'Downloading...' : 'Download Package'}
               </button>
             </div>
           </div>

@@ -8834,13 +8834,79 @@ def rules_document_queryset_for_user(user):
     return queryset
 
 
+def rules_document_file_sources(document):
+    """Return repository data first, then the original signing evidence.
+
+    Some historical repository rows have no copied binary/path value even
+    though their linked signing request still owns the durable proof. The
+    signing request is therefore a read-only fallback, never a replacement.
+    """
+    sources = [document]
+    signing_request = getattr(document, 'signing_request', None)
+    if signing_request:
+        sources.append(signing_request)
+    return sources
+
+
+def rules_document_file_bytes(document, binary_field_name, file_field_name):
+    for source in rules_document_file_sources(document):
+        try:
+            binary_value = getattr(source, binary_field_name, None)
+        except (OperationalError, ProgrammingError):
+            binary_value = None
+        if binary_value:
+            return bytes(binary_value)
+
+        field = getattr(source, file_field_name, None)
+        if not getattr(field, 'name', ''):
+            continue
+        handle, storage_name = open_existing_storage_file(field)
+        if not handle:
+            logger.warning(
+                'Rules document file reference is unavailable in storage: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
+                document.id,
+                source.__class__.__name__,
+                getattr(source, 'id', None),
+                file_field_name,
+                getattr(field, 'name', ''),
+            )
+            continue
+        try:
+            with handle:
+                return handle.read()
+        except Exception:
+            logger.warning(
+                'Rules document storage read failed: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
+                document.id,
+                source.__class__.__name__,
+                getattr(source, 'id', None),
+                file_field_name,
+                storage_name,
+                exc_info=True,
+            )
+    return None
+
+
 def rules_document_has_file(document, binary_field_name, file_field_name):
-    try:
-        if getattr(document, binary_field_name, None):
+    for source in rules_document_file_sources(document):
+        try:
+            if getattr(source, binary_field_name, None):
+                return True
+        except (OperationalError, ProgrammingError):
+            continue
+        field = getattr(source, file_field_name, None)
+        if getattr(field, 'name', '') and stored_rules_file_exists(source, file_field_name):
             return True
-    except (OperationalError, ProgrammingError):
-        pass
-    return stored_rules_file_exists(document, file_field_name)
+    return False
+
+
+def rules_document_image_content_type(document, field_name):
+    for source in rules_document_file_sources(document):
+        field = getattr(source, field_name, None)
+        content_type = mimetypes.guess_type(getattr(field, 'name', '') or '')[0]
+        if content_type:
+            return content_type
+    return 'image/jpeg'
 
 
 def rules_repository_document_status(document):
@@ -8969,10 +9035,11 @@ class RulesRegulationsPdfView(APIView):
     def get(self, request, pk):
         document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
         if not document:
-            return proof_unavailable_response()
-        pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+            return Response({'detail': 'Rules & Regulations document was not found.'}, status=404)
+        pdf_bytes = rules_document_file_bytes(document, 'signed_pdf_file', 'signed_pdf')
         if not pdf_bytes:
-            return proof_unavailable_response()
+            logger.warning('Rules document PDF download unavailable: document_id=%s user_id=%s.', document.id, request.user.id)
+            return Response({'detail': 'The signed Rules & Regulations PDF is unavailable in storage.'}, status=404)
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
         response['Content-Disposition'] = proof_content_disposition(request, document)
         return response
@@ -8990,7 +9057,7 @@ class RulesRegulationsPackageDownloadView(APIView):
         if not document:
             return Response({'detail': 'Rules & Regulations document was not found.'}, status=404)
 
-        pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+        pdf_bytes = rules_document_file_bytes(document, 'signed_pdf_file', 'signed_pdf')
         if not pdf_bytes:
             logger.warning(
                 'Rules package download rejected because the signed PDF is unavailable: document_id=%s user_id=%s.',
@@ -9017,9 +9084,9 @@ class RulesRegulationsPackageDownloadView(APIView):
                 ('selfie_image_file', 'selfie_image', 'Photo'),
                 ('signature_image_file', 'signature_image', 'Signature'),
             ):
-                if not getattr(document, binary_field, None) and not getattr(document, file_field, None):
+                if not rules_document_has_file(document, binary_field, file_field):
                     continue
-                image_bytes = binary_or_legacy_file(document, binary_field, file_field)
+                image_bytes = rules_document_file_bytes(document, binary_field, file_field)
                 if not image_bytes:
                     continue
                 extension = rules_package_image_extension(document, file_field, image_bytes)
@@ -9066,7 +9133,7 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
 
         with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_DEFLATED) as package:
             for document in documents.iterator():
-                pdf_bytes = binary_or_legacy_file(document, 'signed_pdf_file', 'signed_pdf')
+                pdf_bytes = rules_document_file_bytes(document, 'signed_pdf_file', 'signed_pdf')
                 if not pdf_bytes:
                     skipped_pdf_count += 1
                     logger.warning(
@@ -9096,9 +9163,9 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                     ('selfie_image_file', 'selfie_image', 'Photo'),
                     ('signature_image_file', 'signature_image', 'Signature'),
                 ):
-                    if not getattr(document, binary_field, None) and not getattr(document, file_field, None):
+                    if not rules_document_has_file(document, binary_field, file_field):
                         continue
-                    image_bytes = binary_or_legacy_file(document, binary_field, file_field)
+                    image_bytes = rules_document_file_bytes(document, binary_field, file_field)
                     if not image_bytes:
                         logger.warning(
                             'Rules bulk package omitted unavailable optional file: document_id=%s field=%s.',
@@ -9130,16 +9197,10 @@ class RulesRegulationsSelfieView(APIView):
         document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
         if not document:
             return Response({'detail': 'Selfie is not available.'}, status=404)
-        stored_response = file_response_from_field(
-            document.selfie_image,
-            signing_image_content_type(document, 'selfie_image'),
-        )
-        if stored_response:
-            return stored_response
-        image_bytes = binary_or_legacy_file(document, 'selfie_image_file', 'selfie_image')
+        image_bytes = rules_document_file_bytes(document, 'selfie_image_file', 'selfie_image')
         if not image_bytes:
             return Response({'detail': 'Selfie is not available.'}, status=404)
-        return HttpResponse(image_bytes, content_type='image/jpeg')
+        return HttpResponse(image_bytes, content_type=rules_document_image_content_type(document, 'selfie_image'))
 
 
 class RulesRegulationsSignatureView(APIView):
@@ -9149,16 +9210,10 @@ class RulesRegulationsSignatureView(APIView):
         document = rules_document_queryset_for_user(request.user).filter(pk=pk).first()
         if not document:
             return Response({'detail': 'Signature is not available.'}, status=404)
-        stored_response = file_response_from_field(
-            document.signature_image,
-            signing_image_content_type(document, 'signature_image'),
-        )
-        if stored_response:
-            return stored_response
-        image_bytes = binary_or_legacy_file(document, 'signature_image_file', 'signature_image')
+        image_bytes = rules_document_file_bytes(document, 'signature_image_file', 'signature_image')
         if not image_bytes:
             return Response({'detail': 'Signature is not available.'}, status=404)
-        return HttpResponse(image_bytes, content_type='image/jpeg')
+        return HttpResponse(image_bytes, content_type=rules_document_image_content_type(document, 'signature_image'))
 
 
 class PublicRulesSignedPdfView(APIView):

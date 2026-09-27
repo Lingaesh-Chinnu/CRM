@@ -3075,6 +3075,64 @@ class PublicWalkInFormTests(APITestCase):
                 b'%PDF-signed-rules',
             )
 
+    def test_rules_document_download_uses_linked_signing_file_when_repository_copy_is_empty(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Linked Source Candidate',
+            phone='9000000151',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15900,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+            student_number='STU-LINK-001',
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            selfie_image_file=b'linked-selfie',
+            signature_image_file=b'linked-signature',
+            signed_pdf_file=b'%PDF-linked-source',
+        )
+        document = RulesRegulationsDocument.objects.create(
+            signing_request=signing,
+            enrollment=enrollment,
+            branch=self.branch,
+            candidate_name=enrollment.name,
+            student_number=enrollment.student_number,
+            phone=enrollment.phone,
+            course_name=self.course.name,
+            branch_name=self.branch.name,
+            enrollment_date=enrollment.enrollment_date,
+            submitted_at=signing.submitted_at,
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        list_response = self.client.get('/api/rules-regulations/', {'search': 'Linked Source'})
+        pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/?download=1')
+        package_response = self.client.get(f'/api/rules-regulations/{document.id}/download/')
+        bulk_response = self.client.get('/api/rules-regulations/download/')
+
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(list_response.data['results'][0]['status'], 'available')
+        self.assertTrue(list_response.data['results'][0]['download_pdf_url'])
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(pdf_response.content, b'%PDF-linked-source')
+        self.assertIn('attachment;', pdf_response['Content-Disposition'])
+        with zipfile.ZipFile(io.BytesIO(package_response.content)) as package:
+            self.assertIn(
+                'Linked_Source_Candidate_STU-LINK-001/Linked_Source_Candidate_STU-LINK-001_Rules_and_Regulations.pdf',
+                package.namelist(),
+            )
+        with zipfile.ZipFile(io.BytesIO(bulk_response.content)) as package:
+            self.assertIn(
+                'Linked_Source_Candidate_STU-LINK-001/Linked_Source_Candidate_STU-LINK-001_Rules_and_Regulations.pdf',
+                package.namelist(),
+            )
+
     def test_rules_regulations_package_download_uses_pending_student_id_and_skips_missing_optional_files(self):
         document = RulesRegulationsDocument.objects.create(
             branch=self.branch,
