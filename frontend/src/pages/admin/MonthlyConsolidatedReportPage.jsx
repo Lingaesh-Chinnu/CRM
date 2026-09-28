@@ -74,15 +74,15 @@ function DataTable({ title, columns, rows, emptyMessage = 'No records found.' })
         <h2 className="text-lg font-black text-slate-950">{title}</h2>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
+        <table className="min-w-full table-fixed text-left text-sm">
           <thead className="bg-slate-50 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
-            <tr>{columns.map((column) => <th key={column.key} className="px-5 py-3">{column.header}</th>)}</tr>
+            <tr>{columns.map((column) => <th key={column.key} className="min-w-0 break-words px-5 py-3">{column.header}</th>)}</tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.length ? rows.map((row, index) => (
               <tr key={row.branch_id || row.user_id || index}>
                 {columns.map((column) => (
-                  <td key={column.key} className="px-5 py-3 font-medium text-slate-700">
+                  <td key={column.key} className="min-w-0 break-words px-5 py-3 font-medium text-slate-700">
                     {column.render ? column.render(row) : row[column.key]}
                   </td>
                 ))}

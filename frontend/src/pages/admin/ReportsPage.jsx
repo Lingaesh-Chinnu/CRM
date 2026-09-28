@@ -497,7 +497,7 @@ export default function ReportsPage() {
           </div>
           <div className="overflow-x-auto">
             <div className="grid min-w-[1220px] grid-cols-[1.2fr_0.6fr_0.6fr_0.6fr_0.6fr_0.75fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              <div>Branch</div><div>Leads</div><div>Sent</div><div>Received</div><div>Walk-ins</div><div>Enrolls</div><div>Value</div><div>Target</div><div>Follow-up</div><div>Pending</div><div>Missed</div>
+              <div>Branch</div><div>Leads</div><div>Sent</div><div>Received</div><div>Walk-ins</div><div>Enrolls</div><div>Value</div><div>Target %</div><div>Follow-up %</div><div>Pending</div><div>Missed</div>
             </div>
             {branchRows.map((row) => (
               <div key={row.branch_id} className="grid min-w-[1220px] grid-cols-[1.2fr_0.6fr_0.6fr_0.6fr_0.6fr_0.75fr_1fr_1fr_1fr_1fr_0.8fr] gap-4 border-b border-slate-100 px-6 py-4 text-sm text-slate-700">

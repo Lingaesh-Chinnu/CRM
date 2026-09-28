@@ -21,6 +21,15 @@ function money(value) {
   return `Rs ${Number(value || 0).toLocaleString('en-IN')}`
 }
 
+function formatDate(value, fallback = 'Not provided') {
+  if (!value) return fallback
+  return new Date(`${value}T00:00:00`).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 function studentStatusLabel(value) {
   if (value === 'enrolled' || value === 'active') return 'Active'
   if (value === 'completed') return 'Completed'
@@ -262,6 +271,7 @@ export default function StudentsListPage() {
               rows={rows}
               columns={[
                 { key: 'name', header: 'Student Name', width: 'minmax(165px,1.2fr)', render: (row) => <div className="min-w-0"><div className="flex min-w-0 items-center gap-2"><OwnerDot user={row.counselor_user} /><Link to={`/students/${row.id}`} className="min-w-0 whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">{row.name}</Link></div><p className="mt-1 truncate text-xs text-slate-500">{row.student_number}</p></div> },
+                { key: 'enrollment_date', header: 'Enrollment Date', width: '112px', className: 'tabular-nums', render: (row) => <span className="whitespace-nowrap text-slate-700">{formatDate(row.enrollment_date)}</span> },
                 { key: 'course', header: 'Course', width: 'minmax(125px,1fr)', render: (row) => <span className="overflow-hidden break-words leading-5 text-slate-700 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">{compactValue(row.course_name, 'Course pending')}</span> },
                 { key: 'branch', header: 'Branch', width: 'minmax(82px,0.7fr)', render: (row) => <span className="truncate text-slate-700">{compactValue(row.branch_name, 'No branch')}</span> },
                 { key: 'status', header: 'Status', width: '92px', render: (row) => <StatusBadge tone={statusSelectValue(row.status) === 'active' ? 'green' : 'slate'}>{studentStatusLabel(row.status)}</StatusBadge> },

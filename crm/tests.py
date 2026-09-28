@@ -90,6 +90,26 @@ class CommonCandidateFilterAndStatusTests(APITestCase):
         self.assertEqual(self.ids(walkin_response), [self.walkin.id])
         self.assertEqual(self.ids(enrollment_response), [self.enrollment.id])
 
+    def test_student_list_and_details_use_the_enrollment_record_date(self):
+        """Student surfaces must expose Enrollment.enrollment_date, never a surrogate date."""
+        other_enrollment = Enrollment.objects.get(phone='9000011302')
+        for enrollment in (self.enrollment, other_enrollment):
+            expected_date = enrollment.enrollment_date.isoformat()
+            enrollment_response = self.client.get('/api/enrollments/', {'search': enrollment.phone})
+            student_response = self.client.get('/api/students/', {'search': enrollment.phone})
+            detail_response = self.client.get(f'/api/students/{enrollment.id}/')
+
+            self.assertEqual(enrollment_response.status_code, 200)
+            self.assertEqual(student_response.status_code, 200)
+            self.assertEqual(detail_response.status_code, 200)
+            enrollment_rows = enrollment_response.data.get('results', enrollment_response.data)
+            student_rows = student_response.data.get('results', student_response.data)
+            enrollment_row = next(row for row in enrollment_rows if row['id'] == enrollment.id)
+            student_row = next(row for row in student_rows if row['id'] == enrollment.id)
+            self.assertEqual(enrollment_row['enrollment_date'], expected_date)
+            self.assertEqual(student_row['enrollment_date'], expected_date)
+            self.assertEqual(detail_response.data['enrollment_date'], expected_date)
+
     def test_report_uses_the_same_combined_scope_filters(self):
         response = self.client.get('/api/reports/analytics-dashboard/', {
             'branch': self.branch.id, 'user': self.counselor.id, 'source': 'instagram',

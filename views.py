@@ -8367,9 +8367,7 @@ class PublicRulesSigningView(APIView):
 
     def submitted_response(self, request, signing):
         return Response({
-            'success': True,
             'detail': RULES_SUCCESS_MESSAGE,
-            'message': 'Rules & Regulations submitted successfully.',
             'status': signing.status,
             'signed_pdf_url': self.public_pdf_url(request, signing),
             'selfie_url': None,
