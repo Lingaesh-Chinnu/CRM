@@ -284,11 +284,19 @@ export default function RulesSigningPage() {
         url: `${error.config?.baseURL || ''}${error.config?.url || ''}`,
         status: error.response?.status,
         response: error.response?.data,
+        // Axios normally parses JSON before exposing it as `data`; preserve
+        // the unparsed payload as well when the browser makes it available.
+        // Never log the request body because it includes the candidate photo.
+        responseText: error.response?.request?.responseText,
         detail: error.response?.data?.detail,
         validationErrors: error.response?.data?.errors || error.response?.data,
         responseTraceId: error.response?.headers?.['x-rules-submit-trace'],
         requestContentType: error.config?.headers?.['Content-Type'] || error.config?.headers?.['content-type'],
-        requestFields: Object.keys(error.config?.data || {}),
+        requestBodyType: typeof error.config?.data,
+        requestBodyLength: typeof error.config?.data === 'string' ? error.config.data.length : undefined,
+        requestFields: typeof error.config?.data === 'object' && error.config?.data
+          ? Object.keys(error.config.data)
+          : undefined,
         message: error.message,
       })
       setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
