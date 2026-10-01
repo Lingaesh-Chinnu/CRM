@@ -27,6 +27,20 @@ const labelClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-s
 const valueClass = 'mt-2 text-[14px] font-semibold leading-snug text-slate-950'
 const SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 
+function dataUrlToFile(dataUrl, filename) {
+  const [header, encoded] = String(dataUrl || '').split(',', 2)
+  const mimeType = header.match(/^data:([^;]+);base64$/i)?.[1]
+  if (!mimeType || !encoded) {
+    throw new Error('Unable to prepare the image for submission.')
+  }
+  const binary = window.atob(encoded)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new File([bytes], filename, { type: mimeType })
+}
+
 export default function RulesSigningPage() {
   const { token } = useParams()
   const canvasRef = useRef(null)
@@ -254,9 +268,14 @@ export default function RulesSigningPage() {
       : `rules-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     try {
       const signature = canvasRef.current.toDataURL('image/png')
+      // Use genuine files, not base64 JSON. This avoids base64 request-size
+      // inflation and lets Django receive the images through request.FILES.
+      const formData = new FormData()
+      formData.append('selfie', dataUrlToFile(selfie, 'identity-photo.jpg'))
+      formData.append('signature', dataUrlToFile(signature, 'signature.png'))
       const { data: response } = await api.post(
         `/public/rules-sign/${token}/`,
-        { selfie, signature },
+        formData,
         {
           timeout: 90000,
           headers: { 'X-Rules-Submit-Trace': submitTraceId },
@@ -270,7 +289,7 @@ export default function RulesSigningPage() {
         selfie_url: response.selfie_url,
       }))
       stopCamera()
-      setMessage(response.detail || 'Thank You! Rules & Regulations has been submitted successfully.')
+      setMessage(response.detail || 'Thank you. Rules & Regulations has been submitted successfully.')
       window.setTimeout(() => {
         window.location.assign(response.redirect_url || SUCCESS_REDIRECT_URL)
       }, 1800)

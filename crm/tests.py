@@ -1349,7 +1349,7 @@ class PublicWalkInFormTests(APITestCase):
         response = self.client.post('/api/public/walkin/', self.payload, format='json')
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
+        self.assertEqual(response.data['detail'], 'Thank you. Rules & Regulations has been submitted successfully.')
         walkin = WalkIn.objects.get(phone='9876543210')
         self.assertEqual(walkin.branch, self.branch)
         self.assertEqual(walkin.course, self.course)
@@ -3550,7 +3550,7 @@ class PublicWalkInFormTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
+        self.assertEqual(response.data['detail'], 'Thank you. Rules & Regulations has been submitted successfully.')
         self.assertEqual(response.data['redirect_url'], 'https://indrainstitute.com/')
         signing.refresh_from_db()
         enrollment.refresh_from_db()
@@ -3590,15 +3590,50 @@ class PublicWalkInFormTests(APITestCase):
         signature_content = getattr(signature_response, 'content', None) or b''.join(signature_response.streaming_content)
         self.assertTrue(signature_content.startswith(b'\x89PNG'))
 
+        official_submitted_at = signing.submitted_at
+        official_pdf = bytes(signing.signed_pdf_file)
+        official_signature = bytes(signing.signature_image_file)
+
         retry_response = self.client.post(
             f'/api/public/rules-sign/{signing.token}/',
             {'selfie': image_data, 'signature': image_data},
             format='json',
         )
-        self.assertEqual(retry_response.status_code, 200)
-        self.assertEqual(retry_response.data['detail'], 'Thank you for filling out the form. Your details have been submitted successfully.')
-        self.assertEqual(retry_response.data['submitted_at'], response.data['submitted_at'])
+        self.assertEqual(retry_response.status_code, 409)
+        self.assertEqual(retry_response.data['detail'], 'Rules & Regulations has already been submitted.')
+        signing.refresh_from_db()
+        self.assertEqual(signing.submitted_at, official_submitted_at)
+        self.assertEqual(bytes(signing.signed_pdf_file), official_pdf)
+        self.assertEqual(bytes(signing.signature_image_file), official_signature)
         self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
+
+    def test_public_rules_signing_accepts_multipart_photo_and_signature(self):
+        """The browser sends real files so Django receives them in request.FILES."""
+        enrollment = Enrollment.objects.create(
+            branch=self.branch, course=self.course, name='Multipart Rules Candidate',
+            phone='9000000190', preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11', start_date='2026-05-12', actual_fees=15000,
+            discount_amount=0, status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+        image_buffer = io.BytesIO()
+        from PIL import Image
+        Image.new('RGB', (30, 30), (17, 24, 39)).save(image_buffer, format='PNG')
+        image_bytes = image_buffer.getvalue()
+
+        response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {
+                'selfie': SimpleUploadedFile('identity.png', image_bytes, content_type='image/png'),
+                'signature': SimpleUploadedFile('signature.png', image_bytes, content_type='image/png'),
+            },
+            format='multipart',
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        signing.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
 
     def test_public_rules_signing_accepts_an_existing_viewed_request(self):
         """Opening a previously sent link must never make it ineligible to sign."""

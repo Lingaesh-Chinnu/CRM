@@ -302,7 +302,7 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
-RULES_SUCCESS_MESSAGE = 'Thank you for filling out the form. Your details have been submitted successfully.'
+RULES_SUCCESS_MESSAGE = 'Thank you. Rules & Regulations has been submitted successfully.'
 RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
 SATHISH_RULES_RESEND_ENROLLMENT_ID = 210
 SATHISH_RULES_RESEND_PHONE = '9489484095'
@@ -1869,11 +1869,24 @@ def rules_fee_breakdown(enrollment):
     }
 
 
-def validate_data_image(image_data, label):
-    if not image_data or ',' not in image_data:
+def validate_data_image(image_data, label, maximum_bytes=5 * 1024 * 1024):
+    """Validate a legacy data URL or a Django uploaded image and return bytes."""
+    if not image_data:
         raise ValueError(f'{label} is required.')
     try:
-        image_bytes = base64.b64decode(image_data.split(',', 1)[1])
+        if hasattr(image_data, 'read'):
+            image_bytes = image_data.read()
+        else:
+            if not isinstance(image_data, str) or ',' not in image_data:
+                raise ValueError(f'{label} is required.')
+            header, encoded = image_data.split(',', 1)
+            if not header.lower().startswith('data:image/') or ';base64' not in header.lower():
+                raise ValueError(f'Invalid {label.lower()} image.')
+            image_bytes = base64.b64decode(encoded, validate=True)
+        if not image_bytes:
+            raise ValueError(f'{label} is required.')
+        if len(image_bytes) > maximum_bytes:
+            raise ValueError(f'{label} must be {maximum_bytes // (1024 * 1024)}MB or smaller.')
         from PIL import Image
         Image.open(io.BytesIO(image_bytes)).verify()
         return image_bytes
@@ -8259,6 +8272,7 @@ class PublicRulesSigningView(APIView):
     """Public token endpoint for rules signing."""
     permission_classes = [AllowAny]
     authentication_classes = []
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def trace_id(self, request):
         """Browser/server correlation ID; deliberately never derived from the token."""
@@ -8382,7 +8396,12 @@ class PublicRulesSigningView(APIView):
             return Response({'detail': 'Invalid signing link.'}, status=404)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
             self.log_stage('RULES_SUBMIT_REPLAY', request, signing, status=signing.status)
-            return self.submitted_response(request, signing)
+            response = Response(
+                {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
+                status=status.HTTP_409_CONFLICT,
+            )
+            response['X-Rules-Submit-Trace'] = self.trace_id(request)
+            return response
 
         self.log_stage('RULES_TOKEN_VALIDATED', request, signing, status=signing.status)
         self.log_stage(
@@ -8392,8 +8411,15 @@ class PublicRulesSigningView(APIView):
         )
 
         try:
-            selfie_bytes = validate_data_image(request.data.get('selfie'), 'Identity photo')
-            signature_bytes = validate_data_image(request.data.get('signature'), 'Signature')
+            selfie_bytes = validate_data_image(
+                request.FILES.get('selfie') or request.data.get('selfie'),
+                'Identity photo',
+            )
+            signature_bytes = validate_data_image(
+                request.FILES.get('signature') or request.data.get('signature'),
+                'Signature',
+                maximum_bytes=2 * 1024 * 1024,
+            )
             self.log_stage(
                 'RULES_SIGNATURE_RECEIVED', request, signing,
                 selfie_bytes=len(selfie_bytes), signature_bytes=len(signature_bytes),
@@ -8417,7 +8443,12 @@ class PublicRulesSigningView(APIView):
                     'enrollment__course',
                 ).get(pk=signing.pk)
                 if signing.status == RulesSigningRequest.Status.SUBMITTED:
-                    return self.submitted_response(request, signing)
+                    response = Response(
+                        {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                    response['X-Rules-Submit-Trace'] = self.trace_id(request)
+                    return response
 
                 enrollment = signing.enrollment
                 self.log_stage('RULES_ENROLLMENT_FOUND', request, signing, enrollment_status=enrollment.status)
