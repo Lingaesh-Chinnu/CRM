@@ -3157,6 +3157,45 @@ class PublicWalkInFormTests(APITestCase):
                 package.namelist(),
             )
 
+    def test_rules_bulk_download_uses_repository_filefield_when_binary_backup_is_empty(self):
+        """A real Django storage file remains a valid repository proof."""
+        from django.core.files.base import ContentFile
+
+        document = RulesRegulationsDocument.objects.create(
+            branch=self.branch,
+            candidate_name='FileField Fallback Candidate',
+            student_number='STU-FILE-001',
+            submitted_at=timezone.now(),
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with self.settings(MEDIA_ROOT=media_root):
+                document.signed_pdf.save(
+                    'repository-filefield-fallback.pdf',
+                    ContentFile(b'%PDF-filefield-fallback'),
+                    save=True,
+                )
+
+                list_response = self.client.get('/api/rules-regulations/', {'search': document.candidate_name})
+                pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
+                bulk_response = self.client.get('/api/rules-regulations/download/')
+
+                self.assertEqual(list_response.status_code, 200)
+                self.assertEqual(list_response.data['results'][0]['status'], 'available')
+                self.assertEqual(pdf_response.status_code, 200)
+                self.assertEqual(pdf_response.content, b'%PDF-filefield-fallback')
+                self.assertEqual(bulk_response.status_code, 200)
+                with zipfile.ZipFile(io.BytesIO(response_file_bytes(bulk_response))) as package:
+                    self.assertEqual(
+                        package.read(
+                            'Rules_and_Regulations/Gandhipuram/'
+                            'FileField_Fallback_Candidate_STU-FILE-001/'
+                            'FileField_Fallback_Candidate_STU-FILE-001_Rules_and_Regulations.pdf'
+                        ),
+                        b'%PDF-filefield-fallback',
+                    )
+
     def test_rules_regulations_package_download_uses_pending_student_id_and_skips_missing_optional_files(self):
         document = RulesRegulationsDocument.objects.create(
             branch=self.branch,
@@ -3634,6 +3673,211 @@ class PublicWalkInFormTests(APITestCase):
         signing.refresh_from_db()
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
         self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
+
+    def test_public_rules_signing_uses_the_filefield_storage_for_save_verification(self):
+        """A custom proof storage must not be checked through default_storage."""
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import Storage
+
+        class MemoryRulesStorage(Storage):
+            def __init__(self):
+                self.files = {}
+
+            def _open(self, name, mode='rb'):
+                return ContentFile(self.files[name], name=name)
+
+            def _save(self, name, content):
+                self.files[name] = content.read()
+                return name
+
+            def exists(self, name):
+                return name in self.files
+
+            def delete(self, name):
+                self.files.pop(name, None)
+
+        enrollment = Enrollment.objects.create(
+            branch=self.branch, course=self.course, name='Custom Storage Rules Candidate',
+            phone='9000000191', preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            batch_timing='Weekdays (Morning)', enrollment_date='2026-05-11',
+            start_date='2026-05-12', actual_fees=15000, discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(enrollment=enrollment, status=RulesSigningRequest.Status.SENT)
+        image_buffer = io.BytesIO()
+        from PIL import Image
+        Image.new('RGB', (30, 30), (17, 24, 39)).save(image_buffer, format='PNG')
+        image_bytes = image_buffer.getvalue()
+        field_storage = MemoryRulesStorage()
+        proof_fields = [
+            RulesSigningRequest._meta.get_field(field_name)
+            for field_name in ('selfie_image', 'signature_image', 'signed_pdf')
+        ]
+        original_storages = [(field, field.storage) for field in proof_fields]
+        unavailable_default_storage = mock.Mock()
+        unavailable_default_storage.exists.side_effect = AssertionError('default storage must not be used')
+
+        try:
+            for field in proof_fields:
+                field.storage = field_storage
+            with mock.patch('views.default_storage', unavailable_default_storage):
+                response = self.client.post(
+                    f'/api/public/rules-sign/{signing.token}/',
+                    {
+                        'selfie': SimpleUploadedFile('identity.png', image_bytes, content_type='image/png'),
+                        'signature': SimpleUploadedFile('signature.png', image_bytes, content_type='image/png'),
+                    },
+                    format='multipart',
+                )
+        finally:
+            for field, storage in original_storages:
+                field.storage = storage
+
+        self.assertEqual(response.status_code, 200, response.data)
+        signing.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+        self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
+        self.assertEqual(len(field_storage.files), 3)
+
+    def test_walkin_rules_submission_enrolls_the_same_candidate_in_each_branch(self):
+        """Exercise the real UI/API journey without relying on browser-local state."""
+        kuniyamuthur = Branch.objects.create(name='Kuniyamuthur', city='Coimbatore')
+        kuniyamuthur_staff = User.objects.create_user(
+            username='kuniyamuthur-staff', email='kuniyamuthur@example.com',
+            password='pass12345', branch=kuniyamuthur, role=User.Role.STAFF,
+        )
+        branch_cases = [
+            (self.branch, self.staff, 'Gandhipuram'),
+            (self.other_branch, self.other_staff, 'Hopes'),
+            (kuniyamuthur, kuniyamuthur_staff, 'Kuniyamuthur'),
+        ]
+        image_buffer = io.BytesIO()
+        from PIL import Image
+        Image.new('RGB', (32, 32), (17, 24, 39)).save(image_buffer, format='PNG')
+        image_bytes = image_buffer.getvalue()
+        created_documents = []
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                for index, (branch, counselor, branch_name) in enumerate(branch_cases, start=1):
+                    phone = f'90000002{index:02d}'
+                    walkin = WalkIn.objects.create(
+                        branch=branch, course=self.course, assigned_to=counselor,
+                        counseling_by=counselor, created_by=counselor,
+                        name=f'{branch_name} Rules Journey Candidate', phone=phone,
+                        email=f'{branch_name.lower()}-rules@example.com', dob='2000-01-01',
+                        location='Coimbatore', pincode='641001',
+                        qualification=WalkIn.Qualification.COLLEGE_STUDENT,
+                        degree='BSc', source=WalkIn.Source.DIRECT,
+                        preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                        counselor_status=WalkIn.CounselorStatus.FOLLOW_UP,
+                        competitor_status=WalkIn.CompetitorStatus.NOT_ENQUIRED_ELSEWHERE,
+                        follow_up_priority=WalkIn.FollowUpPriority.HIGH,
+                        conversion_probability=WalkIn.ConversionProbability.P75,
+                        remarks=f'{branch_name} walk-in remarks', visit_date='2026-05-11',
+                    )
+                    self.client.force_authenticate(user=counselor)
+                    conversion_response = self.client.post(
+                        f'/api/walkins/{walkin.id}/convert-to-enrollment/',
+                        {
+                            'branch': branch.id, 'name': walkin.name, 'phone': walkin.phone,
+                            'email': walkin.email, 'dob': '2000-01-01',
+                            'location': walkin.location, 'pincode': walkin.pincode,
+                            'qualification': walkin.qualification, 'degree': walkin.degree,
+                            'course': self.course.id,
+                            'preferred_timing': walkin.preferred_timing,
+                            'enrollment_date': '2026-05-11', 'start_date': '2026-05-12',
+                            'actual_fees': '10000',
+                        },
+                        format='json',
+                    )
+                    self.assertEqual(conversion_response.status_code, 201, conversion_response.data)
+                    enrollment = Enrollment.objects.get(pk=conversion_response.data['id'])
+                    self.assertEqual(enrollment.walkin_id, walkin.id)
+                    self.assertEqual(enrollment.batch_timing, 'Weekdays (Morning)')
+                    self.assertEqual(enrollment.remarks, walkin.remarks)
+                    self.assertEqual(enrollment.status, Enrollment.Status.PENDING_RULES)
+
+                    # The backend rejects an attempt to bypass a submitted Rules form.
+                    blocked_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+                    self.assertEqual(blocked_response.status_code, 400)
+
+                    sent_response = self.client.post(f'/api/enrollments/{enrollment.id}/send-rules-form/')
+                    self.assertEqual(sent_response.status_code, 200, sent_response.data)
+                    signing = RulesSigningRequest.objects.get(enrollment=enrollment)
+                    enrollment.refresh_from_db()
+                    self.assertEqual(signing.status, RulesSigningRequest.Status.SENT)
+                    self.assertTrue(enrollment.payment_schedule)
+                    self.assertTrue(enrollment.payment_schedule_locked)
+
+                    # Candidate-side requests are anonymous and use the same multipart payload as the UI.
+                    self.client.force_authenticate(user=None)
+                    opened_response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+                    self.assertEqual(opened_response.status_code, 200, opened_response.data)
+                    submission_response = self.client.post(
+                        f'/api/public/rules-sign/{signing.token}/',
+                        {
+                            'selfie': SimpleUploadedFile('identity.png', image_bytes, content_type='image/png'),
+                            'signature': SimpleUploadedFile('signature.png', image_bytes, content_type='image/png'),
+                        },
+                        format='multipart',
+                        HTTP_X_RULES_SUBMIT_TRACE=f'e2e-{branch_name.lower()}',
+                    )
+                    self.assertEqual(submission_response.status_code, 200, submission_response.data)
+                    self.assertEqual(
+                        submission_response.data['detail'],
+                        'Thank you. Rules & Regulations has been submitted successfully.',
+                    )
+                    signing.refresh_from_db()
+                    enrollment.refresh_from_db()
+                    document = RulesRegulationsDocument.objects.get(signing_request=signing)
+                    self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
+                    self.assertEqual(enrollment.status, Enrollment.Status.RULES_SUBMITTED)
+                    self.assertIsNotNone(signing.submitted_at)
+                    self.assertTrue(bytes(signing.signed_pdf_file).startswith(b'%PDF'))
+                    self.assertTrue(bytes(document.signed_pdf_file).startswith(b'%PDF'))
+                    self.assertEqual(document.enrollment_id, enrollment.id)
+                    self.assertEqual(document.branch_id, branch.id)
+                    created_documents.append((document, counselor))
+
+                    # A refresh gets the submitted status from the database, then enrollment succeeds.
+                    self.client.force_authenticate(user=counselor)
+                    refreshed_response = self.client.get(f'/api/enrollments/{enrollment.id}/')
+                    self.assertEqual(refreshed_response.status_code, 200, refreshed_response.data)
+                    self.assertEqual(refreshed_response.data['rules_signing_status'], RulesSigningRequest.Status.SUBMITTED)
+                    self.assertTrue(refreshed_response.data['payment_schedule'])
+                    enrolled_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+                    self.assertEqual(enrolled_response.status_code, 200, enrolled_response.data)
+                    enrollment.refresh_from_db()
+                    walkin.refresh_from_db()
+                    self.assertEqual(enrollment.status, Enrollment.Status.ACTIVE)
+                    self.assertEqual(enrollment.enrolled_by_id, counselor.id)
+                    self.assertTrue(enrollment.student_number)
+                    self.assertEqual(Enrollment.objects.filter(walkin=walkin).count(), 1)
+                    self.assertEqual(walkin.status, WalkIn.Status.CONVERTED)
+                    self.assertEqual(walkin.converted_record_id, enrollment.id)
+                    self.assertEqual(enrollment.name, walkin.name)
+                    self.assertEqual(enrollment.phone, walkin.phone)
+                    self.assertEqual(enrollment.email, walkin.email)
+                    self.assertEqual(enrollment.branch_id, walkin.branch_id)
+                    self.assertEqual(enrollment.course_id, walkin.course_id)
+                    self.assertEqual(enrollment.counselor_id, counselor.id)
+                    self.assertEqual(enrollment.source, walkin.source)
+                    self.assertTrue(Payment.objects.filter(enrollment=enrollment).exists())
+
+                    list_response = self.client.get('/api/rules-regulations/', {'search': walkin.name})
+                    self.assertEqual(list_response.status_code, 200, list_response.data)
+                    self.assertIn(document.id, [row['id'] for row in list_response.data['results']])
+                    pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
+                    self.assertEqual(pdf_response.status_code, 200)
+                    self.assertTrue(response_file_bytes(pdf_response).startswith(b'%PDF'))
+
+        # A counselor cannot read another branch's proof, while its assigned
+        # counselor has just read every document above.
+        gandhipuram_document, _gandhipuram_counselor = created_documents[0]
+        self.client.force_authenticate(user=self.other_staff)
+        denied_response = self.client.get(f'/api/rules-regulations/{gandhipuram_document.id}/pdf/')
+        self.assertEqual(denied_response.status_code, 404)
 
     def test_public_rules_signing_accepts_an_existing_viewed_request(self):
         """Opening a previously sent link must never make it ineligible to sign."""

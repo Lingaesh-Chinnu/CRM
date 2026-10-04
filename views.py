@@ -7853,10 +7853,23 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data.setdefault('degree', walkin.degree)
         for field_name in QUALIFICATION_KPI_FIELDS:
             data.setdefault(field_name, getattr(walkin, field_name, ''))
+        # These fields are displayed and filtered on the enrollment record.
+        # Walk-in-only fields remain available through the linked walk-in.
+        for field_name in (
+            'counselor_status', 'competitor_status', 'follow_up_priority',
+            'conversion_probability', 'remarks', 'is_important',
+        ):
+            data.setdefault(field_name, getattr(walkin, field_name, ''))
         data.setdefault('demo_class',  walkin.demo_class)
         data.setdefault('interested_global_certification', walkin.interested_global_certification)
         data.setdefault('branch',      walkin.branch_id)
         data.setdefault('course',      walkin.course_id)
+        # The conversion screen already captures preferred timing, but not a
+        # duplicate batch-timing field. Use its display value as the initial
+        # batch timing so the next Send Rules action satisfies its existing
+        # server-side requirement.
+        if not str(data.get('batch_timing') or '').strip():
+            data['batch_timing'] = walkin.get_preferred_timing_display() or ''
         required_fields = [
             'name', 'phone', 'course', 'branch', 'preferred_timing',
             'enrollment_date', 'start_date',
@@ -8471,21 +8484,25 @@ class PublicRulesSigningView(APIView):
                     signing.signature_image_file = None
                     signing.signed_pdf_file = None
                 if rules_external_proof_storage_enabled():
-                    save_rules_proof_file(
-                        signing.selfie_image,
-                        proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
-                        selfie_bytes,
-                    )
-                    save_rules_proof_file(
-                        signing.signature_image,
-                        proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
-                        signature_bytes,
-                    )
-                    save_rules_proof_file(
-                        signing.signed_pdf,
-                        proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
-                        pdf_bytes,
-                    )
+                    try:
+                        self.log_stage('RULES_FILE_STORAGE_START', request, signing)
+                        save_rules_proof_file(
+                            signing.selfie_image,
+                            proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
+                            selfie_bytes,
+                        )
+                        save_rules_proof_file(
+                            signing.signature_image,
+                            proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
+                            signature_bytes,
+                        )
+                        save_rules_proof_file(
+                            signing.signed_pdf,
+                            proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
+                            pdf_bytes,
+                        )
+                    except Exception as exc:
+                        return self.processing_failure(request, signing, 'RULES_FILE_STORAGE_FAILED', exc)
                 self.log_stage(
                     'RULES_FILE_STORAGE_SUCCESS', request, signing,
                     database_backup=rules_database_file_backups_enabled(),
@@ -8604,10 +8621,14 @@ def storage_name_candidates(field):
 
 
 def open_existing_storage_file(field):
+    # A FileField may use a custom storage backend. Prefer that configured
+    # field storage (including S3/R2) instead of assuming local filesystem
+    # paths or even the process-wide default storage instance.
+    storage = getattr(field, 'storage', None) or default_storage
     for name in storage_name_candidates(field):
         try:
-            if default_storage.exists(name):
-                return default_storage.open(name, 'rb'), name
+            if storage.exists(name):
+                return storage.open(name, 'rb'), name
         except Exception:
             logger.warning('Unable to open rules proof storage path=%s.', name, exc_info=True)
     return None, ''
@@ -8648,12 +8669,17 @@ def proof_storage_name(enrollment, suffix, extension):
 
 
 def save_rules_proof_file(field, storage_name, file_bytes):
+    # FileField.save() deliberately uses the storage configured on that
+    # particular field. Do the cleanup and verification through that same
+    # storage instance: ``default_storage`` may point somewhere different
+    # from an R2/S3/custom FileField storage.
+    storage = getattr(field, 'storage', None) or default_storage
     target_name = field.field.generate_filename(field.instance, storage_name)
-    if default_storage.exists(target_name):
-        default_storage.delete(target_name)
+    if storage.exists(target_name):
+        storage.delete(target_name)
     field.save(storage_name, ContentFile(file_bytes), save=False)
     saved_name = getattr(field, 'name', '') or target_name
-    if not saved_name or not default_storage.exists(saved_name):
+    if not saved_name or not storage.exists(saved_name):
         raise RuntimeError(f'Rules proof file was not stored successfully: {saved_name or target_name}')
     return saved_name
 
@@ -8866,6 +8892,76 @@ def rules_document_queryset_for_user(user):
     return queryset
 
 
+def rules_document_bulk_queryset_for_user(user):
+    """Fetch the fields needed by a ZIP without duplicating proof blobs.
+
+    The normal repository queryset joins the signing request so list/detail
+    views can render related enrollment information. A submitted repository
+    document normally contains the same binary proof as its signing request;
+    selecting both tables therefore doubles the transfer for every current
+    proof. For an All Branches export that can delay the first ZIP byte long
+    enough for an upstream request timeout.
+
+    Keep the document's backup fields on the main query. File names from the
+    linked signing request are prefetched as lightweight fallback metadata,
+    and its backup fields are populated only where the repository has no
+    corresponding backup (see ``hydrate_rules_document_source_binaries``).
+    """
+    return (
+        rules_document_queryset_for_user(user)
+        .select_related(None)
+        .select_related('branch')
+        .prefetch_related(
+            Prefetch(
+                'signing_request',
+                queryset=RulesSigningRequest.objects.only(
+                    'id',
+                    'selfie_image',
+                    'signature_image',
+                    'signed_pdf',
+                ),
+            ),
+        )
+    )
+
+
+def hydrate_rules_document_source_binaries(documents):
+    """Load signing-request backups only when the repository backup is empty.
+
+    The repository remains the first source. This merely keeps the existing
+    signing-request fallback available without transferring duplicate binary
+    columns for documents that already carry their own proof.
+    """
+    for binary_field_name in (
+        'selfie_image_file',
+        'signature_image_file',
+        'signed_pdf_file',
+    ):
+        signing_request_ids = {
+            document.signing_request_id
+            for document in documents
+            if document.signing_request_id
+            and not getattr(document, binary_field_name, None)
+        }
+        if not signing_request_ids:
+            continue
+
+        source_values = dict(
+            RulesSigningRequest.objects.filter(pk__in=signing_request_ids).values_list(
+                'id',
+                binary_field_name,
+            )
+        )
+        for document in documents:
+            signing_request = getattr(document, 'signing_request', None)
+            if signing_request and signing_request.id in signing_request_ids:
+                setattr(
+                    signing_request,
+                    binary_field_name,
+                    source_values.get(signing_request.id),
+                )
+
+
 def rules_document_file_sources(document):
     """Return repository data first, then the original signing evidence.
 
@@ -8880,42 +8976,97 @@ def rules_document_file_sources(document):
     return sources
 
 
-def rules_document_file_bytes(document, binary_field_name, file_field_name):
+def rules_document_file_bytes(document, binary_field_name, file_field_name, diagnostics=None):
     for source in rules_document_file_sources(document):
+        source_diagnostic = {
+            'source_model': source.__class__.__name__,
+            'source_id': getattr(source, 'id', None),
+            'binary_field': binary_field_name,
+            'file_field': file_field_name,
+        }
         try:
             binary_value = getattr(source, binary_field_name, None)
         except (OperationalError, ProgrammingError):
             binary_value = None
         if binary_value:
+            if diagnostics is not None:
+                source_diagnostic.update({
+                    'binary_present': True,
+                    'storage_file_exists': None,
+                    'reason': 'database_backup_available',
+                })
+                diagnostics.append(source_diagnostic)
             return bytes(binary_value)
 
         field = getattr(source, file_field_name, None)
-        if not getattr(field, 'name', ''):
+        stored_name = str(getattr(field, 'name', '') or '')
+        source_diagnostic.update({
+            'binary_present': False,
+            'stored_name': stored_name,
+        })
+        if not stored_name:
+            if diagnostics is not None:
+                source_diagnostic.update({
+                    'storage_file_exists': False,
+                    'reason': 'no_database_backup_or_stored_file_name',
+                })
+                diagnostics.append(source_diagnostic)
             continue
         handle, storage_name = open_existing_storage_file(field)
         if not handle:
-            logger.warning(
-                'Rules document file reference is unavailable in storage: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
-                document.id,
-                source.__class__.__name__,
-                getattr(source, 'id', None),
-                file_field_name,
-                getattr(field, 'name', ''),
-            )
+            if diagnostics is not None:
+                source_diagnostic.update({
+                    'storage_file_exists': False,
+                    'reason': 'stored_file_not_found',
+                })
+                diagnostics.append(source_diagnostic)
+            else:
+                logger.warning(
+                    'Rules document file reference is unavailable in storage: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
+                    document.id,
+                    source.__class__.__name__,
+                    getattr(source, 'id', None),
+                    file_field_name,
+                    stored_name,
+                )
             continue
         try:
             with handle:
-                return handle.read()
+                file_bytes = handle.read()
+            if file_bytes:
+                if diagnostics is not None:
+                    source_diagnostic.update({
+                        'storage_file_exists': True,
+                        'storage_name': storage_name,
+                        'reason': 'stored_file_available',
+                    })
+                    diagnostics.append(source_diagnostic)
+                return file_bytes
+            if diagnostics is not None:
+                source_diagnostic.update({
+                    'storage_file_exists': True,
+                    'storage_name': storage_name,
+                    'reason': 'stored_file_empty',
+                })
+                diagnostics.append(source_diagnostic)
         except Exception:
-            logger.warning(
-                'Rules document storage read failed: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
-                document.id,
-                source.__class__.__name__,
-                getattr(source, 'id', None),
-                file_field_name,
-                storage_name,
-                exc_info=True,
-            )
+            if diagnostics is not None:
+                source_diagnostic.update({
+                    'storage_file_exists': True,
+                    'storage_name': storage_name,
+                    'reason': 'stored_file_read_failed',
+                })
+                diagnostics.append(source_diagnostic)
+            else:
+                logger.warning(
+                    'Rules document storage read failed: document_id=%s source_model=%s source_id=%s field=%s path=%s.',
+                    document.id,
+                    source.__class__.__name__,
+                    getattr(source, 'id', None),
+                    file_field_name,
+                    storage_name,
+                    exc_info=True,
+                )
     return None
 
 
@@ -9162,7 +9313,8 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
 
     def get(self, request):
         requested_branch = str(request.query_params.get('branch') or '').strip()
-        documents = rules_document_queryset_for_user(request.user)
+        selected_branch = requested_branch or 'all'
+        documents = rules_document_bulk_queryset_for_user(request.user)
         all_branches = request.user.is_super_admin and (
             not requested_branch or requested_branch.lower() in {'all', '*'}
         )
@@ -9184,15 +9336,25 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
             if not request.user.branch_id:
                 return Response({'detail': 'Your account is not assigned to a branch.'}, status=403)
 
-        documents = documents.order_by('branch_id', 'candidate_name', 'student_number', 'id')
-        document_count = documents.count()
+        documents = list(documents.order_by('branch_id', 'candidate_name', 'student_number', 'id'))
+        hydrate_rules_document_source_binaries(documents)
+        document_count = len(documents)
+        branch_ids_found = sorted({document.branch_id for document in documents if document.branch_id})
+        branch_names_found = sorted({
+            getattr(getattr(document, 'branch', None), 'name', '') or document.branch_name
+            for document in documents
+            if getattr(getattr(document, 'branch', None), 'name', '') or document.branch_name
+        })
         logger.info(
-            'Rules bulk package requested: user_id=%s is_super_admin=%s requested_branch=%s all_branches=%s document_count=%s.',
-            request.user.id,
+            'Rules bulk package requested: selected_branch=%s request_user=%s is_super_admin=%s '
+            'total_documents_found=%s branch_ids_found=%s branch_names_found=%s all_branches=%s.',
+            selected_branch,
+            request.user.username or request.user.id,
             request.user.is_super_admin,
-            requested_branch or 'all',
-            all_branches,
             document_count,
+            branch_ids_found,
+            branch_names_found,
+            all_branches,
         )
         # PDFs are already compressed. Avoid deflating them again and avoid
         # copying a large archive into HttpResponse memory; Render can stream
@@ -9200,18 +9362,31 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
         archive = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode='w+b')
         included_count = 0
         skipped_pdf_count = 0
+        zip_file_count = 0
         used_stems = set()
 
         with zipfile.ZipFile(archive, mode='w', compression=zipfile.ZIP_STORED) as package:
-            for document in documents.iterator():
-                pdf_bytes = rules_document_file_bytes(document, 'signed_pdf_file', 'signed_pdf')
+            for document in documents:
+                pdf_diagnostics = []
+                pdf_bytes = rules_document_file_bytes(
+                    document,
+                    'signed_pdf_file',
+                    'signed_pdf',
+                    diagnostics=pdf_diagnostics,
+                )
                 if not pdf_bytes:
                     skipped_pdf_count += 1
                     logger.warning(
-                        'Rules bulk package skipped a submitted document with no signed PDF: document_id=%s branch_id=%s user_id=%s.',
+                        'Rules bulk package skipped document: document_id=%s branch_id=%s candidate_name=%s '
+                        'signed_pdf_name=%s signed_pdf_file_present=%s storage_file_exists=%s reason=%s.',
                         document.id,
                         document.branch_id,
-                        request.user.id,
+                        document.candidate_name,
+                        getattr(document.signed_pdf, 'name', ''),
+                        bool(getattr(document, 'signed_pdf_file', None)),
+                        any(detail.get('storage_file_exists') for detail in pdf_diagnostics),
+                        [detail.get('reason') for detail in pdf_diagnostics],
+                        extra={'rules_document_file_diagnostics': pdf_diagnostics},
                     )
                     continue
 
@@ -9234,6 +9409,7 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                     f'{folder_name}{unique_stem}_Rules_and_Regulations.pdf',
                     pdf_bytes,
                 )
+                zip_file_count += 1
                 for binary_field, file_field, label in (
                     ('selfie_image_file', 'selfie_image', 'Photo'),
                     ('signature_image_file', 'signature_image', 'Signature'),
@@ -9250,6 +9426,7 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
                         continue
                     extension = rules_package_image_extension(document, file_field, image_bytes)
                     package.writestr(f'{folder_name}{unique_stem}_{label}.{extension}', image_bytes)
+                    zip_file_count += 1
                 included_count += 1
 
         if not included_count:
@@ -9265,12 +9442,18 @@ class RulesRegulationsBulkPackageDownloadView(APIView):
         if skipped_pdf_count:
             response['X-Rules-Package-Skipped'] = str(skipped_pdf_count)
         logger.info(
-            'Rules bulk package ready: user_id=%s requested_branch=%s documents_found=%s included=%s skipped_pdf=%s filename=%s.',
-            request.user.id,
-            requested_branch or 'all',
+            'Rules bulk package ready: selected_branch=%s request_user=%s is_super_admin=%s '
+            'total_documents_found=%s available_documents=%s unavailable_documents=%s '
+            'branch_ids_found=%s branch_names_found=%s zip_file_count=%s filename=%s.',
+            selected_branch,
+            request.user.username or request.user.id,
+            request.user.is_super_admin,
             document_count,
             included_count,
             skipped_pdf_count,
+            branch_ids_found,
+            branch_names_found,
+            zip_file_count,
             output_name,
         )
         return response
