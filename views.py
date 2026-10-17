@@ -10776,11 +10776,17 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='enroll-student')
     def enroll_student(self, request, pk=None):
         enrollment = self.get_object()
-        signing = getattr(enrollment, 'rules_signing', None)
-        if not signing or signing.status != RulesSigningRequest.Status.SUBMITTED:
-            return Response({'detail': 'Rules & Regulation form must be signed before enrollment can proceed.'}, status=400)
         with transaction.atomic():
+            enrollment = Enrollment.objects.select_for_update().get(pk=enrollment.pk)
             if enrollment.status not in Enrollment.FINAL_STATUSES:
+                # Temporary Rules-signing bypass: retain the existing payment
+                # schedule validation, but do not require a Rules submission.
+                _, schedule_error = self._clean_manual_payment_schedule(
+                    enrollment,
+                    enrollment.payment_schedule,
+                )
+                if schedule_error:
+                    return Response({'detail': schedule_error}, status=status.HTTP_400_BAD_REQUEST)
                 old_status = enrollment.status
                 enrollment.status = Enrollment.Status.ACTIVE
                 enrollment.enrolled_by = request.user

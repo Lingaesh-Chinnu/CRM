@@ -556,7 +556,7 @@ export default function EnrollmentDetailPage() {
       setScheduleDraft(cloneSchedule(data.installment_schedule || []))
       setMessage('Student enrollment confirmed.')
     } catch (error) {
-      setMessage(error.response?.data?.detail || 'Signed Rules & Regulation form is required before enrollment.')
+      setMessage(error.response?.data?.detail || 'Failed to enroll student.')
     } finally {
       setSaving(false)
     }
@@ -800,7 +800,9 @@ export default function EnrollmentDetailPage() {
   // manual schedule editing, payment collection, or fee changes.
   const canRegenerateSchedule = canManageSchedule || allowsRulesResendWithHistoricalSchedule
   const canAddInstallment = schedule.length < 13 && canManageSchedule
-  const canEnroll = hasSavedSchedule && rulesStatus === 'submitted'
+  // Temporary Rules-signing bypass: payment confirmation remains required,
+  // but a missing or unsigned Rules form must not block enrollment.
+  const canEnroll = hasSavedSchedule
   const scheduleBadge = scheduleIsReadOnly || row.payment_schedule_locked
     ? 'Locked'
     : hasSavedSchedule
@@ -819,13 +821,7 @@ export default function EnrollmentDetailPage() {
     ? ''
     : !hasSavedSchedule
       ? 'Configure and save the payment schedule.'
-      : rulesStatus === 'pending'
-        ? 'Send the Rules & Regulation form.'
-        : rulesStatus === 'sent' || rulesStatus === 'viewed'
-          ? 'Waiting for Rules & Regulation submission.'
-          : rulesStatus !== 'submitted'
-            ? 'Waiting for Rules & Regulation submission.'
-            : ''
+      : ''
 
   return (
     <div className="space-y-6">
@@ -947,7 +943,7 @@ export default function EnrollmentDetailPage() {
           <div>
             <h2 className="text-xl font-black tracking-tight text-slate-950">Rules & Regulation Form</h2>
             <p className="mt-2 text-sm text-slate-500">
-              Configure and save the payment schedule, send the signing link, then enroll after the candidate submits the form.
+              Configure and save the payment schedule before enrollment. The Rules & Regulation form can still be sent and signed, but does not block enrollment temporarily.
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-3">

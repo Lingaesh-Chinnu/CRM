@@ -3739,6 +3739,159 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
         self.assertEqual(len(field_storage.files), 3)
 
+    def test_walkin_enrollment_succeeds_without_rules_submission_after_schedule_confirmation(self):
+        """The temporary bypass keeps payment checks and the walk-in audit trail intact."""
+        walkin = WalkIn.objects.create(
+            branch=self.branch,
+            course=self.course,
+            assigned_to=self.staff,
+            counseling_by=self.staff,
+            created_by=self.staff,
+            name='Unsigned Rules Enrollment Candidate',
+            phone='9000000250',
+            email='unsigned-rules@example.com',
+            source=WalkIn.Source.DIRECT,
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            remarks='Keep this walk-in history.',
+            visit_date='2026-05-11',
+            follow_up_date='2026-05-20',
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        conversion_response = self.client.post(
+            f'/api/walkins/{walkin.id}/convert-to-enrollment/',
+            {
+                'branch': self.branch.id,
+                'course': self.course.id,
+                'name': walkin.name,
+                'phone': walkin.phone,
+                'preferred_timing': walkin.preferred_timing,
+                'enrollment_date': '2026-05-11',
+                'start_date': '2026-05-12',
+            },
+            format='json',
+        )
+        self.assertEqual(conversion_response.status_code, 201, conversion_response.data)
+        enrollment = Enrollment.objects.get(pk=conversion_response.data['id'])
+        self.assertEqual(enrollment.actual_fees, Decimal('10000.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('10000.00'))
+        self.assertFalse(RulesSigningRequest.objects.filter(enrollment=enrollment).exists())
+
+        # The fee/payment schedule remains a required server-side validation.
+        missing_schedule_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+        self.assertEqual(missing_schedule_response.status_code, 400)
+        self.assertEqual(missing_schedule_response.data['detail'], 'Payment schedule is required.')
+        enrollment.refresh_from_db()
+        self.assertEqual(enrollment.status, Enrollment.Status.PENDING_RULES)
+
+        schedule_response = self.client.post(
+            f'/api/enrollments/{enrollment.id}/payment-schedule/',
+            {
+                'payment_schedule': [
+                    {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                    {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+                ],
+            },
+            format='json',
+        )
+        self.assertEqual(schedule_response.status_code, 200, schedule_response.data)
+        self.assertEqual(schedule_response.data['rules_signing_status'], RulesSigningRequest.Status.PENDING)
+
+        dashboard_before = self.client.get('/api/dashboard/summary/')
+        self.assertEqual(dashboard_before.status_code, 200)
+        enroll_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+        self.assertEqual(enroll_response.status_code, 200, enroll_response.data)
+        enrollment.refresh_from_db()
+        walkin.refresh_from_db()
+
+        self.assertEqual(enrollment.status, Enrollment.Status.ACTIVE)
+        self.assertTrue(enrollment.student_number)
+        self.assertEqual(enrollment.actual_fees, Decimal('10000.00'))
+        self.assertEqual(enrollment.net_payable_fee, Decimal('10000.00'))
+        self.assertFalse(RulesSigningRequest.objects.filter(enrollment=enrollment).exists())
+        self.assertEqual(Payment.objects.filter(enrollment=enrollment).count(), 1)
+        payment = Payment.objects.get(enrollment=enrollment)
+        self.assertEqual(payment.total_fees, Decimal('10000.00'))
+        self.assertEqual(payment.manual_installment_schedule, enrollment.payment_schedule)
+
+        # Final status moves the candidate out of Yet To Enroll and into both
+        # established enrollment/student lists and dashboard totals.
+        yet_to_enroll = self.client.get('/api/enrollments/', {'queue': 'yet_to_enroll'})
+        enrollment_list = self.client.get('/api/enrollments/', {'search': enrollment.phone})
+        student_list = self.client.get('/api/students/', {'search': enrollment.phone})
+        dashboard_after = self.client.get('/api/dashboard/summary/')
+        self.assertEqual(yet_to_enroll.status_code, 200)
+        self.assertEqual(enrollment_list.status_code, 200)
+        self.assertEqual(student_list.status_code, 200)
+        self.assertEqual(dashboard_after.status_code, 200)
+        yet_rows = yet_to_enroll.data.get('results', yet_to_enroll.data)
+        enrollment_rows = enrollment_list.data.get('results', enrollment_list.data)
+        student_rows = student_list.data.get('results', student_list.data)
+        self.assertNotIn(enrollment.id, [row['id'] for row in yet_rows])
+        self.assertIn(enrollment.id, [row['id'] for row in enrollment_rows])
+        self.assertIn(enrollment.id, [row['id'] for row in student_rows])
+        self.assertEqual(
+            dashboard_after.data['total_enrollments'],
+            dashboard_before.data['total_enrollments'] + 1,
+        )
+
+        # Conversion preserved the original walk-in and its history.
+        self.assertEqual(walkin.status, WalkIn.Status.CONVERTED)
+        self.assertEqual(walkin.remarks, 'Keep this walk-in history.')
+        self.assertEqual(walkin.converted_record_id, enrollment.id)
+        self.assertIsNone(walkin.follow_up_date)
+        self.assertTrue(FollowUp.objects.filter(
+            record_type=FollowUp.RecordType.WALKIN,
+            record_id=walkin.id,
+            remarks='Joined - No follow-up required',
+        ).exists())
+
+        # A second click stays idempotent: no second enrollment, payment, or
+        # completion history is created.
+        repeat_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+        self.assertEqual(repeat_response.status_code, 200, repeat_response.data)
+        enrollment.refresh_from_db()
+        self.assertEqual(Enrollment.objects.filter(walkin=walkin).count(), 1)
+        self.assertEqual(Payment.objects.filter(enrollment=enrollment).count(), 1)
+        self.assertEqual(CandidateStatusHistory.objects.filter(
+            record_type=CandidateStatusHistory.RecordType.ENROLLMENT,
+            record_id=enrollment.id,
+            new_status=Enrollment.Status.ACTIVE,
+        ).count(), 1)
+
+    def test_enrollment_preserves_an_unsigned_rules_request(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Sent But Unsigned Rules Candidate',
+            phone='9000000251',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=10000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+            payment_schedule=[
+                {'label': 'Enrollment', 'amount': 5000, 'due_date': '2026-05-11'},
+                {'label': '1st Installment', 'amount': 5000, 'due_date': '2026-05-12'},
+            ],
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        self.client.force_authenticate(user=self.staff)
+
+        response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        enrollment.refresh_from_db()
+        signing.refresh_from_db()
+        self.assertEqual(enrollment.status, Enrollment.Status.ACTIVE)
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SENT)
+        self.assertEqual(RulesSigningRequest.objects.filter(enrollment=enrollment).count(), 1)
+
     def test_walkin_rules_submission_enrolls_the_same_candidate_in_each_branch(self):
         """Exercise the real UI/API journey without relying on browser-local state."""
         kuniyamuthur = Branch.objects.create(name='Kuniyamuthur', city='Coimbatore')
@@ -3798,9 +3951,10 @@ class PublicWalkInFormTests(APITestCase):
                     self.assertEqual(enrollment.remarks, walkin.remarks)
                     self.assertEqual(enrollment.status, Enrollment.Status.PENDING_RULES)
 
-                    # The backend rejects an attempt to bypass a submitted Rules form.
+                    # Enrollment remains blocked until the fee/payment schedule is confirmed.
                     blocked_response = self.client.post(f'/api/enrollments/{enrollment.id}/enroll-student/')
                     self.assertEqual(blocked_response.status_code, 400)
+                    self.assertEqual(blocked_response.data['detail'], 'Payment schedule is required.')
 
                     sent_response = self.client.post(f'/api/enrollments/{enrollment.id}/send-rules-form/')
                     self.assertEqual(sent_response.status_code, 200, sent_response.data)
