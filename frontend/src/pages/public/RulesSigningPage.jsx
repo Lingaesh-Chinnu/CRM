@@ -26,6 +26,11 @@ const sectionHeadingClass = 'text-[17px] font-bold leading-snug text-slate-950'
 const labelClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500'
 const valueClass = 'mt-2 text-[14px] font-semibold leading-snug text-slate-950'
 const SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
+// Keep this just below the production gunicorn timeout (180 seconds).  A
+// signing submission generates a PDF and writes three durable files, so a
+// shorter browser timeout can incorrectly tell a candidate that a submission
+// failed after the server has already completed it.
+const RULES_SUBMISSION_TIMEOUT_MS = 170000
 
 function dataUrlToFile(dataUrl, filename) {
   const [header, encoded] = String(dataUrl || '').split(',', 2)
@@ -41,6 +46,27 @@ function dataUrlToFile(dataUrl, filename) {
   return new File([bytes], filename, { type: mimeType })
 }
 
+function submissionErrorMessage(error) {
+  const response = error.response?.data || {}
+  const safeMessages = {
+    RULES_IMAGE_VALIDATION_FAILED: 'We could not verify your photo or signature. Please use a clear image and sign again.',
+    RULES_PDF_GENERATION_FAILED: 'We could not prepare the signed form. Nothing was submitted; please try again in a moment.',
+    RULES_FILE_STORAGE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
+    RULES_STORAGE_OR_DATABASE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
+    RULES_SUBMISSION_FAILED: 'We could not complete the submission. Nothing was submitted; please try again in a moment.',
+  }
+  const safeMessage = safeMessages[response.code]
+  if (!safeMessage) return response.detail || 'Unable to submit the signed form.'
+
+  // The server supplies this opaque correlation ID only for controlled Rules
+  // processing failures.  It helps support find the secure server log without
+  // revealing a signing token, candidate data, or an internal exception.
+  const traceId = String(error.response?.headers?.['x-rules-submit-trace'] || '').trim().slice(0, 80)
+  return traceId
+    ? `${safeMessage} If the problem continues, quote reference ${traceId} to support.`
+    : safeMessage
+}
+
 export default function RulesSigningPage() {
   const { token } = useParams()
   const canvasRef = useRef(null)
@@ -54,6 +80,7 @@ export default function RulesSigningPage() {
   const [submitting, setSubmitting] = useState(false)
   const [hasSignature, setHasSignature] = useState(false)
   const [selfie, setSelfie] = useState('')
+  const [selfieProofFile, setSelfieProofFile] = useState(null)
   const [identitySource, setIdentitySource] = useState('')
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
@@ -70,7 +97,7 @@ export default function RulesSigningPage() {
   useEffect(() => {
     document.title = 'IIE Rules & Regulations'
     api
-      .get(`/public/rules-sign/${token}/`)
+      .get(`/public/rules-sign/${token}/`, { skipAuth: true })
       .then(({ data: response }) => setData(response))
       .catch(() => setMessage('This signing link is invalid or unavailable.'))
       .finally(() => setLoading(false))
@@ -182,6 +209,7 @@ export default function RulesSigningPage() {
     canvas.height = video.videoHeight || 480
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
     setSelfie(canvas.toDataURL('image/jpeg', 0.86))
+    setSelfieProofFile(null)
     setIdentitySource('camera')
     clearSignature()
     stopCamera()
@@ -189,6 +217,7 @@ export default function RulesSigningPage() {
 
   const retakeSelfie = () => {
     setSelfie('')
+    setSelfieProofFile(null)
     setIdentitySource('')
     clearSignature()
     openCamera()
@@ -231,6 +260,9 @@ export default function RulesSigningPage() {
       stopCamera()
       const imageData = await resizeImageFile(file)
       setSelfie(imageData)
+      // Keep the candidate's actual selected file for evidence storage and
+      // PDF generation. The resized JPEG is only a responsive page preview.
+      setSelfieProofFile(file)
       setIdentitySource('upload')
       clearSignature()
       setMessage('')
@@ -242,9 +274,34 @@ export default function RulesSigningPage() {
 
   const replaceImage = () => {
     setSelfie('')
+    setSelfieProofFile(null)
     setIdentitySource('')
     clearSignature()
     fileInputRef.current?.click()
+  }
+
+  const reconcileSubmittedState = async ({ successMessage = '', redirectAfterSuccess = false } = {}) => {
+    try {
+      const { data: submittedForm } = await api.get(`/public/rules-sign/${token}/`, {
+        skipAuth: true,
+        timeout: 20000,
+      })
+      if (submittedForm?.status !== 'submitted') return false
+
+      setData(submittedForm)
+      stopCamera()
+      submittingRef.current = false
+      setSubmitting(false)
+      if (successMessage) setMessage(successMessage)
+      if (redirectAfterSuccess) {
+        window.setTimeout(() => {
+          window.location.assign(submittedForm.redirect_url || SUCCESS_REDIRECT_URL)
+        }, 1800)
+      }
+      return true
+    } catch {
+      return false
+    }
   }
 
   const submitSignature = async () => {
@@ -271,13 +328,16 @@ export default function RulesSigningPage() {
       // Use genuine files, not base64 JSON. This avoids base64 request-size
       // inflation and lets Django receive the images through request.FILES.
       const formData = new FormData()
-      formData.append('selfie', dataUrlToFile(selfie, 'identity-photo.jpg'))
+      formData.append('selfie', selfieProofFile || dataUrlToFile(selfie, 'identity-photo.jpg'))
       formData.append('signature', dataUrlToFile(signature, 'signature.png'))
       const { data: response } = await api.post(
         `/public/rules-sign/${token}/`,
         formData,
         {
-          timeout: 90000,
+          timeout: RULES_SUBMISSION_TIMEOUT_MS,
+          // Signing links are deliberately public.  Do not couple a
+          // candidate's submission to stale CRM credentials in their browser.
+          skipAuth: true,
           headers: { 'X-Rules-Submit-Trace': submitTraceId },
         },
       )
@@ -294,6 +354,32 @@ export default function RulesSigningPage() {
         window.location.assign(response.redirect_url || SUCCESS_REDIRECT_URL)
       }, 1800)
     } catch (error) {
+      // A browser timeout or dropped response can happen after the server has
+      // durably saved the submission.  A repeat request correctly returns
+      // 409; fetch the canonical state so the candidate sees the locked form
+      // rather than a misleading failure message.
+      if (error.response?.status === 409 && error.response?.data?.code === 'already_submitted') {
+        const reconciled = await reconcileSubmittedState({
+          successMessage: 'Rules & Regulations has already been submitted and is locked.',
+        })
+        if (reconciled) return
+        submittingRef.current = false
+        setSubmitting(false)
+        setMessage('Rules & Regulations has already been submitted and is locked.')
+        return
+      }
+      // A completed server-side submission can also lose its original HTTP
+      // response (for example, through a browser timeout or network drop).
+      // Only reconcile transport failures: validation and storage responses
+      // already contain a meaningful result and must not cause an extra GET.
+      const isTransportFailure = !error.response && error.code !== 'ERR_CANCELED'
+      if (isTransportFailure) {
+        const reconciled = await reconcileSubmittedState({
+          successMessage: 'Thank you. Rules & Regulations has been submitted successfully.',
+          redirectAfterSuccess: true,
+        })
+        if (reconciled) return
+      }
       submittingRef.current = false
       // Keep the technical response available in browser diagnostics without
       // exposing internal failures to the candidate-facing page.
@@ -318,7 +404,7 @@ export default function RulesSigningPage() {
           : undefined,
         message: error.message,
       })
-      setMessage(error.response?.data?.detail || 'Unable to submit the signed form.')
+      setMessage(submissionErrorMessage(error))
     } finally {
       setSubmitting(false)
     }
@@ -345,7 +431,7 @@ export default function RulesSigningPage() {
             IIE Rules & Regulations
           </h1>
           <p className="mt-4 text-[14px] leading-[1.6] text-slate-600">
-            This form has already been submitted and is locked.
+            {message || 'This form has already been submitted and is locked.'}
           </p>
           {data.submitted_at && (
             <p className="mt-3 text-sm font-semibold text-slate-700">

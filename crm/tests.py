@@ -11,6 +11,7 @@ import io
 import uuid
 import tempfile
 import zipfile
+from pathlib import Path
 
 from crm.models import AdminReceipt, Branch, BranchTarget, CandidateStatusHistory, CounselorChangeRequest, Course, CourseChangeHistory, CourseChangeRequest, Enrollment, EnrollmentCounselorChangeHistory, EnrollmentRulesResetHistory, FollowUp, Lead, LeadTransferHistory, Notification, Payment, PaymentInstallment, PaymentProof, PaymentReasonMessage, PaymentReasonRequest, RulesRegulationsDocument, RulesSigningRequest, UserMonthlyRating, WalkIn, WalkInAssignmentChangeRequest, WhatsAppMessage, get_default_installment_schedule
 from views import apply_enrollment_discount
@@ -3022,9 +3023,20 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(list_response.data['count'], 1)
         self.assertEqual(list_response.data['results'][0]['id'], document.id)
         self.assertEqual(list_response.data['results'][0]['status'], 'available')
+        self.assertEqual(list_response.data['results'][0]['submission_status'], 'submitted')
+        self.assertEqual(list_response.data['results'][0]['document_status'], 'available')
         self.assertIn(f'/api/rules-regulations/{document.id}/pdf/', list_response.data['results'][0]['pdf_url'])
         self.assertIn(f'/api/rules-regulations/{document.id}/selfie/', list_response.data['results'][0]['selfie_url'])
         self.assertIn(f'/api/rules-regulations/{document.id}/signature/', list_response.data['results'][0]['signature_url'])
+
+        denied_branch_response = self.client.get('/api/rules-regulations/', {'branch': self.other_branch.id})
+        self.assertEqual(denied_branch_response.status_code, 403)
+
+        self.client.force_authenticate(user=self.admin)
+        filtered_response = self.client.get('/api/rules-regulations/', {'branch': self.branch.id})
+        self.assertEqual(filtered_response.status_code, 200)
+        self.assertEqual(filtered_response.data['count'], 1)
+        self.client.force_authenticate(user=self.staff)
 
         detail_response = self.client.get(f'/api/rules-regulations/{document.id}/')
 
@@ -3037,6 +3049,11 @@ class PublicWalkInFormTests(APITestCase):
         pdf_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/')
         self.assertEqual(pdf_response.status_code, 200)
         self.assertEqual(pdf_response.content, b'%PDF-stored')
+        self.assertIn('inline;', pdf_response['Content-Disposition'])
+
+        download_response = self.client.get(f'/api/rules-regulations/{document.id}/pdf/?download=1')
+        self.assertEqual(download_response.status_code, 200)
+        self.assertIn('attachment;', download_response['Content-Disposition'])
 
         signature_response = self.client.get(f'/api/rules-regulations/{document.id}/signature/')
         self.assertEqual(signature_response.status_code, 200)
@@ -3533,11 +3550,14 @@ class PublicWalkInFormTests(APITestCase):
         import views as crm_views
 
         original_save_rules_proof_file = crm_views.save_rules_proof_file
+        saved_paths = []
 
         def fail_signed_pdf_storage(field, storage_name, file_bytes):
             if str(storage_name).endswith('.pdf') and '-signed' in str(storage_name):
                 raise RuntimeError('Rules proof file was not stored successfully.')
-            return original_save_rules_proof_file(field, storage_name, file_bytes)
+            saved_name = original_save_rules_proof_file(field, storage_name, file_bytes)
+            saved_paths.append(saved_name)
+            return saved_name
 
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
@@ -3547,6 +3567,8 @@ class PublicWalkInFormTests(APITestCase):
                         {'selfie': image_data, 'signature': image_data},
                         format='json',
                     )
+            self.assertTrue(saved_paths)
+            self.assertTrue(all(not (Path(media_root) / saved_path).exists() for saved_path in saved_paths))
 
         self.assertEqual(response.status_code, 503)
         signing.refresh_from_db()
@@ -4146,7 +4168,13 @@ class PublicWalkInFormTests(APITestCase):
         Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
         image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
 
-        with override_settings(RUNNING_ON_RENDER=True, MEDIA_ROOT_IS_DEFAULT_LOCAL=True, USE_S3_STORAGE=False):
+        with override_settings(
+            RUNNING_ON_RENDER=True,
+            MEDIA_ROOT_IS_DEFAULT_LOCAL=True,
+            USE_S3_STORAGE=False,
+            RULES_PERSISTENT_MEDIA_ROOT=False,
+            RULES_DATABASE_FILE_BACKUPS=False,
+        ):
             with mock.patch('views.save_rules_proof_file', side_effect=AssertionError('ephemeral media must not be used')):
                 response = self.client.post(
                     f'/api/public/rules-sign/{signing.token}/',

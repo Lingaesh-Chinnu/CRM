@@ -45,7 +45,8 @@ web: gunicorn wsgi:application
 
 ## Environment Variables
 
-For the first Render test deployment:
+For a non-production Render test deployment that uses PostgreSQL as the
+Rules-proof fallback:
 
 ```text
 DJANGO_DEBUG=false
@@ -60,6 +61,7 @@ DB_SSL_REQUIRE=true
 STATIC_URL=/static/
 MEDIA_URL=/media/
 USE_S3_STORAGE=false
+RULES_DATABASE_FILE_BACKUPS=true
 ```
 
 For the later custom-domain path:
@@ -74,7 +76,10 @@ Then redeploy so React is rebuilt with the new base paths.
 
 ## Database
 
-Render production uses PostgreSQL via `DATABASE_URL`. Local development can continue using SQLite when `DATABASE_URL` is not set.
+Render uses PostgreSQL via `DATABASE_URL`. Local development can continue
+using SQLite when `DATABASE_URL` is not set. Run every deployed migration
+before accepting a Rules submission; the proof fallback requires the binary
+columns introduced by CRM migrations `0036`, `0101`, and `0102`.
 
 After the first deploy, run:
 
@@ -82,37 +87,71 @@ After the first deploy, run:
 python manage.py migrate
 ```
 
-## Media Files
+## Rules & Regulations proof storage
 
-Render web service filesystems are ephemeral unless you attach a persistent disk. Free web services should not be treated as durable storage for uploaded signatures or signed PDFs.
+Render's web-service filesystem is ephemeral. On the checked-in Free plan,
+uploaded files in the application directory are lost when the service is
+restarted, redeployed, or spun down. A Free Render web service cannot attach a
+persistent disk.
 
-For production media, use one of these:
+The application has a deliberate Render fallback: when `USE_S3_STORAGE=false`
+and the app is running on Render with its default local `MEDIA_ROOT`, it does
+not rely on those local file paths. It stores the original selfie, original
+signature, and signed PDF bytes in PostgreSQL `BinaryField` columns and serves
+them through the protected Rules endpoints. A submission is not marked
+submitted until those bytes and the repository document have been verified.
 
-```text
-1. S3-compatible object storage via django-storages
-2. A paid Render persistent disk mounted under the app and configured with MEDIA_ROOT=/path/to/mounted/media
-```
+This fallback survives a web-service restart only while the PostgreSQL database
+itself remains durable. It is not a substitute for a production storage and
+backup policy. In particular, the checked-in `render.yaml` uses Free web and
+database plans, which must not be represented as permanent document storage.
+Before production, use one of the following and verify it in the Render
+Dashboard:
 
-Without persistent media storage, rules signatures and generated PDFs can disappear after deploys/restarts.
+1. Recommended: S3-compatible object storage (AWS S3, Cloudflare R2, or an
+   equivalent durable bucket) with lifecycle and backup policy appropriate for
+   signed records.
+2. A paid Render service with an actual mounted persistent disk, with
+   `MEDIA_ROOT` pointing inside that mount.
+3. A durable, backed-up paid PostgreSQL service while retaining the database
+   proof fallback. Confirm capacity and retention for the binary documents.
 
-The application now refuses to start on Render when media is still configured as the default app-local `media/` directory. Configure one of:
+### Recommended S3/R2 configuration
+
+Set these Render secrets/environment variables, then redeploy and perform an
+upload plus authenticated download test:
 
 ```text
 USE_S3_STORAGE=true
-AWS_STORAGE_BUCKET_NAME=...
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_S3_REGION_NAME=...
-# Optional for S3-compatible providers such as R2/Spaces:
-AWS_S3_ENDPOINT_URL=...
+AWS_STORAGE_BUCKET_NAME=<private durable bucket>
+AWS_ACCESS_KEY_ID=<bucket access key>
+AWS_SECRET_ACCESS_KEY=<bucket secret>
+AWS_S3_REGION_NAME=<region, or auto for R2>
+AWS_S3_ENDPOINT_URL=<S3/R2 endpoint URL>
 AWS_S3_ADDRESSING_STYLE=path
-AWS_S3_CUSTOM_DOMAIN=...
+# Optional only when a suitable public/custom media domain is intentionally used:
+AWS_S3_CUSTOM_DOMAIN=<custom domain>
 ```
 
-or attach a Render persistent disk and set:
+`AWS_S3_ENDPOINT_URL` is required by the current settings validation, including
+for native AWS S3. Use the provider's endpoint; do not put credentials in the
+repository or browser bundle. With object storage enabled, verify that each
+saved object can be read back before treating a submission as complete.
+
+### Render persistent disk alternative
+
+This option requires a paid web service and an actual disk mount created in
+the Render Dashboard. Setting `MEDIA_ROOT` alone does not create durable
+storage.
 
 ```text
 MEDIA_ROOT=/path/to/persistent-disk/media
+USE_S3_STORAGE=false
+RULES_DATABASE_FILE_BACKUPS=true
+RULES_PERSISTENT_MEDIA_ROOT=true
 ```
 
-New Rules & Regulations submissions also keep database-backed copies of the signed PDF, selfie, and signature so protected API views can still serve the document even if an older file path is unavailable.
+After changing any storage setting, redeploy (environment changes are not
+proof of a live configuration), run migrations, submit a test document, and
+verify its signed PDF, selfie, and signature after a service restart from a
+separate authorized session.

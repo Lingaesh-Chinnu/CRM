@@ -304,6 +304,17 @@ _TABLE_COLUMN_CACHE = {}
 FORM_PROCESSING_ERROR_MESSAGE = 'Unable to process form at the moment. Please contact support.'
 RULES_SUCCESS_MESSAGE = 'Thank you. Rules & Regulations has been submitted successfully.'
 RULES_SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
+
+
+class RulesSubmissionStageError(Exception):
+    """Abort a signing transaction while retaining the safe public error stage."""
+
+    def __init__(self, stage, cause=None):
+        self.stage = stage
+        self.cause = cause or self
+        super().__init__(stage)
+
+
 SATHISH_RULES_RESEND_ENROLLMENT_ID = 210
 SATHISH_RULES_RESEND_PHONE = '9489484095'
 SATHISH_RULES_RESEND_COURSE_ID = 58
@@ -321,8 +332,30 @@ PUBLIC_LEAD_COURSE_NAMES = [
 ]
 
 
+def rules_persistent_media_root_enabled():
+    """A declaration never makes the app-local Render media directory durable."""
+    return (
+        bool(getattr(settings, 'RULES_PERSISTENT_MEDIA_ROOT', False))
+        and not bool(getattr(settings, 'MEDIA_ROOT_IS_DEFAULT_LOCAL', True))
+    )
+
+
 def rules_database_file_backups_enabled():
     configured = getattr(settings, 'RULES_DATABASE_FILE_BACKUPS', None)
+    # The Render web-service filesystem is ephemeral unless a durable provider
+    # is explicitly configured. Never let an environment typo or a stale
+    # deployment turn a signing submission into a path-only save there.
+    if (
+        bool(getattr(settings, 'RUNNING_ON_RENDER', False))
+        and not bool(getattr(settings, 'USE_S3_STORAGE', False))
+        and not rules_persistent_media_root_enabled()
+    ):
+        if configured is False:
+            logger.error(
+                'RULES_STORAGE_CONFIGURATION_INVALID: refusing to disable '
+                'database proof backups on Render without durable file storage.'
+            )
+        return True
     if configured is not None:
         if isinstance(configured, str):
             return configured.strip().lower() in {'1', 'true', 'yes', 'on'}
@@ -335,14 +368,44 @@ def rules_external_proof_storage_enabled():
 
     Render's application filesystem is ephemeral. The signed proof is kept in
     PostgreSQL in that configuration, so a local-media write must never make a
-    valid public signing fail. S3/R2 and an explicitly mounted MEDIA_ROOT are
-    durable file-storage options and continue to receive proof files.
+    valid public signing fail. S3/R2 and an explicitly declared mounted media
+    disk are durable file-storage options and continue to receive proof files.
     """
     if bool(getattr(settings, 'USE_S3_STORAGE', False)):
         return True
     if not bool(getattr(settings, 'RUNNING_ON_RENDER', False)):
         return True
-    return not bool(getattr(settings, 'MEDIA_ROOT_IS_DEFAULT_LOCAL', True))
+    return rules_persistent_media_root_enabled()
+
+
+def rules_submission_persistence_issues():
+    """Return safe readiness diagnostics before accepting an irreversible signature.
+
+    The signing transaction can only be final when at least one configured
+    durable destination is available.  If the PostgreSQL fallback is selected,
+    verify the required columns before decoding an image or generating a PDF;
+    this turns migration drift into a traceable storage response instead of a
+    generic processing error after the candidate has waited.
+    """
+    database_backups = rules_database_file_backups_enabled()
+    external_storage = rules_external_proof_storage_enabled()
+    issues = []
+    if not database_backups and not external_storage:
+        issues.append('no_durable_rules_storage_configured')
+    if database_backups:
+        signing_missing = missing_model_columns(
+            RulesSigningRequest,
+            ('selfie_image_file', 'signature_image_file', 'signed_pdf_file'),
+        )
+        document_missing = missing_model_columns(
+            RulesRegulationsDocument,
+            ('selfie_image_file', 'signature_image_file', 'signed_pdf_file'),
+        )
+        if signing_missing:
+            issues.append('signing_proof_columns_missing')
+        if document_missing:
+            issues.append('repository_proof_columns_missing')
+    return issues
 
 
 def is_sathish_rules_resend_enrollment(enrollment):
@@ -1870,7 +1933,7 @@ def rules_fee_breakdown(enrollment):
 
 
 def validate_data_image(image_data, label, maximum_bytes=5 * 1024 * 1024):
-    """Validate a legacy data URL or a Django uploaded image and return bytes."""
+    """Validate an uploaded/legacy Rules image and return its original bytes."""
     if not image_data:
         raise ValueError(f'{label} is required.')
     try:
@@ -1888,7 +1951,14 @@ def validate_data_image(image_data, label, maximum_bytes=5 * 1024 * 1024):
         if len(image_bytes) > maximum_bytes:
             raise ValueError(f'{label} must be {maximum_bytes // (1024 * 1024)}MB or smaller.')
         from PIL import Image
-        Image.open(io.BytesIO(image_bytes)).verify()
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            image_format = (image.format or '').upper()
+            if image_format not in {'JPEG', 'PNG', 'WEBP'}:
+                raise ValueError(f'{label} must be a JPG, PNG, or WEBP image.')
+            width, height = image.size
+            if not width or not height or width * height > 24_000_000:
+                raise ValueError(f'{label} image dimensions are too large.')
+            image.verify()
         return image_bytes
     except ImportError as exc:
         raise RuntimeError('Form image processing dependency is unavailable.') from exc
@@ -8321,6 +8391,35 @@ class PublicRulesSigningView(APIView):
         response['X-Rules-Submit-Trace'] = self.trace_id(request)
         return response
 
+    def persistence_not_ready(self, request, signing, issues):
+        """Reject before processing a candidate image when durable save is unsafe."""
+        logger.error(
+            'RULES_SUBMIT_PERSISTENCE_NOT_READY trace_id=%s signing_request_id=%s '
+            'enrollment_id=%s issues=%s.',
+            self.trace_id(request),
+            getattr(signing, 'id', None),
+            getattr(signing, 'enrollment_id', None),
+            issues,
+        )
+        self.log_stage(
+            'RULES_PERSISTENCE_NOT_READY',
+            request,
+            signing,
+            issue_count=len(issues),
+        )
+        response = Response(
+            {
+                'detail': (
+                    'The document storage service is temporarily unavailable. '
+                    'Please try again in a few minutes.'
+                ),
+                'code': 'rules_persistence_not_ready',
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+        response['X-Rules-Submit-Trace'] = self.trace_id(request)
+        return response
+
     def get_signing(self, token):
         return RulesSigningRequest.objects.defer(
             'selfie_image_file',
@@ -8416,6 +8515,10 @@ class PublicRulesSigningView(APIView):
             response['X-Rules-Submit-Trace'] = self.trace_id(request)
             return response
 
+        persistence_issues = rules_submission_persistence_issues()
+        if persistence_issues:
+            return self.persistence_not_ready(request, signing, persistence_issues)
+
         self.log_stage('RULES_TOKEN_VALIDATED', request, signing, status=signing.status)
         self.log_stage(
             'RULES_SUBMIT_START', request, signing,
@@ -8449,6 +8552,7 @@ class PublicRulesSigningView(APIView):
             response['X-Rules-Submit-Trace'] = self.trace_id(request)
             return response
 
+        saved_external_files = []
         try:
             with transaction.atomic():
                 signing = RulesSigningRequest.objects.select_for_update().select_related(
@@ -8470,8 +8574,8 @@ class PublicRulesSigningView(APIView):
                     self.log_stage('RULES_PDF_GENERATION_START', request, signing)
                     pdf_bytes = build_signed_rules_pdf(enrollment, signature_bytes, selfie_bytes, submitted_at)
                     self.log_stage('RULES_PDF_GENERATION_SUCCESS', request, signing, pdf_bytes=len(pdf_bytes))
-                except RuntimeError as exc:
-                    return self.processing_failure(request, signing, 'RULES_PDF_GENERATION_FAILED', exc)
+                except Exception as exc:
+                    raise RulesSubmissionStageError('RULES_PDF_GENERATION_FAILED', exc) from exc
                 selfie_extension = image_storage_extension(selfie_bytes)
                 signature_extension = image_storage_extension(signature_bytes)
                 proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S%f}'
@@ -8486,23 +8590,26 @@ class PublicRulesSigningView(APIView):
                 if rules_external_proof_storage_enabled():
                     try:
                         self.log_stage('RULES_FILE_STORAGE_START', request, signing)
-                        save_rules_proof_file(
+                        selfie_name = save_rules_proof_file(
                             signing.selfie_image,
                             proof_storage_name(enrollment, f'{proof_version}-selfie', selfie_extension),
                             selfie_bytes,
                         )
-                        save_rules_proof_file(
+                        saved_external_files.append((signing.selfie_image, selfie_name))
+                        signature_name = save_rules_proof_file(
                             signing.signature_image,
                             proof_storage_name(enrollment, f'{proof_version}-signature', signature_extension),
                             signature_bytes,
                         )
-                        save_rules_proof_file(
+                        saved_external_files.append((signing.signature_image, signature_name))
+                        pdf_name = save_rules_proof_file(
                             signing.signed_pdf,
                             proof_storage_name(enrollment, f'{proof_version}-signed', 'pdf'),
                             pdf_bytes,
                         )
+                        saved_external_files.append((signing.signed_pdf, pdf_name))
                     except Exception as exc:
-                        return self.processing_failure(request, signing, 'RULES_FILE_STORAGE_FAILED', exc)
+                        raise RulesSubmissionStageError('RULES_FILE_STORAGE_FAILED', exc) from exc
                 self.log_stage(
                     'RULES_FILE_STORAGE_SUCCESS', request, signing,
                     database_backup=rules_database_file_backups_enabled(),
@@ -8513,7 +8620,10 @@ class PublicRulesSigningView(APIView):
                     or not stored_rules_file_exists(signing, 'signature_image', 'signature_image_file')
                     or not stored_rules_file_exists(signing, 'signed_pdf', 'signed_pdf_file')
                 ):
-                    raise RuntimeError('Rules proof files were not verified after storage.')
+                    raise RulesSubmissionStageError(
+                        'RULES_FILE_STORAGE_FAILED',
+                        RuntimeError('Rules proof files were not verified after storage.'),
+                    )
                 signing.status = RulesSigningRequest.Status.SUBMITTED
                 signing.submitted_at = submitted_at
                 signing.submitted_ip = get_client_ip(request)
@@ -8544,9 +8654,14 @@ class PublicRulesSigningView(APIView):
                         enrollment.status,
                         remarks='Rules form submitted.',
                     )
+        except RulesSubmissionStageError as exc:
+            cleanup_rules_proof_files(saved_external_files)
+            return self.processing_failure(request, signing, exc.stage, exc.cause)
         except (OperationalError, ProgrammingError) as exc:
+            cleanup_rules_proof_files(saved_external_files)
             return self.processing_failure(request, signing, 'RULES_STORAGE_OR_DATABASE_FAILED', exc)
         except Exception as exc:
+            cleanup_rules_proof_files(saved_external_files)
             return self.processing_failure(request, signing, 'RULES_SUBMISSION_FAILED', exc)
         try:
             notify_rules_signed(enrollment, signing.submitted_at)
@@ -8668,6 +8783,29 @@ def proof_storage_name(enrollment, suffix, extension):
     return f'rules_proofs/{enrollment.id}/IIE-Rules-Regulations-{safe_student_id}-{suffix}.{extension}'
 
 
+def cleanup_rules_proof_files(saved_files):
+    """Remove objects created by a transaction that did not commit.
+
+    Database transactions cannot roll back S3/R2/filesystem writes.  These
+    names are generated per submission attempt, so deleting only the recorded
+    successful writes cannot affect an earlier immutable submission.
+    """
+    for field, storage_name in reversed(saved_files):
+        if not storage_name:
+            continue
+        try:
+            storage = getattr(field, 'storage', None) or default_storage
+            if storage.exists(storage_name):
+                storage.delete(storage_name)
+        except Exception:
+            logger.exception(
+                'Rules proof cleanup failed: model=%s field=%s path=%s.',
+                field.instance.__class__.__name__,
+                field.field.name,
+                storage_name,
+            )
+
+
 def save_rules_proof_file(field, storage_name, file_bytes):
     # FileField.save() deliberately uses the storage configured on that
     # particular field. Do the cleanup and verification through that same
@@ -8679,8 +8817,26 @@ def save_rules_proof_file(field, storage_name, file_bytes):
         storage.delete(target_name)
     field.save(storage_name, ContentFile(file_bytes), save=False)
     saved_name = getattr(field, 'name', '') or target_name
-    if not saved_name or not storage.exists(saved_name):
-        raise RuntimeError(f'Rules proof file was not stored successfully: {saved_name or target_name}')
+    try:
+        if not saved_name or not storage.exists(saved_name):
+            raise RuntimeError(f'Rules proof file was not stored successfully: {saved_name or target_name}')
+        with storage.open(saved_name, 'rb') as stored_file:
+            if stored_file.read() != file_bytes:
+                raise RuntimeError(f'Rules proof file verification failed: {saved_name}')
+    except RuntimeError:
+        try:
+            if saved_name and storage.exists(saved_name):
+                storage.delete(saved_name)
+        except Exception:
+            logger.exception('Rules proof cleanup failed after verification error: path=%s.', saved_name)
+        raise
+    except Exception as exc:
+        try:
+            if saved_name and storage.exists(saved_name):
+                storage.delete(saved_name)
+        except Exception:
+            logger.exception('Rules proof cleanup failed after verification error: path=%s.', saved_name)
+        raise RuntimeError(f'Rules proof file could not be read back: {saved_name}') from exc
     return saved_name
 
 
@@ -8888,7 +9044,11 @@ def rules_document_queryset_for_user(user):
         'signing_request',
     )
     if not user.is_super_admin:
-        queryset = queryset.filter(branch=user.branch)
+        # A branch-less staff account must never receive branch-less historical
+        # documents merely because ``branch=None`` compares equal in Django.
+        if not user.branch_id:
+            return queryset.none()
+        queryset = queryset.filter(branch_id=user.branch_id)
     return queryset
 
 
@@ -9137,6 +9297,8 @@ def serialize_rules_document(document, request, include_detail=False):
     pdf_available = rules_document_has_file(document, 'signed_pdf_file', 'signed_pdf')
     selfie_available = rules_document_has_file(document, 'selfie_image_file', 'selfie_image')
     signature_available = rules_document_has_file(document, 'signature_image_file', 'signature_image')
+    document_status = 'available' if pdf_available else 'document_unavailable'
+    document_status_label = 'Available' if pdf_available else 'Document unavailable'
     base_path = getattr(settings, 'APP_BASE_PATH', '') or ''
     pdf_url = f'{base_path}/api/rules-regulations/{document.id}/pdf/' if pdf_available else None
     selfie_url = f'{base_path}/api/rules-regulations/{document.id}/selfie/' if selfie_available else None
@@ -9161,9 +9323,13 @@ def serialize_rules_document(document, request, include_detail=False):
         'enrollment_date': document.enrollment_date,
         'signed_date': document.submitted_at,
         'submitted_at': document.submitted_at,
-        'status': rules_repository_document_status(document),
-        'status_label': 'Available' if pdf_available else 'Document unavailable',
+        'status': document_status,
+        'status_label': document_status_label,
         'rules_status': RulesSigningRequest.Status.SUBMITTED,
+        'submission_status': RulesSigningRequest.Status.SUBMITTED,
+        'submission_status_label': 'Submitted',
+        'document_status': document_status,
+        'document_status_label': document_status_label,
         'pdf_url': pdf_url,
         'download_pdf_url': f'{pdf_url}?download=1' if pdf_url else None,
         'package_download_url': package_download_url,
@@ -9202,6 +9368,21 @@ class RulesRegulationsListView(APIView):
 
     def get(self, request):
         queryset = rules_document_queryset_for_user(request.user)
+        requested_branch = str(request.query_params.get('branch') or '').strip()
+        if requested_branch and requested_branch.lower() not in {'all', '*'}:
+            if request.user.is_super_admin:
+                try:
+                    branch_id = int(requested_branch)
+                except (TypeError, ValueError):
+                    return Response({'detail': 'Select a valid branch.'}, status=status.HTTP_400_BAD_REQUEST)
+                if not Branch.objects.filter(pk=branch_id).exists():
+                    return Response({'detail': 'Selected branch was not found.'}, status=status.HTTP_404_NOT_FOUND)
+                queryset = queryset.filter(branch_id=branch_id)
+            elif requested_branch != str(request.user.branch_id or ''):
+                return Response(
+                    {'detail': 'You may view Rules & Regulations documents only for your assigned branch.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
         search = str(request.query_params.get('search') or '').strip()
         if search:
             queryset = queryset.filter(
@@ -9238,7 +9419,8 @@ class RulesRegulationsPdfView(APIView):
             logger.warning('Rules document PDF download unavailable: document_id=%s user_id=%s.', document.id, request.user.id)
             return Response({'detail': 'The signed Rules & Regulations PDF is unavailable in storage.'}, status=404)
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
-        response['Content-Disposition'] = f'attachment; filename="{rules_document_download_filename(document)}"'
+        disposition = 'attachment' if str(request.query_params.get('download') or '').lower() in {'1', 'true', 'yes'} else 'inline'
+        response['Content-Disposition'] = f'{disposition}; filename="{rules_document_download_filename(document)}"'
         logger.info(
             'Rules document PDF download served: document_id=%s user_id=%s branch_id=%s bytes=%s repository_path=%s signing_path=%s.',
             document.id,

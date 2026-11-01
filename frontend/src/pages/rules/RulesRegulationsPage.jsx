@@ -28,6 +28,23 @@ function fileNameFor(row) {
   return `IIE-Rules-Regulations-${identifier}.pdf`
 }
 
+function rulesStatusLabel(status) {
+  if (status === 'submitted') return 'Submitted'
+  if (!status) return '-'
+  return String(status).replace(/_/g, ' ')
+}
+
+function submissionStatusFor(row) {
+  return row.submission_status || row.rules_status
+}
+
+function documentAvailabilityFor(row) {
+  return {
+    status: row.document_status || row.status,
+    label: row.document_status_label || row.status_label || 'Document unavailable',
+  }
+}
+
 function responseFilename(response, fallback) {
   const disposition = response?.headers?.['content-disposition'] || ''
   const encodedMatch = disposition.match(/filename\*=UTF-8''([^;]+)/i)
@@ -93,7 +110,7 @@ function RulesRegulationsList() {
   const [downloadingId, setDownloadingId] = useState(null)
   const [bulkDownloading, setBulkDownloading] = useState(false)
   const [branches, setBranches] = useState([])
-  const [bulkBranch, setBulkBranch] = useState('all')
+  const [selectedBranch, setSelectedBranch] = useState('all')
   const { user } = useSelector((state) => state.auth)
   const isSuperAdmin = user?.role === 'super_admin'
   const debouncedSearch = useDebouncedValue(search.trim())
@@ -105,7 +122,7 @@ function RulesRegulationsList() {
   useEffect(() => {
     if (!isSuperAdmin) {
       setBranches([])
-      setBulkBranch('all')
+      setSelectedBranch('all')
       return
     }
     api.get('/branches/')
@@ -115,13 +132,14 @@ function RulesRegulationsList() {
 
   useEffect(() => {
     loadRows()
-  }, [debouncedSearch, page])
+  }, [debouncedSearch, page, selectedBranch, isSuperAdmin])
 
   const loadRows = async () => {
     setLoading(true)
     try {
       const params = { page, page_size: PAGE_SIZE }
       if (debouncedSearch) params.search = debouncedSearch
+      if (isSuperAdmin && selectedBranch !== 'all') params.branch = selectedBranch
       const { data } = await api.get('/rules-regulations/', { params })
       const nextRows = normaliseListResponse(data)
       setRows(nextRows)
@@ -156,10 +174,10 @@ function RulesRegulationsList() {
     setBulkDownloading(true)
     setMessage('')
     try {
-      const params = isSuperAdmin && bulkBranch !== 'all' ? { branch: bulkBranch } : undefined
+      const params = isSuperAdmin && selectedBranch !== 'all' ? { branch: selectedBranch } : undefined
       const response = await downloadProtectedFile(
         '/rules-regulations/download/',
-        bulkBranch === 'all' ? 'Rules_and_Regulations_All_Branches.zip' : 'Rules_and_Regulations.zip',
+        selectedBranch === 'all' ? 'Rules_and_Regulations_All_Branches.zip' : 'Rules_and_Regulations.zip',
         setMessage,
         params,
         300000,
@@ -183,43 +201,51 @@ function RulesRegulationsList() {
           <Link to={`/rules-regulations/${row.id}`} className="whitespace-normal break-words font-bold leading-5 text-slate-950 hover:text-cyan-700">
             {row.candidate_name}
           </Link>
-          <p className="mt-1 truncate text-xs text-slate-500">{row.student_number || '-'}</p>
         </div>
       ),
     },
+    { key: 'student_number', header: 'Student ID', width: 'minmax(115px,0.7fr)', render: (row) => row.student_number || '-' },
     { key: 'phone', header: 'Phone Number', width: 'minmax(110px,0.75fr)', render: (row) => row.phone || '-' },
     { key: 'course', header: 'Course', width: 'minmax(140px,1fr)', render: (row) => row.course || '-' },
+    { key: 'branch', header: 'Branch', width: 'minmax(130px,0.85fr)', render: (row) => row.branch || '-' },
     { key: 'enrollment_date', header: 'Enrollment Date', width: 'minmax(110px,0.7fr)', render: (row) => formatDate(row.enrollment_date) },
-    { key: 'signed_date', header: 'Signed Date', width: 'minmax(110px,0.7fr)', render: (row) => formatDate(row.signed_date) },
+    { key: 'signed_date', header: 'Submitted Date', width: 'minmax(110px,0.7fr)', render: (row) => formatDate(row.signed_date) },
     {
-      key: 'status',
+      key: 'rules_status',
       header: 'Status',
       width: 'minmax(115px,0.65fr)',
-      render: (row) => <StatusBadge tone={row.status === 'available' ? 'green' : 'amber'}>{row.status_label}</StatusBadge>,
+      render: (row) => {
+        const submissionStatus = submissionStatusFor(row)
+        return <StatusBadge tone={submissionStatus === 'submitted' ? 'green' : 'amber'}>{row.submission_status_label || rulesStatusLabel(submissionStatus)}</StatusBadge>
+      },
     },
     {
-      key: 'view',
-      header: 'View',
-      width: 'minmax(80px,0.45fr)',
-      render: (row) => (
-        <Link to={`/rules-regulations/${row.id}`} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50">
-          View
-        </Link>
-      ),
+      key: 'availability',
+      header: 'Document Availability',
+      width: 'minmax(145px,0.8fr)',
+      render: (row) => {
+        const availability = documentAvailabilityFor(row)
+        return <StatusBadge tone={availability.status === 'available' ? 'green' : 'amber'}>{availability.label}</StatusBadge>
+      },
     },
     {
-      key: 'download',
-      header: 'Download',
-      width: 'minmax(100px,0.6fr)',
+      key: 'actions',
+      header: 'Actions',
+      width: 'minmax(190px,1fr)',
       render: (row) => (
-        <button
-          type="button"
-          disabled={!row.download_pdf_url || downloadingId === row.id}
-          onClick={() => downloadDocument(row)}
-          className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
-        >
-          {downloadingId === row.id ? 'Downloading...' : 'Download'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link to={`/rules-regulations/${row.id}`} className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50">
+            View
+          </Link>
+          <button
+            type="button"
+            disabled={!row.download_pdf_url || downloadingId === row.id}
+            onClick={() => downloadDocument(row)}
+            className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+          >
+            {downloadingId === row.id ? 'Downloading...' : 'Download'}
+          </button>
+        </div>
       ),
     },
   ]
@@ -253,8 +279,8 @@ function RulesRegulationsList() {
                 Branch
               </span>
               <select
-                value={bulkBranch}
-                onChange={(event) => setBulkBranch(event.target.value)}
+                value={selectedBranch}
+                onChange={(event) => setSelectedBranch(event.target.value)}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
               >
                 <option value="all">All Branches</option>

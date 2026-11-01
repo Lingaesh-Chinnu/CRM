@@ -588,6 +588,39 @@ MEDIA_ROOT_IS_DEFAULT_LOCAL = (
     == (BASE_DIR / 'media').resolve()
 )
 
+# Rules signing accepts a 5 MiB identity photo and a 2 MiB signature. The
+# current browser sends multipart files, but this limit also keeps existing
+# signing links usable while an older cached frontend is still submitting the
+# same images as base64 JSON (which is roughly 33% larger). Without an
+# explicit budget Django rejects that request while parsing it, before the
+# signing view can return a useful, traceable response.
+RULES_UPLOAD_REQUEST_MAX_BYTES = int(
+    os.environ.get('RULES_UPLOAD_REQUEST_MAX_BYTES', str(12 * 1024 * 1024))
+)
+DATA_UPLOAD_MAX_MEMORY_SIZE = max(
+    int(os.environ.get('DATA_UPLOAD_MAX_MEMORY_SIZE', '0') or 0),
+    RULES_UPLOAD_REQUEST_MAX_BYTES,
+)
+
+# Render does not make an arbitrary non-default MEDIA_ROOT durable. A mounted
+# disk must be declared explicitly; otherwise Rules evidence is retained in
+# PostgreSQL and no FileField write is attempted on the ephemeral web-service
+# filesystem. S3/R2 is durable when USE_S3_STORAGE is configured. The flag
+# alone is not enough: it cannot make the app-local media directory durable.
+RULES_PERSISTENT_MEDIA_ROOT = (
+    env_bool('RULES_PERSISTENT_MEDIA_ROOT', False)
+    and not MEDIA_ROOT_IS_DEFAULT_LOCAL
+)
+RULES_DATABASE_FILE_BACKUPS = (
+    env_bool('RULES_DATABASE_FILE_BACKUPS', False)
+    if 'RULES_DATABASE_FILE_BACKUPS' in os.environ
+    else None
+)
+if RUNNING_ON_RENDER and not USE_S3_STORAGE and not RULES_PERSISTENT_MEDIA_ROOT:
+    # Do not permit a deployment setting to silently turn a Rules submission
+    # into an ephemeral-only save.
+    RULES_DATABASE_FILE_BACKUPS = True
+
 
 
 # ── WhatsApp Cloud API ────────────────────────────────────────
