@@ -8642,7 +8642,11 @@ class PublicRulesSigningView(APIView):
                     raise RulesSubmissionStageError('RULES_PDF_GENERATION_FAILED', exc) from exc
                 selfie_extension = image_storage_extension(selfie_bytes)
                 signature_extension = image_storage_extension(signature_bytes)
-                proof_version = f'{signing.token}-{submitted_at:%Y%m%d%H%M%S%f}'
+                # Object names can appear in storage exception messages. Use
+                # the internal signing-request primary key, never the public
+                # signing token, so full production tracebacks cannot expose
+                # the credential that grants access to this form.
+                proof_version = f'signing-{signing.pk}-{submitted_at:%Y%m%d%H%M%S%f}'
                 if rules_database_file_backups_enabled():
                     signing.selfie_image_file = selfie_bytes
                     signing.signature_image_file = signature_bytes

@@ -3760,6 +3760,8 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
         self.assertEqual(RulesRegulationsDocument.objects.filter(signing_request=signing).count(), 1)
         self.assertEqual(len(field_storage.files), 3)
+        self.assertTrue(all(str(signing.token) not in storage_name for storage_name in field_storage.files))
+        self.assertTrue(all(f'signing-{signing.id}-' in storage_name for storage_name in field_storage.files))
 
     def test_walkin_enrollment_succeeds_without_rules_submission_after_schedule_confirmation(self):
         """The temporary bypass keeps payment checks and the walk-in audit trail intact."""
@@ -4354,6 +4356,61 @@ class PublicWalkInFormTests(APITestCase):
         self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
         self.assertTrue(any('signing_request_id=None' in entry for entry in logs.output))
         self.assertTrue(any('RuntimeError: signing lookup failed' in entry for entry in logs.output))
+
+    def test_public_rules_signing_rejects_missing_proofs_and_rolls_back_pdf_failure(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules PDF Failure Candidate',
+            phone='9000000133',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        image_buffer = io.BytesIO()
+        from PIL import Image
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+
+        missing_photo_response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'signature': image_data},
+            format='json',
+        )
+        missing_signature_response = self.client.post(
+            f'/api/public/rules-sign/{signing.token}/',
+            {'selfie': image_data},
+            format='json',
+        )
+        with mock.patch('views.build_signed_rules_pdf', side_effect=RuntimeError('PDF renderer unavailable')):
+            pdf_failure_response = self.client.post(
+                f'/api/public/rules-sign/{signing.token}/',
+                {'selfie': image_data, 'signature': image_data},
+                format='json',
+            )
+
+        self.assertEqual(missing_photo_response.status_code, 400)
+        self.assertEqual(missing_photo_response.data['detail'], 'Identity photo is required before signing the form.')
+        self.assertEqual(missing_signature_response.status_code, 400)
+        self.assertEqual(missing_signature_response.data['detail'], 'Signature is required.')
+        self.assertEqual(pdf_failure_response.status_code, 503)
+        self.assertEqual(pdf_failure_response.data['code'], 'RULES_PDF_GENERATION_FAILED')
+        signing.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SENT)
+        self.assertFalse(signing.selfie_image)
+        self.assertFalse(signing.signature_image)
+        self.assertFalse(signing.signed_pdf)
+        self.assertFalse(RulesRegulationsDocument.objects.filter(signing_request=signing).exists())
+        self.assertEqual(enrollment.status, Enrollment.Status.RULES_SENT)
 
     def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):
         enrollment = Enrollment.objects.create(
