@@ -26,11 +26,12 @@ const sectionHeadingClass = 'text-[17px] font-bold leading-snug text-slate-950'
 const labelClass = 'text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500'
 const valueClass = 'mt-2 text-[14px] font-semibold leading-snug text-slate-950'
 const SUCCESS_REDIRECT_URL = 'https://indrainstitute.com/'
-// Keep this just below the production gunicorn timeout (180 seconds).  A
-// signing submission generates a PDF and writes three durable files, so a
-// shorter browser timeout can incorrectly tell a candidate that a submission
-// failed after the server has already completed it.
-const RULES_SUBMISSION_TIMEOUT_MS = 170000
+// Local workflow measurements complete in a few seconds.  Two minutes leaves
+// ample room for a temporarily slow PDF or durable-storage write, while
+// ensuring a broken connection cannot leave the candidate-facing button in an
+// indefinite loading state.  The reconciliation below treats this timeout as
+// an uncertain outcome, never as proof that the server did not save the form.
+const RULES_SUBMISSION_TIMEOUT_MS = 120000
 
 function dataUrlToFile(dataUrl, filename) {
   const [header, encoded] = String(dataUrl || '').split(',', 2)
@@ -87,6 +88,8 @@ export default function RulesSigningPage() {
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
   const [message, setMessage] = useState('')
+  const [submissionUncertain, setSubmissionUncertain] = useState(false)
+  const [checkingSubmissionStatus, setCheckingSubmissionStatus] = useState(false)
 
   const stopCamera = (updateState = true) => {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -292,8 +295,7 @@ export default function RulesSigningPage() {
 
       setData(submittedForm)
       stopCamera()
-      submittingRef.current = false
-      setSubmitting(false)
+      setSubmissionUncertain(false)
       if (successMessage) setMessage(successMessage)
       if (redirectAfterSuccess) {
         window.setTimeout(() => {
@@ -306,8 +308,26 @@ export default function RulesSigningPage() {
     }
   }
 
+  const checkSubmissionStatus = async () => {
+    if (checkingSubmissionStatus || submittingRef.current) return
+    setCheckingSubmissionStatus(true)
+    setMessage('Checking whether your signed form was saved...')
+    try {
+      const reconciled = await reconcileSubmittedState({
+        successMessage: 'Thank you. Rules & Regulations has been submitted successfully.',
+        redirectAfterSuccess: true,
+      })
+      if (!reconciled) {
+        setMessage('No saved submission was found. You may safely submit the form again.')
+        setSubmissionUncertain(false)
+      }
+    } finally {
+      setCheckingSubmissionStatus(false)
+    }
+  }
+
   const submitSignature = async () => {
-    if (submittingRef.current) return
+    if (submittingRef.current || checkingSubmissionStatus) return
     if (!selfie) {
       setMessage('Identity photo is required before signing the form.')
       return
@@ -320,6 +340,7 @@ export default function RulesSigningPage() {
     submittingRef.current = true
     setSubmitting(true)
     setMessage('')
+    setSubmissionUncertain(false)
     // Correlates the browser error to the server log; contains no candidate
     // data or signing token.
     const submitTraceId = typeof globalThis.crypto?.randomUUID === 'function'
@@ -365,8 +386,6 @@ export default function RulesSigningPage() {
           successMessage: 'Rules & Regulations has already been submitted and is locked.',
         })
         if (reconciled) return
-        submittingRef.current = false
-        setSubmitting(false)
         setMessage('Rules & Regulations has already been submitted and is locked.')
         return
       }
@@ -374,21 +393,39 @@ export default function RulesSigningPage() {
       // response (for example, through a browser timeout or network drop).
       // Only reconcile transport failures: validation and storage responses
       // already contain a meaningful result and must not cause an extra GET.
+      const isTimeout = (
+        error.code === 'ECONNABORTED'
+        || /timeout/i.test(String(error.message || ''))
+      )
       const isTransportFailure = !error.response && error.code !== 'ERR_CANCELED'
       if (isTransportFailure) {
+        // Release the visible submit state as soon as the browser no longer
+        // has a response, while keeping clicks disabled during the status
+        // lookup. This avoids a second request racing a legitimate server-
+        // side transaction after either a timeout or a dropped connection.
+        setSubmitting(false)
+        setCheckingSubmissionStatus(true)
+        setMessage(
+          isTimeout
+            ? 'The submission took longer than two minutes. Checking whether it was saved...'
+            : 'The connection was interrupted. Checking whether your signed form was saved...',
+        )
         const reconciled = await reconcileSubmittedState({
           successMessage: 'Thank you. Rules & Regulations has been submitted successfully.',
           redirectAfterSuccess: true,
         })
+        setCheckingSubmissionStatus(false)
         if (reconciled) return
       }
-      submittingRef.current = false
       // Keep the technical response available in browser diagnostics without
       // exposing internal failures to the candidate-facing page.
       console.error('Rules signing submission failed', {
         traceId: submitTraceId,
         method: error.config?.method?.toUpperCase(),
-        url: `${error.config?.baseURL || ''}${error.config?.url || ''}`,
+        // The request URL contains the public signing credential. Keep the
+        // endpoint useful for diagnostics without leaking that token to a
+        // shared browser console or remote console collector.
+        endpoint: '/public/rules-sign/[redacted]/',
         status: error.response?.status,
         response: error.response?.data,
         // Axios normally parses JSON before exposing it as `data`; preserve
@@ -406,8 +443,20 @@ export default function RulesSigningPage() {
           : undefined,
         message: error.message,
       })
-      setMessage(submissionErrorMessage(error))
+      if (isTimeout) {
+        setSubmissionUncertain(true)
+        setMessage(
+          'The submission took longer than two minutes. We could not confirm whether it was saved. '
+          + 'Check its status before submitting again.',
+        )
+      } else {
+        setMessage(submissionErrorMessage(error))
+      }
     } finally {
+      // This is the one exit path for the in-memory duplicate-click guard and
+      // the visual loading state. It runs after success, API errors, dropped
+      // responses, timeouts, reconciliation, and unexpected client errors.
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
@@ -650,11 +699,21 @@ export default function RulesSigningPage() {
                 <button
                   type="button"
                   onClick={submitSignature}
-                  disabled={submitting || !selfie || !hasSignature}
+                  disabled={submitting || checkingSubmissionStatus || !selfie || !hasSignature}
                   className="rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {submitting ? 'Submitting...' : 'Submit Signed Form'}
+                  {checkingSubmissionStatus ? 'Checking status...' : submitting ? 'Submitting...' : 'Submit Signed Form'}
                 </button>
+                {submissionUncertain && (
+                  <button
+                    type="button"
+                    onClick={checkSubmissionStatus}
+                    disabled={checkingSubmissionStatus}
+                    className="rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {checkingSubmissionStatus ? 'Checking status...' : 'Check Submission Status'}
+                  </button>
+                )}
               </>
             )}
             {data.signed_pdf_url && (

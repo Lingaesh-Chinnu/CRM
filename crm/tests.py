@@ -8,8 +8,10 @@ from decimal import Decimal
 from datetime import timedelta
 import base64
 import io
+import re
 import uuid
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -3604,15 +3606,55 @@ class PublicWalkInFormTests(APITestCase):
         Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
         image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
 
-        response = self.client.post(
-            f'/api/public/rules-sign/{signing.token}/',
-            {'selfie': image_data, 'signature': image_data},
-            format='json',
-        )
+        import views as crm_views
+
+        original_build_pdf = crm_views.build_signed_rules_pdf
+        original_save_proof = crm_views.save_rules_proof_file
+
+        # A real (but deliberately delayed) render/storage path verifies that
+        # the request remains a normal completed submission and emits timing
+        # for the operations that can otherwise appear to be "stuck".
+        def slow_build_pdf(*args, **kwargs):
+            time.sleep(0.03)
+            return original_build_pdf(*args, **kwargs)
+
+        def slow_save_proof(*args, **kwargs):
+            time.sleep(0.02)
+            return original_save_proof(*args, **kwargs)
+
+        with mock.patch('views.build_signed_rules_pdf', side_effect=slow_build_pdf):
+            with mock.patch('views.save_rules_proof_file', side_effect=slow_save_proof):
+                with self.assertLogs('views', level='INFO') as logs:
+                    response = self.client.post(
+                        f'/api/public/rules-sign/{signing.token}/',
+                        {'selfie': image_data, 'signature': image_data},
+                        format='json',
+                    )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['detail'], 'Thank you. Rules & Regulations has been submitted successfully.')
         self.assertEqual(response.data['redirect_url'], 'https://indrainstitute.com/')
+        stage_logs = '\n'.join(logs.output)
+        for stage in (
+            'RULES_SUBMIT_START',
+            'RULES_PHOTO_RECEIVED',
+            'RULES_SIGNATURE_RECEIVED',
+            'RULES_PDF_GENERATION_SUCCESS',
+            'RULES_FILE_STORAGE_SUCCESS',
+            'RULES_SIGNING_RECORD_SAVE_SUCCESS',
+            'RULES_SUBMISSION_RESPONSE_SENT',
+        ):
+            self.assertIn(stage, stage_logs)
+        self.assertIn("'stage_duration_ms':", stage_logs)
+        self.assertIn("'elapsed_ms':", stage_logs)
+
+        def stage_duration(stage):
+            match = re.search(rf"{stage} .*?'stage_duration_ms': ([0-9.]+)", stage_logs)
+            self.assertIsNotNone(match, f'Missing duration for {stage}: {stage_logs}')
+            return float(match.group(1))
+
+        self.assertGreaterEqual(stage_duration('RULES_PDF_GENERATION_SUCCESS'), 25)
+        self.assertGreaterEqual(stage_duration('RULES_FILE_STORAGE_SUCCESS'), 40)
         signing.refresh_from_db()
         enrollment.refresh_from_db()
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)

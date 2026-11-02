@@ -71,6 +71,7 @@ import mimetypes
 import re
 import tempfile
 import textwrap
+import time
 import unicodedata
 import uuid
 import zipfile
@@ -8392,26 +8393,42 @@ class PublicRulesSigningView(APIView):
         return response
 
     def log_stage(self, stage, request, signing=None, **extra):
+        """Log each transition with request-relative timing, never the token."""
+        now = time.perf_counter()
+        started_at = getattr(request, '_rules_submission_started_at', None)
+        if started_at is None:
+            started_at = now
+            request._rules_submission_started_at = started_at
+        previous_stage_at = getattr(request, '_rules_submission_previous_stage_at', started_at)
+        request._rules_submission_previous_stage_at = now
         fields = {
             'reference_id': self.trace_id(request),
             'request_id': self.request_id(request),
             'signing_request_id': getattr(signing, 'id', None),
             'enrollment_id': getattr(signing, 'enrollment_id', None),
+            # ``stage_duration_ms`` is measured since the preceding stage.
+            # It exposes, for example, PDF generation and storage latency
+            # directly in Render logs without candidate data or a token.
+            'stage_duration_ms': round((now - previous_stage_at) * 1000, 1),
+            'elapsed_ms': round((now - started_at) * 1000, 1),
         }
         fields.update(extra)
         logger.info('RULES_SUBMIT_STAGE=%s %s', stage, fields)
 
     def log_failure(self, request, signing, stage, exc):
         """Emit the complete, token-free failure record and traceback."""
+        now = time.perf_counter()
+        started_at = getattr(request, '_rules_submission_started_at', now)
         logger.exception(
             'RULES_SUBMIT_FAILED stage=%s reference_id=%s request_id=%s '
-            'signing_request_id=%s enrollment_id=%s exception_type=%s.',
+            'signing_request_id=%s enrollment_id=%s exception_type=%s elapsed_ms=%s.',
             stage,
             self.trace_id(request),
             self.request_id(request),
             getattr(signing, 'id', None),
             getattr(signing, 'enrollment_id', None),
             type(exc).__name__,
+            round((now - started_at) * 1000, 1),
         )
 
     def processing_failure(self, request, signing, stage, exc):
@@ -8603,9 +8620,9 @@ class PublicRulesSigningView(APIView):
                 maximum_bytes=2 * 1024 * 1024,
             )
             self.log_stage(
-                'RULES_SIGNATURE_RECEIVED', request, signing,
-                selfie_bytes=len(selfie_bytes), signature_bytes=len(signature_bytes),
+                'RULES_PHOTO_RECEIVED', request, signing, selfie_bytes=len(selfie_bytes),
             )
+            self.log_stage('RULES_SIGNATURE_RECEIVED', request, signing, signature_bytes=len(signature_bytes))
             self.log_stage('RULES_SELFIE_VALIDATED', request, signing)
         except RuntimeError as exc:
             return self.processing_failure(request, signing, 'RULES_IMAGE_VALIDATION_FAILED', exc)
@@ -8755,8 +8772,8 @@ class PublicRulesSigningView(APIView):
                 signing.id,
                 enrollment.id,
             )
-        self.log_stage('RULES_SUBMIT_SUCCESS', request, signing)
         response = self.submitted_response(request, signing)
+        self.log_stage('RULES_SUBMISSION_RESPONSE_SENT', request, signing, status_code=response.status_code)
         return self.apply_trace_headers(response, request)
 
 
