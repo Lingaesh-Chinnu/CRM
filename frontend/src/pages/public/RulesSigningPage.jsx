@@ -291,7 +291,10 @@ export default function RulesSigningPage() {
         skipAuth: true,
         timeout: 20000,
       })
-      if (submittedForm?.status !== 'submitted') return false
+      // A status response is authoritative only when it confirms both the
+      // immutable submission and the stored signed document. Do not tell a
+      // candidate that a response-less POST succeeded from a partial record.
+      if (submittedForm?.status !== 'submitted' || !submittedForm?.signed_pdf_url) return false
 
       setData(submittedForm)
       stopCamera()
@@ -364,6 +367,12 @@ export default function RulesSigningPage() {
           headers: { 'X-Rules-Submit-Trace': submitTraceId },
         },
       )
+      // A 2xx response by itself is not proof of completion. The server must
+      // explicitly confirm the final state and durable signed document before
+      // the candidate sees the submitted confirmation.
+      if (response?.status !== 'submitted' || !response?.signed_pdf_url || !response?.submitted_at) {
+        throw new Error('Rules submission response did not confirm the saved signed document.')
+      }
       setData((current) => ({
         ...current,
         status: 'submitted',
@@ -382,6 +391,14 @@ export default function RulesSigningPage() {
       // 409; fetch the canonical state so the candidate sees the locked form
       // rather than a misleading failure message.
       if (error.response?.status === 409 && error.response?.data?.code === 'already_submitted') {
+        const submittedForm = error.response.data
+        if (submittedForm?.status === 'submitted' && submittedForm?.signed_pdf_url) {
+          setData((current) => ({ ...current, ...submittedForm }))
+          stopCamera()
+          setSubmissionUncertain(false)
+          setMessage('Rules & Regulations has already been submitted and is locked.')
+          return
+        }
         const reconciled = await reconcileSubmittedState({
           successMessage: 'Rules & Regulations has already been submitted and is locked.',
         })

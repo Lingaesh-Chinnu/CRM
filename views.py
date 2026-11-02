@@ -8541,6 +8541,7 @@ class PublicRulesSigningView(APIView):
         fees = rules_fee_breakdown(enrollment)
         return Response({
             'status': signing.status,
+            'submitted_at': signing.submitted_at,
             'candidate': {
                 'name': enrollment.name,
                 'phone': enrollment.phone,
@@ -8565,6 +8566,7 @@ class PublicRulesSigningView(APIView):
             'rules_content': rules_paragraphs,
             'signed_pdf_url': self.public_pdf_url(request, signing),
             'selfie_url': self.file_url(request, signing, 'selfie_image'),
+            'redirect_url': RULES_SUCCESS_REDIRECT_URL,
         })
 
     def file_url(self, request, signing, field_name):
@@ -8574,15 +8576,46 @@ class PublicRulesSigningView(APIView):
         except (OperationalError, ProgrammingError, ValueError):
             return None
 
-    def submitted_response(self, request, signing):
-        return Response({
+    def submitted_payload(self, request, signing):
+        """Return the canonical, token-safe state of a completed signing."""
+        # A retry after a dropped response needs the immutable document it
+        # already created, not merely a conflict message. This is deliberately
+        # best-effort: failing to add an ancillary response field must never
+        # turn a durable submission into a new failed request.
+        try:
+            document_id = RulesRegulationsDocument.objects.filter(
+                signing_request_id=signing.id,
+            ).values_list('id', flat=True).first()
+        except (OperationalError, ProgrammingError):
+            logger.exception(
+                'Rules submitted response could not resolve repository document: '
+                'signing_request_id=%s.',
+                signing.id,
+            )
+            document_id = None
+        return {
             'detail': RULES_SUCCESS_MESSAGE,
             'status': signing.status,
+            # This is an authenticated-CRM document ID, not the public
+            # signing token. It lets a retry refer to the saved immutable
+            # record without revealing another credential.
+            'document_id': document_id,
             'signed_pdf_url': self.public_pdf_url(request, signing),
             'selfie_url': None,
             'submitted_at': signing.submitted_at,
             'redirect_url': RULES_SUCCESS_REDIRECT_URL,
+        }
+
+    def submitted_response(self, request, signing):
+        return Response(self.submitted_payload(request, signing))
+
+    def already_submitted_response(self, request, signing):
+        payload = self.submitted_payload(request, signing)
+        payload.update({
+            'detail': 'Rules & Regulations has already been submitted.',
+            'code': 'already_submitted',
         })
+        return Response(payload, status=status.HTTP_409_CONFLICT)
 
     def post(self, request, token):
         signing = self.get_signing(token)
@@ -8592,10 +8625,7 @@ class PublicRulesSigningView(APIView):
         self.remember_signing(request, signing)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
             self.log_stage('RULES_SUBMIT_REPLAY', request, signing, status=signing.status)
-            response = Response(
-                {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
-                status=status.HTTP_409_CONFLICT,
-            )
+            response = self.already_submitted_response(request, signing)
             return self.apply_trace_headers(response, request)
 
         persistence_issues = rules_submission_persistence_issues()
@@ -8642,10 +8672,7 @@ class PublicRulesSigningView(APIView):
                     'enrollment__course',
                 ).get(pk=signing.pk)
                 if signing.status == RulesSigningRequest.Status.SUBMITTED:
-                    response = Response(
-                        {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
-                        status=status.HTTP_409_CONFLICT,
-                    )
+                    response = self.already_submitted_response(request, signing)
                     return self.apply_trace_headers(response, request)
 
                 enrollment = signing.enrollment
