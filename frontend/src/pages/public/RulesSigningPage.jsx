@@ -53,6 +53,8 @@ function submissionErrorMessage(error) {
     RULES_PDF_GENERATION_FAILED: 'We could not prepare the signed form. Nothing was submitted; please try again in a moment.',
     RULES_FILE_STORAGE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
     RULES_STORAGE_OR_DATABASE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
+    RULES_DATABASE_SAVE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
+    RULES_ENROLLMENT_STATUS_UPDATE_FAILED: 'We could not securely save the signed form. Nothing was submitted; please try again in a moment.',
     RULES_SUBMISSION_FAILED: 'We could not complete the submission. Nothing was submitted; please try again in a moment.',
   }
   const safeMessage = safeMessages[response.code]

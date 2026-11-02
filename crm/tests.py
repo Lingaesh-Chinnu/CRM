@@ -4254,18 +4254,106 @@ class PublicWalkInFormTests(APITestCase):
             sent_at=timezone.now(),
         )
 
+        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
         with mock.patch('views.validate_data_image', side_effect=RuntimeError('Pillow is required to process form images.')):
             with self.assertLogs('views', level='ERROR') as logs:
                 response = self.client.post(
                     f'/api/public/rules-sign/{signing.token}/',
                     {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
                     format='json',
+                    HTTP_X_RULES_SUBMIT_TRACE=reference_id,
                 )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data['detail'], 'Unable to process form at the moment. Please contact support.')
         self.assertNotIn('Pillow', response.data['detail'])
-        self.assertTrue(any('Rules signing image validation failed' in entry for entry in logs.output))
+        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        self.assertTrue(response['X-Request-ID'])
+        self.assertTrue(any('stage=RULES_IMAGE_VALIDATION_FAILED' in entry for entry in logs.output))
+        self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any('request_id=' in entry for entry in logs.output))
+        self.assertTrue(any('signing_request_id=' in entry for entry in logs.output))
+        self.assertTrue(any('RuntimeError: Pillow is required to process form images.' in entry for entry in logs.output))
+
+    def test_public_rules_signing_database_failure_is_traced_and_rolled_back(self):
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Rules Repository Failure Candidate',
+            phone='9000000132',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SENT,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SENT,
+            sent_at=timezone.now(),
+        )
+        from PIL import Image
+
+        image_buffer = io.BytesIO()
+        Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
+        image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
+        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
+
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                with mock.patch(
+                    'views.persist_rules_regulations_document',
+                    side_effect=RuntimeError('repository insert failed'),
+                ):
+                    with self.assertLogs('views', level='ERROR') as logs:
+                        response = self.client.post(
+                            f'/api/public/rules-sign/{signing.token}/',
+                            {'selfie': image_data, 'signature': image_data},
+                            format='json',
+                            HTTP_X_RULES_SUBMIT_TRACE=reference_id,
+                        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'RULES_DATABASE_SAVE_FAILED')
+        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        self.assertTrue(response['X-Request-ID'])
+        self.assertTrue(any('stage=RULES_DATABASE_SAVE_FAILED' in entry for entry in logs.output))
+        self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any('RuntimeError: repository insert failed' in entry for entry in logs.output))
+        self.assertFalse(any(str(signing.token) in entry for entry in logs.output))
+
+        signing.refresh_from_db()
+        enrollment.refresh_from_db()
+        self.assertEqual(signing.status, RulesSigningRequest.Status.SENT)
+        self.assertFalse(signing.selfie_image)
+        self.assertFalse(signing.signature_image)
+        self.assertFalse(signing.signed_pdf)
+        self.assertFalse(RulesRegulationsDocument.objects.filter(signing_request=signing).exists())
+        self.assertEqual(enrollment.status, Enrollment.Status.RULES_SENT)
+
+    def test_public_rules_signing_unhandled_request_failure_is_traced(self):
+        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
+        with mock.patch(
+            'views.PublicRulesSigningView.get_signing',
+            side_effect=RuntimeError('signing lookup failed'),
+        ):
+            with self.assertLogs('views', level='ERROR') as logs:
+                response = self.client.post(
+                    f'/api/public/rules-sign/{uuid.uuid4()}/',
+                    {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
+                    format='json',
+                    HTTP_X_RULES_SUBMIT_TRACE=reference_id,
+                )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.data['code'], 'RULES_SUBMISSION_FAILED')
+        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        self.assertTrue(response['X-Request-ID'])
+        self.assertTrue(any('stage=RULES_UNHANDLED_REQUEST_FAILED' in entry for entry in logs.output))
+        self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any('signing_request_id=None' in entry for entry in logs.output))
+        self.assertTrue(any('RuntimeError: signing lookup failed' in entry for entry in logs.output))
 
     def test_change_course_preserves_paid_amount_and_rebuilds_pending_schedule(self):
         enrollment = Enrollment.objects.create(

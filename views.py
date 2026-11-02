@@ -8361,26 +8361,61 @@ class PublicRulesSigningView(APIView):
         """Browser/server correlation ID; deliberately never derived from the token."""
         return (request.META.get('HTTP_X_RULES_SUBMIT_TRACE') or '').strip()[:80] or 'not-provided'
 
+    def request_id(self, request):
+        """Return a safe request identifier without relying on a signing token.
+
+        Render may supply an upstream request ID, but it is not guaranteed.
+        Generate one once per request when it is absent so a failed submission
+        is always traceable in server logs even when the browser did not send
+        its optional reference ID.
+        """
+        request_id = getattr(request, '_rules_submission_request_id', None)
+        if request_id:
+            return request_id
+        supplied = (
+            request.META.get('HTTP_X_REQUEST_ID')
+            or request.META.get('HTTP_X_RENDER_REQUEST_ID')
+            or ''
+        ).strip()[:80]
+        request_id = supplied or str(uuid.uuid4())
+        request._rules_submission_request_id = request_id
+        return request_id
+
+    def remember_signing(self, request, signing):
+        """Make the non-sensitive record IDs available to exception handling."""
+        request._rules_submission_signing = signing
+        return signing
+
+    def apply_trace_headers(self, response, request):
+        response['X-Rules-Submit-Trace'] = self.trace_id(request)
+        response['X-Request-ID'] = self.request_id(request)
+        return response
+
     def log_stage(self, stage, request, signing=None, **extra):
         fields = {
-            'trace_id': self.trace_id(request),
+            'reference_id': self.trace_id(request),
+            'request_id': self.request_id(request),
             'signing_request_id': getattr(signing, 'id', None),
             'enrollment_id': getattr(signing, 'enrollment_id', None),
         }
         fields.update(extra)
         logger.info('RULES_SUBMIT_STAGE=%s %s', stage, fields)
 
-    def processing_failure(self, request, signing, stage, exc):
-        failure_label = (
-            'Rules signing image validation failed'
-            if stage == 'RULES_IMAGE_VALIDATION_FAILED'
-            else 'Rules signing submission failed'
-        )
+    def log_failure(self, request, signing, stage, exc):
+        """Emit the complete, token-free failure record and traceback."""
         logger.exception(
-            'RULES_SUBMIT_FAILED %s stage=%s trace_id=%s signing_request_id=%s enrollment_id=%s exception_type=%s.',
-            failure_label, stage, self.trace_id(request), getattr(signing, 'id', None),
-            getattr(signing, 'enrollment_id', None), type(exc).__name__,
+            'RULES_SUBMIT_FAILED stage=%s reference_id=%s request_id=%s '
+            'signing_request_id=%s enrollment_id=%s exception_type=%s.',
+            stage,
+            self.trace_id(request),
+            self.request_id(request),
+            getattr(signing, 'id', None),
+            getattr(signing, 'enrollment_id', None),
+            type(exc).__name__,
         )
+
+    def processing_failure(self, request, signing, stage, exc):
+        self.log_failure(request, signing, stage, exc)
         response = Response(
             {
                 'detail': FORM_PROCESSING_ERROR_MESSAGE,
@@ -8388,15 +8423,47 @@ class PublicRulesSigningView(APIView):
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-        response['X-Rules-Submit-Trace'] = self.trace_id(request)
-        return response
+        return self.apply_trace_headers(response, request)
+
+    def handle_exception(self, exc):
+        """Correlate parser and unexpected view failures with the submission.
+
+        ``request.data`` parsing happens before the body of ``post`` can
+        validate the photo/signature. DRF otherwise returns that error without
+        the reference ID or signing record context required for production
+        diagnosis. Known processing failures return through
+        ``processing_failure`` and are not logged twice here.
+        """
+        request = getattr(self, 'request', None)
+        if not request or request.method != 'POST':
+            return super().handle_exception(exc)
+        signing = getattr(request, '_rules_submission_signing', None)
+        try:
+            response = super().handle_exception(exc)
+        except Exception:
+            # DRF re-raises non-API exceptions. Keep the original traceback in
+            # the Rules logger and turn it into the same safe, traceable JSON
+            # failure contract used by the submission path.
+            self.log_failure(request, signing, 'RULES_UNHANDLED_REQUEST_FAILED', exc)
+            response = Response(
+                {
+                    'detail': FORM_PROCESSING_ERROR_MESSAGE,
+                    'code': 'RULES_SUBMISSION_FAILED',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+            return self.apply_trace_headers(response, request)
+        stage = 'RULES_REQUEST_EXCEPTION'
+        self.log_failure(request, signing, stage, exc)
+        return self.apply_trace_headers(response, request)
 
     def persistence_not_ready(self, request, signing, issues):
         """Reject before processing a candidate image when durable save is unsafe."""
         logger.error(
-            'RULES_SUBMIT_PERSISTENCE_NOT_READY trace_id=%s signing_request_id=%s '
-            'enrollment_id=%s issues=%s.',
+            'RULES_SUBMIT_PERSISTENCE_NOT_READY reference_id=%s request_id=%s '
+            'signing_request_id=%s enrollment_id=%s issues=%s.',
             self.trace_id(request),
+            self.request_id(request),
             getattr(signing, 'id', None),
             getattr(signing, 'enrollment_id', None),
             issues,
@@ -8417,8 +8484,7 @@ class PublicRulesSigningView(APIView):
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
-        response['X-Rules-Submit-Trace'] = self.trace_id(request)
-        return response
+        return self.apply_trace_headers(response, request)
 
     def get_signing(self, token):
         return RulesSigningRequest.objects.defer(
@@ -8506,14 +8572,14 @@ class PublicRulesSigningView(APIView):
         if not signing:
             self.log_stage('RULES_SUBMIT_TOKEN_INVALID', request)
             return Response({'detail': 'Invalid signing link.'}, status=404)
+        self.remember_signing(request, signing)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
             self.log_stage('RULES_SUBMIT_REPLAY', request, signing, status=signing.status)
             response = Response(
                 {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
                 status=status.HTTP_409_CONFLICT,
             )
-            response['X-Rules-Submit-Trace'] = self.trace_id(request)
-            return response
+            return self.apply_trace_headers(response, request)
 
         persistence_issues = rules_submission_persistence_issues()
         if persistence_issues:
@@ -8549,8 +8615,7 @@ class PublicRulesSigningView(APIView):
                 detail = 'Identity photo is required before signing the form.'
             self.log_stage('RULES_SUBMIT_VALIDATION_FAILED', request, signing, validation_detail=detail)
             response = Response({'detail': detail}, status=400)
-            response['X-Rules-Submit-Trace'] = self.trace_id(request)
-            return response
+            return self.apply_trace_headers(response, request)
 
         saved_external_files = []
         try:
@@ -8564,8 +8629,7 @@ class PublicRulesSigningView(APIView):
                         {'detail': 'Rules & Regulations has already been submitted.', 'code': 'already_submitted'},
                         status=status.HTTP_409_CONFLICT,
                     )
-                    response['X-Rules-Submit-Trace'] = self.trace_id(request)
-                    return response
+                    return self.apply_trace_headers(response, request)
 
                 enrollment = signing.enrollment
                 self.log_stage('RULES_ENROLLMENT_FOUND', request, signing, enrollment_status=enrollment.status)
@@ -8624,36 +8688,52 @@ class PublicRulesSigningView(APIView):
                         'RULES_FILE_STORAGE_FAILED',
                         RuntimeError('Rules proof files were not verified after storage.'),
                     )
-                signing.status = RulesSigningRequest.Status.SUBMITTED
-                signing.submitted_at = submitted_at
-                signing.submitted_ip = get_client_ip(request)
-                signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
-                signing.save(update_fields=[
-                    'selfie_image',
-                    'signature_image',
-                    'signed_pdf',
-                    'selfie_image_file',
-                    'signature_image_file',
-                    'signed_pdf_file',
-                    'status',
-                    'submitted_at',
-                    'submitted_ip',
-                    'submitted_user_agent',
-                    'updated_at',
-                ])
-                persist_rules_regulations_document(signing)
-                self.log_stage('RULES_DB_SAVE_SUCCESS', request, signing)
-                if enrollment.status != Enrollment.Status.ENROLLED:
-                    old_status = enrollment.status
-                    enrollment.status = Enrollment.Status.RULES_SUBMITTED
-                    enrollment.save(update_fields=['status', 'updated_at'])
-                    create_status_history(
-                        enrollment,
-                        CandidateStatusHistory.RecordType.ENROLLMENT,
-                        old_status,
-                        enrollment.status,
-                        remarks='Rules form submitted.',
+                try:
+                    self.log_stage('RULES_SIGNING_RECORD_SAVE_START', request, signing)
+                    signing.status = RulesSigningRequest.Status.SUBMITTED
+                    signing.submitted_at = submitted_at
+                    signing.submitted_ip = get_client_ip(request)
+                    signing.submitted_user_agent = request.META.get('HTTP_USER_AGENT', '')[:2000]
+                    signing.save(update_fields=[
+                        'selfie_image',
+                        'signature_image',
+                        'signed_pdf',
+                        'selfie_image_file',
+                        'signature_image_file',
+                        'signed_pdf_file',
+                        'status',
+                        'submitted_at',
+                        'submitted_ip',
+                        'submitted_user_agent',
+                        'updated_at',
+                    ])
+                    self.log_stage('RULES_SIGNING_RECORD_SAVE_SUCCESS', request, signing)
+                    self.log_stage('RULES_REPOSITORY_DOCUMENT_SAVE_START', request, signing)
+                    document = persist_rules_regulations_document(signing)
+                    self.log_stage(
+                        'RULES_REPOSITORY_DOCUMENT_SAVE_SUCCESS',
+                        request,
+                        signing,
+                        document_id=document.id,
                     )
+                except Exception as exc:
+                    raise RulesSubmissionStageError('RULES_DATABASE_SAVE_FAILED', exc) from exc
+                if enrollment.status != Enrollment.Status.ENROLLED:
+                    try:
+                        self.log_stage('RULES_ENROLLMENT_STATUS_UPDATE_START', request, signing)
+                        old_status = enrollment.status
+                        enrollment.status = Enrollment.Status.RULES_SUBMITTED
+                        enrollment.save(update_fields=['status', 'updated_at'])
+                        create_status_history(
+                            enrollment,
+                            CandidateStatusHistory.RecordType.ENROLLMENT,
+                            old_status,
+                            enrollment.status,
+                            remarks='Rules form submitted.',
+                        )
+                        self.log_stage('RULES_ENROLLMENT_STATUS_UPDATE_SUCCESS', request, signing)
+                    except Exception as exc:
+                        raise RulesSubmissionStageError('RULES_ENROLLMENT_STATUS_UPDATE_FAILED', exc) from exc
         except RulesSubmissionStageError as exc:
             cleanup_rules_proof_files(saved_external_files)
             return self.processing_failure(request, signing, exc.stage, exc.cause)
@@ -8667,14 +8747,13 @@ class PublicRulesSigningView(APIView):
             notify_rules_signed(enrollment, signing.submitted_at)
         except Exception:
             logger.exception(
-                'Rules signing notification creation failed after save: token=%s enrollment_id=%s.',
-                token,
+                'Rules signing notification creation failed after save: signing_request_id=%s enrollment_id=%s.',
+                signing.id,
                 enrollment.id,
             )
         self.log_stage('RULES_SUBMIT_SUCCESS', request, signing)
         response = self.submitted_response(request, signing)
-        response['X-Rules-Submit-Trace'] = self.trace_id(request)
-        return response
+        return self.apply_trace_headers(response, request)
 
 
 def proof_filename(enrollment):
@@ -10863,11 +10942,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         )
 
         logger.info(
-            'Rules & Regulations link generated: student_id=%s enrollment_id=%s token=%s url=%s',
-            enrollment.student_number or enrollment.id,
+            'Rules & Regulations link generated: enrollment_id=%s signing_request_id=%s',
             enrollment.id,
-            signing.token,
-            signing_link,
+            signing.id,
         )
         try:
             log = send_whatsapp_message(
@@ -10881,11 +10958,9 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             )
         except Exception as exc:
             logger.exception(
-                'Rules & Regulations WhatsApp Web handoff crashed: candidate_id=%s candidate_name=%s candidate_phone=%s enrollment_id=%s',
-                enrollment.student_number or enrollment.id,
-                enrollment.name,
-                enrollment.phone,
+                'Rules & Regulations WhatsApp Web handoff crashed: enrollment_id=%s signing_request_id=%s',
                 enrollment.id,
+                signing.id,
             )
             return Response({
                 'detail': f'Unable to prepare WhatsApp Web message: {exc}',
@@ -10897,25 +10972,21 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
         logger.info(
-            'Rules & Regulations WhatsApp message status: student_id=%s token=%s url=%s whatsapp_log_id=%s whatsapp_status=%s whatsapp_error=%s provider_response=%s',
-            enrollment.student_number or enrollment.id,
-            signing.token,
-            signing_link,
+            'Rules & Regulations WhatsApp message status: enrollment_id=%s signing_request_id=%s whatsapp_log_id=%s whatsapp_status=%s has_error=%s',
+            enrollment.id,
+            signing.id,
             log.id,
             log.status,
-            log.error_message,
-            log.provider_response,
+            bool(log.error_message),
         )
         if log.status != WhatsAppMessage.MsgStatus.SENT:
             detail = log.error_message or 'Unable to prepare WhatsApp Web message.'
             logger.error(
-                'Rules & Regulations WhatsApp Web handoff failed: candidate_id=%s candidate_name=%s candidate_phone=%s whatsapp_log_id=%s error=%s response=%s',
-                enrollment.student_number or enrollment.id,
-                enrollment.name,
-                enrollment.phone,
+                'Rules & Regulations WhatsApp Web handoff failed: enrollment_id=%s signing_request_id=%s whatsapp_log_id=%s error_type=%s',
+                enrollment.id,
+                signing.id,
                 log.id,
-                detail,
-                log.provider_response,
+                type(detail).__name__,
             )
             return Response({
                 'detail': detail,
