@@ -371,7 +371,12 @@ export default function RulesSigningPage() {
       // explicitly confirm the final state and durable signed document before
       // the candidate sees the submitted confirmation.
       if (response?.status !== 'submitted' || !response?.signed_pdf_url || !response?.submitted_at) {
-        throw new Error('Rules submission response did not confirm the saved signed document.')
+        const incompleteResponse = new Error('Rules submission response did not confirm the saved signed document.')
+        // The database commit may have succeeded even though a proxy or a
+        // final response-path dependency prevented a complete JSON response.
+        // Reconcile once before presenting this as a failed submission.
+        incompleteResponse.rulesSubmissionOutcomeUncertain = true
+        throw incompleteResponse
       }
       setData((current) => ({
         ...current,
@@ -408,24 +413,31 @@ export default function RulesSigningPage() {
       }
       // A completed server-side submission can also lose its original HTTP
       // response (for example, through a browser timeout or network drop).
-      // Only reconcile transport failures: validation and storage responses
-      // already contain a meaningful result and must not cause an extra GET.
+      // Reconcile transport failures, 5xx responses, and incomplete success
+      // payloads. Validation errors remain conclusive and never cause a GET.
       const isTimeout = (
         error.code === 'ECONNABORTED'
         || /timeout/i.test(String(error.message || ''))
       )
       const isTransportFailure = !error.response && error.code !== 'ERR_CANCELED'
-      if (isTransportFailure) {
+      const isServerFailure = Number(error.response?.status || 0) >= 500
+      const hasUncertainOutcome = (
+        isTransportFailure
+        || isServerFailure
+        || error.rulesSubmissionOutcomeUncertain
+      )
+      if (hasUncertainOutcome) {
         // Release the visible submit state as soon as the browser no longer
-        // has a response, while keeping clicks disabled during the status
-        // lookup. This avoids a second request racing a legitimate server-
-        // side transaction after either a timeout or a dropped connection.
+        // has a conclusive outcome, while keeping clicks disabled during the
+        // status lookup. This avoids a second request racing a legitimate
+        // server-side transaction after a timeout, network interruption, or
+        // an error returned after a successful commit.
         setSubmitting(false)
         setCheckingSubmissionStatus(true)
         setMessage(
           isTimeout
             ? 'The submission took longer than two minutes. Checking whether it was saved...'
-            : 'The connection was interrupted. Checking whether your signed form was saved...',
+            : 'Checking whether your signed form was saved...',
         )
         const reconciled = await reconcileSubmittedState({
           successMessage: 'Thank you. Rules & Regulations has been submitted successfully.',

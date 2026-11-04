@@ -4250,6 +4250,8 @@ class PublicWalkInFormTests(APITestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.data['detail'], 'Invalid signing link.')
+        self.assertEqual(str(uuid.UUID(response['X-Rules-Submit-Trace'])), response['X-Rules-Submit-Trace'])
+        self.assertTrue(response['X-Request-ID'])
 
     def test_public_rules_signing_accepts_an_already_enrolled_candidate(self):
         enrollment = Enrollment.objects.create(
@@ -4282,6 +4284,37 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(signing.status, RulesSigningRequest.Status.SUBMITTED)
         self.assertEqual(enrollment.status, Enrollment.Status.ENROLLED)
 
+    def test_public_rules_status_uses_verified_signed_file_reference_without_another_storage_probe(self):
+        """A completed external-storage save must not look incomplete on a transient exists check."""
+        enrollment = Enrollment.objects.create(
+            branch=self.branch,
+            course=self.course,
+            name='Remote Storage Status Candidate',
+            phone='9000000146',
+            preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+            enrollment_date='2026-05-11',
+            start_date='2026-05-12',
+            actual_fees=15000,
+            discount_amount=0,
+            status=Enrollment.Status.RULES_SUBMITTED,
+        )
+        signing = RulesSigningRequest.objects.create(
+            enrollment=enrollment,
+            status=RulesSigningRequest.Status.SUBMITTED,
+            submitted_at=timezone.now(),
+            signed_pdf='signed_rules/verified-remote-proof.pdf',
+        )
+
+        with mock.patch(
+            'views.stored_rules_file_exists',
+            side_effect=AssertionError('status response must not re-check remote storage'),
+        ):
+            response = self.client.get(f'/api/public/rules-sign/{signing.token}/')
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['status'], RulesSigningRequest.Status.SUBMITTED)
+        self.assertIn(f'/public/rules-signed-pdf/{signing.token}/', response.data['signed_pdf_url'])
+
     def test_public_rules_signing_hides_dependency_errors(self):
         enrollment = Enrollment.objects.create(
             branch=self.branch,
@@ -4301,23 +4334,26 @@ class PublicWalkInFormTests(APITestCase):
             sent_at=timezone.now(),
         )
 
-        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
+        client_reference_id = f'client-{uuid.uuid4()}'
         with mock.patch('views.validate_data_image', side_effect=RuntimeError('Pillow is required to process form images.')):
             with self.assertLogs('views', level='ERROR') as logs:
                 response = self.client.post(
                     f'/api/public/rules-sign/{signing.token}/',
                     {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
                     format='json',
-                    HTTP_X_RULES_SUBMIT_TRACE=reference_id,
+                    HTTP_X_RULES_SUBMIT_TRACE=client_reference_id,
                 )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data['detail'], 'Unable to process form at the moment. Please contact support.')
         self.assertNotIn('Pillow', response.data['detail'])
-        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        reference_id = response['X-Rules-Submit-Trace']
+        self.assertNotEqual(reference_id, client_reference_id)
+        self.assertEqual(str(uuid.UUID(reference_id)), reference_id)
         self.assertTrue(response['X-Request-ID'])
         self.assertTrue(any('stage=RULES_IMAGE_VALIDATION_FAILED' in entry for entry in logs.output))
         self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any(f'client_reference_id={client_reference_id}' in entry for entry in logs.output))
         self.assertTrue(any('request_id=' in entry for entry in logs.output))
         self.assertTrue(any('signing_request_id=' in entry for entry in logs.output))
         self.assertTrue(any('RuntimeError: Pillow is required to process form images.' in entry for entry in logs.output))
@@ -4345,7 +4381,7 @@ class PublicWalkInFormTests(APITestCase):
         image_buffer = io.BytesIO()
         Image.new('RGBA', (20, 20), (17, 24, 39, 255)).save(image_buffer, format='PNG')
         image_data = 'data:image/png;base64,' + base64.b64encode(image_buffer.getvalue()).decode('ascii')
-        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
+        client_reference_id = f'client-{uuid.uuid4()}'
 
         with tempfile.TemporaryDirectory() as media_root:
             with override_settings(MEDIA_ROOT=media_root):
@@ -4358,15 +4394,18 @@ class PublicWalkInFormTests(APITestCase):
                             f'/api/public/rules-sign/{signing.token}/',
                             {'selfie': image_data, 'signature': image_data},
                             format='json',
-                            HTTP_X_RULES_SUBMIT_TRACE=reference_id,
+                            HTTP_X_RULES_SUBMIT_TRACE=client_reference_id,
                         )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data['code'], 'RULES_DATABASE_SAVE_FAILED')
-        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        reference_id = response['X-Rules-Submit-Trace']
+        self.assertNotEqual(reference_id, client_reference_id)
+        self.assertEqual(str(uuid.UUID(reference_id)), reference_id)
         self.assertTrue(response['X-Request-ID'])
         self.assertTrue(any('stage=RULES_DATABASE_SAVE_FAILED' in entry for entry in logs.output))
         self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any(f'client_reference_id={client_reference_id}' in entry for entry in logs.output))
         self.assertTrue(any('RuntimeError: repository insert failed' in entry for entry in logs.output))
         self.assertFalse(any(str(signing.token) in entry for entry in logs.output))
 
@@ -4380,7 +4419,7 @@ class PublicWalkInFormTests(APITestCase):
         self.assertEqual(enrollment.status, Enrollment.Status.RULES_SENT)
 
     def test_public_rules_signing_unhandled_request_failure_is_traced(self):
-        reference_id = '410d9b0e-d08e-44c4-9f4d-cbcf3cd38bf0'
+        client_reference_id = f'client-{uuid.uuid4()}'
         with mock.patch(
             'views.PublicRulesSigningView.get_signing',
             side_effect=RuntimeError('signing lookup failed'),
@@ -4390,15 +4429,18 @@ class PublicWalkInFormTests(APITestCase):
                     f'/api/public/rules-sign/{uuid.uuid4()}/',
                     {'selfie': 'data:image/png;base64,AA==', 'signature': 'data:image/png;base64,AA=='},
                     format='json',
-                    HTTP_X_RULES_SUBMIT_TRACE=reference_id,
+                    HTTP_X_RULES_SUBMIT_TRACE=client_reference_id,
                 )
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.data['code'], 'RULES_SUBMISSION_FAILED')
-        self.assertEqual(response['X-Rules-Submit-Trace'], reference_id)
+        reference_id = response['X-Rules-Submit-Trace']
+        self.assertNotEqual(reference_id, client_reference_id)
+        self.assertEqual(str(uuid.UUID(reference_id)), reference_id)
         self.assertTrue(response['X-Request-ID'])
         self.assertTrue(any('stage=RULES_UNHANDLED_REQUEST_FAILED' in entry for entry in logs.output))
         self.assertTrue(any(f'reference_id={reference_id}' in entry for entry in logs.output))
+        self.assertTrue(any(f'client_reference_id={client_reference_id}' in entry for entry in logs.output))
         self.assertTrue(any('signing_request_id=None' in entry for entry in logs.output))
         self.assertTrue(any('RuntimeError: signing lookup failed' in entry for entry in logs.output))
 

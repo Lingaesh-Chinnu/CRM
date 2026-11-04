@@ -31,13 +31,15 @@ python manage.py collectstatic --noinput --clear
 
 ## Start
 
-Use this start command:
+The checked-in Render Blueprint starts migrations before Gunicorn:
 
 ```bash
-gunicorn wsgi:application
+python manage.py migrate --noinput && gunicorn --timeout 180 wsgi:application
 ```
 
-The `Procfile` also contains:
+If configuring a service manually, use that exact command (or run the same
+migration as a release step before starting Gunicorn). The current `Procfile`
+is suitable only where migrations are run separately:
 
 ```text
 web: gunicorn wsgi:application
@@ -107,6 +109,12 @@ backup policy. In particular, the checked-in `render.yaml` uses Free web and
 database plans, which must not be represented as permanent document storage.
 Before production, use one of the following and verify it in the Render
 Dashboard:
+
+Every public submission response now includes a server-generated
+`X-Rules-Submit-Trace` UUID. Search Render logs for that `reference_id`; do
+not use a token, a candidate name, or a browser-supplied request header as the
+support reference. The browser's optional request header is retained only as
+secondary diagnostic data and cannot cause references to be reused.
 
 1. Recommended: S3-compatible object storage (AWS S3, Cloudflare R2, or an
    equivalent durable bucket) with lifecycle and backup policy appropriate for

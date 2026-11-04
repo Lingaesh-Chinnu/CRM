@@ -1981,6 +1981,31 @@ def image_storage_extension(image_bytes):
     return re.sub(r'[^a-z0-9]', '', image_format) or 'jpg'
 
 
+def rules_pdf_image(image_bytes, mode, maximum_size):
+    """Load a proof at the size needed by the PDF, not at camera resolution.
+
+    The original, validated image bytes remain the signed evidence in storage.
+    The PDF only displays a small photo/signature, so retaining a 12--24 MP
+    decoded bitmap while rendering every page needlessly raises the request's
+    memory use and can make a small Render instance terminate the worker.
+    ``draft`` lets Pillow downsample JPEGs before decoding where supported;
+    the thumbnail bounds the image retained for all supported formats.
+    """
+    from PIL import Image, ImageOps
+
+    resample = getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.LANCZOS)
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        try:
+            source.draft(mode, maximum_size)
+        except Exception:
+            # Not every supported decoder implements draft mode. Validation
+            # already bounds pixels; use the normal decoder in that case.
+            pass
+        normalized = ImageOps.exif_transpose(source)
+        normalized.thumbnail(maximum_size, resample=resample)
+        return normalized.convert(mode).copy()
+
+
 def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, submitted_at=None):
     try:
         from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -2083,7 +2108,9 @@ def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, 
     draw.text((margin, y), 'IIE Rules & Regulations Form', fill=ink, font=title_font)
     y += 58
     if selfie_bytes:
-        selfie = Image.open(io.BytesIO(selfie_bytes)).convert('RGB')
+        # The evidence bytes are retained unchanged; this compact derivative
+        # exists only for the small identity-photo slot in the final PDF.
+        selfie = rules_pdf_image(selfie_bytes, 'RGB', (960, 960))
         card_width = 230
         card_height = 290
         image_width = 196
@@ -2151,8 +2178,12 @@ def build_signed_rules_pdf(enrollment, signature_bytes=None, selfie_bytes=None, 
     y += 18
     draw.text((margin, y), 'Student Signature', fill=ink, font=section_font)
     if signature_bytes:
-        signature = Image.open(io.BytesIO(signature_bytes)).convert('RGBA')
-        signature.thumbnail((420, 180))
+        # Preserve transparency while keeping the rendered PDF bounded.
+        signature = rules_pdf_image(signature_bytes, 'RGBA', (960, 480))
+        signature.thumbnail(
+            (420, 180),
+            resample=getattr(getattr(Image, 'Resampling', Image), 'LANCZOS', Image.LANCZOS),
+        )
         page.paste(signature, (margin, y + 46), signature)
         submitted_value = submitted_at or timezone.now()
         draw.text((margin, y + 225), f'Submitted At: {timezone.localtime(submitted_value).strftime("%d %b %Y %I:%M %p")}', fill=muted, font=small_font)
@@ -8357,10 +8388,39 @@ class PublicRulesSigningView(APIView):
     permission_classes = [AllowAny]
     authentication_classes = []
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+    stage_events = {
+        'RULES_SUBMIT_START': 'submission_started',
+        'RULES_TOKEN_VALIDATED': 'token_validated',
+        'RULES_ENROLLMENT_FOUND': 'enrollment_identified',
+        'RULES_PHOTO_RECEIVED': 'photo_received',
+        'RULES_SIGNATURE_RECEIVED': 'signature_received',
+        'RULES_PDF_GENERATION_START': 'pdf_generation_started',
+        'RULES_PDF_GENERATION_SUCCESS': 'pdf_generation_completed',
+        'RULES_FILE_STORAGE_START': 'storage_started',
+        'RULES_FILE_STORAGE_SUCCESS': 'storage_completed',
+        'RULES_DATABASE_UPDATE_COMPLETED': 'database_update_completed',
+        'RULES_SUBMISSION_RESPONSE_SENT': 'submission_completed',
+    }
 
     def trace_id(self, request):
-        """Browser/server correlation ID; deliberately never derived from the token."""
-        return (request.META.get('HTTP_X_RULES_SUBMIT_TRACE') or '').strip()[:80] or 'not-provided'
+        """Return a server-created correlation ID for one submission attempt.
+
+        A browser-supplied value is useful only as supplementary diagnostics:
+        it may be absent, stale after a cached page reload, or intentionally
+        repeated.  The candidate-facing reference must therefore be generated
+        by the server once per HTTP request and must never be based on the
+        signing token.
+        """
+        correlation_id = getattr(request, '_rules_submission_trace_id', None)
+        if correlation_id:
+            return correlation_id
+        correlation_id = str(uuid.uuid4())
+        request._rules_submission_trace_id = correlation_id
+        return correlation_id
+
+    def client_trace_id(self, request):
+        """Return the optional browser diagnostic value without trusting it."""
+        return (request.META.get('HTTP_X_RULES_SUBMIT_TRACE') or '').strip()[:80]
 
     def request_id(self, request):
         """Return a safe request identifier without relying on a signing token.
@@ -8402,7 +8462,9 @@ class PublicRulesSigningView(APIView):
         previous_stage_at = getattr(request, '_rules_submission_previous_stage_at', started_at)
         request._rules_submission_previous_stage_at = now
         fields = {
+            'event': self.stage_events.get(stage, stage.lower()),
             'reference_id': self.trace_id(request),
+            'client_reference_id': self.client_trace_id(request) or None,
             'request_id': self.request_id(request),
             'signing_request_id': getattr(signing, 'id', None),
             'enrollment_id': getattr(signing, 'enrollment_id', None),
@@ -8420,10 +8482,12 @@ class PublicRulesSigningView(APIView):
         now = time.perf_counter()
         started_at = getattr(request, '_rules_submission_started_at', now)
         logger.exception(
-            'RULES_SUBMIT_FAILED stage=%s reference_id=%s request_id=%s '
-            'signing_request_id=%s enrollment_id=%s exception_type=%s elapsed_ms=%s.',
+            'RULES_SUBMIT_FAILED event=submission_failed stage=%s reference_id=%s '
+            'client_reference_id=%s request_id=%s signing_request_id=%s '
+            'enrollment_id=%s exception_type=%s elapsed_ms=%s.',
             stage,
             self.trace_id(request),
+            self.client_trace_id(request) or None,
             self.request_id(request),
             getattr(signing, 'id', None),
             getattr(signing, 'enrollment_id', None),
@@ -8515,7 +8579,13 @@ class PublicRulesSigningView(APIView):
         ).filter(token=token).first()
 
     def public_pdf_url(self, request, signing):
-        if stored_rules_file_exists(signing, 'signed_pdf'):
+        # Storage is verified before the database transaction is committed.
+        # Do not issue another remote ``exists`` request while composing the
+        # success/status response: an otherwise completed S3/R2 submission
+        # could be reported as incomplete merely because that extra network
+        # check is briefly unavailable. The signed-PDF endpoint performs the
+        # real read when the candidate opens the URL.
+        if getattr(getattr(signing, 'signed_pdf', None), 'name', ''):
             return request.build_absolute_uri(f'{app_url(f"public/rules-signed-pdf/{signing.token}")}/')
         try:
             has_pdf = RulesSigningRequest.objects.filter(
@@ -8618,10 +8688,15 @@ class PublicRulesSigningView(APIView):
         return Response(payload, status=status.HTTP_409_CONFLICT)
 
     def post(self, request, token):
+        # Start the audit trail before token lookup or body parsing. This also
+        # gives malformed and invalid-token requests a unique reference that
+        # support can search without logging the token itself.
+        self.log_stage('RULES_SUBMIT_START', request)
         signing = self.get_signing(token)
         if not signing:
             self.log_stage('RULES_SUBMIT_TOKEN_INVALID', request)
-            return Response({'detail': 'Invalid signing link.'}, status=404)
+            response = Response({'detail': 'Invalid signing link.'}, status=404)
+            return self.apply_trace_headers(response, request)
         self.remember_signing(request, signing)
         if signing.status == RulesSigningRequest.Status.SUBMITTED:
             self.log_stage('RULES_SUBMIT_REPLAY', request, signing, status=signing.status)
@@ -8634,7 +8709,7 @@ class PublicRulesSigningView(APIView):
 
         self.log_stage('RULES_TOKEN_VALIDATED', request, signing, status=signing.status)
         self.log_stage(
-            'RULES_SUBMIT_START', request, signing,
+            'RULES_SUBMIT_REQUEST_PARSED', request, signing,
             status=signing.status, content_type=request.content_type,
             fields=sorted(request.data.keys()), files=sorted(request.FILES.keys()),
         )
@@ -8791,6 +8866,15 @@ class PublicRulesSigningView(APIView):
         except Exception as exc:
             cleanup_rules_proof_files(saved_external_files)
             return self.processing_failure(request, signing, 'RULES_SUBMISSION_FAILED', exc)
+        # This runs only after leaving ``transaction.atomic()``, so the log
+        # marks a committed database state rather than an in-transaction save
+        # that could still be rolled back.
+        self.log_stage(
+            'RULES_DATABASE_UPDATE_COMPLETED',
+            request,
+            signing,
+            document_id=document.id,
+        )
         try:
             notify_rules_signed(enrollment, signing.submitted_at)
         except Exception:
