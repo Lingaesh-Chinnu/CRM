@@ -2179,6 +2179,60 @@ class PublicWalkInFormTests(APITestCase):
             yet_rows = yet_to_enroll.data.get('results', yet_to_enroll.data)
             self.assertNotIn(enrollment.id, [row['id'] for row in yet_rows])
 
+            active_list_response = self.client.get('/api/walkins/', {
+                'search': walkin.phone,
+                'status': WalkIn.Status.NEW,
+            })
+            self.assertEqual(active_list_response.status_code, 200)
+            active_rows = active_list_response.data.get('results', active_list_response.data)
+            self.assertIn(walkin.id, [row['id'] for row in active_rows])
+
+        # A subsequent conversion request must not use the retained audit row
+        # to mark this now-active walk-in as converted again or create a second
+        # enrollment record.
+        duplicate_response = self.client.post(
+            f'/api/walkins/{first_walkin.id}/convert-to-enrollment/',
+            {},
+            format='json',
+        )
+        self.assertEqual(duplicate_response.status_code, 409, duplicate_response.data)
+        self.assertEqual(duplicate_response.data['enrollment_id'], first_enrollment.id)
+        first_walkin.refresh_from_db()
+        self.assertEqual(first_walkin.status, WalkIn.Status.NEW)
+        self.assertEqual(Enrollment.objects.filter(walkin=first_walkin).count(), 1)
+
+        # Simulate an older partial reversal that changed only the enrollment.
+        # Retrying the normal reversal API must repair the linked walk-in but
+        # preserve the original reversal audit fields.
+        first_enrollment.refresh_from_db()
+        original_reason = first_enrollment.reversal_reason
+        original_reversed_at = first_enrollment.reversed_at
+        WalkIn.objects.filter(pk=first_walkin.id).update(
+            status=WalkIn.Status.CONVERTED,
+            converted_to_type='enrollment',
+            converted_record_id=first_enrollment.id,
+            converted_at=timezone.now(),
+            converted_by_id=self.staff.id,
+        )
+        recovery_response = self.client.post(
+            f'/api/enrollments/{first_enrollment.id}/reverse-to-walkin/',
+            {'reversal_reason': 'Repair a prior partial reversal.'},
+            format='json',
+        )
+        self.assertEqual(recovery_response.status_code, 200, recovery_response.data)
+        self.assertEqual(recovery_response.data['restored_walkin_id'], first_walkin.id)
+
+        first_enrollment.refresh_from_db()
+        first_walkin.refresh_from_db()
+        self.assertEqual(first_enrollment.status, Enrollment.Status.REVERSED_TO_WALKIN)
+        self.assertEqual(first_enrollment.reversal_reason, original_reason)
+        self.assertEqual(first_enrollment.reversed_at, original_reversed_at)
+        self.assertEqual(first_walkin.status, WalkIn.Status.NEW)
+        self.assertEqual(first_walkin.converted_to_type, '')
+        self.assertIsNone(first_walkin.converted_record_id)
+        self.assertIsNone(first_walkin.converted_at)
+        self.assertIsNone(first_walkin.converted_by_id)
+
     def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
         walkin = WalkIn.objects.create(
             branch=self.branch,

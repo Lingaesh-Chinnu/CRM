@@ -1009,8 +1009,15 @@ def effective_walkin_status(obj):
     if active_walkin_enrollment(obj):
         return WalkIn.Status.CONVERTED
     stored_status = safe_deferred_value(obj, 'status', WalkIn.Status.NEW) or WalkIn.Status.NEW
+    # A retained reversed enrollment is audit history, not a live conversion.
+    # If an older partial reversal left the raw status as ``converted``, do
+    # not surface that candidate as enrolled in the list/detail APIs.
     if stored_status == WalkIn.Status.CONVERTED:
-        return WalkIn.Status.CONVERTED
+        stored_status = WalkIn.Status.FOLLOW_UP if safe_deferred_value(
+            obj,
+            'follow_up_date',
+            None,
+        ) else WalkIn.Status.NEW
     return safe_deferred_value(obj, 'counselor_status', '') or stored_status
 
 

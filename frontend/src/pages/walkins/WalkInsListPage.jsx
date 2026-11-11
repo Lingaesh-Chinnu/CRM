@@ -30,16 +30,20 @@ const emptyFilters = {
   important_only: '',
 }
 
+function hasActiveEnrollment(walkin) {
+  return Boolean(walkin?.is_converted_to_enrollment || walkin?.enrollment_id)
+}
+
 function statusLabel(walkin) {
   if (walkin?.status_display) return walkin.status_display
-  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'Enrolled'
+  if (hasActiveEnrollment(walkin)) return 'Enrolled'
   const status = walkin?.status
   if (!status) return 'Unknown'
   return status.replaceAll('_', ' ').replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 function statusTone(walkin) {
-  if (walkin?.enrollment_id || walkin?.status === 'converted') return 'green'
+  if (hasActiveEnrollment(walkin)) return 'green'
   if (['not_interested', 'lost_to_competitor'].includes(walkin?.status)) return 'red'
   if (['follow_up', 'demo_attended', 'ready_to_join'].includes(walkin?.status)) return 'amber'
   return 'slate'
@@ -204,7 +208,7 @@ function CounselorBadge({ walkin }) {
 }
 
 function WalkInSection({ title, walkins, count, page, emptyMessage, onFollowUpSaved, onImportantToggle, activeFilter, onStatusChange, canViewBranch, returnTo, listFilters, onPageChange }) {
-  const isEnrollmentConversion = (walkin) => Boolean(walkin.enrollment_id || walkin.status === 'converted')
+  const isEnrollmentConversion = hasActiveEnrollment
   const statusCount = (status) => walkins.filter((walkin) => walkin.status === status).length
   const todayWalkInCount = walkins.filter((walkin) => walkin.visit_date === todayIsoFrom()).length
   const summary = [

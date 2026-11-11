@@ -451,15 +451,102 @@ def missing_model_columns(model, field_names):
 
 
 def valid_walkin_enrollment(walkin):
+    """Return the enrollment that currently keeps a walk-in converted.
+
+    A reversed enrollment deliberately retains its one-to-one ``walkin`` link
+    for audit history.  It must not be treated as an active conversion,
+    otherwise a later conversion request can overwrite the restored walk-in
+    state.
+    """
     try:
         enrollment = getattr(walkin, 'enrollment', None)
     except Enrollment.DoesNotExist:
         enrollment = None
-    if enrollment:
+    if (
+        enrollment
+        and enrollment.status != Enrollment.Status.REVERSED_TO_WALKIN
+        and not enrollment.is_deleted
+    ):
         return enrollment
     if walkin.converted_to_type == 'enrollment' and walkin.converted_record_id:
-        return Enrollment.objects.filter(pk=walkin.converted_record_id, walkin=walkin).first()
+        return Enrollment.objects.filter(
+            pk=walkin.converted_record_id,
+            walkin=walkin,
+            is_deleted=False,
+        ).exclude(status=Enrollment.Status.REVERSED_TO_WALKIN).first()
     return None
+
+
+def restored_walkin_status(walkin):
+    """Choose the active lifecycle status when an enrollment is reversed."""
+    return WalkIn.Status.FOLLOW_UP if walkin.follow_up_date else WalkIn.Status.NEW
+
+
+def walkin_reversal_link_error(walkin, enrollment):
+    """Return a safe error when a reversal would touch the wrong walk-in."""
+    if enrollment.walkin_id != walkin.id:
+        return 'The linked walk-in does not belong to this enrollment.'
+    if walkin.is_deleted:
+        return 'The linked walk-in has been deleted and cannot be restored.'
+
+    conversion_type = str(walkin.converted_to_type or '')
+    if conversion_type not in ('', 'enrollment'):
+        return 'The linked walk-in is associated with a different conversion type.'
+
+    converted_record_id = walkin.converted_record_id
+    if converted_record_id and converted_record_id != enrollment.id:
+        conflicting_enrollment = Enrollment.objects.filter(
+            pk=converted_record_id,
+            walkin_id=walkin.id,
+            is_deleted=False,
+        ).exclude(status=Enrollment.Status.REVERSED_TO_WALKIN).exists()
+        if conflicting_enrollment:
+            return 'The linked walk-in is associated with a different active enrollment.'
+    return ''
+
+
+def walkin_requires_reversal_restore(walkin):
+    """Whether a historical partial reversal still needs its walk-in repaired."""
+    return any((
+        walkin.status != restored_walkin_status(walkin),
+        bool(walkin.converted_to_type),
+        walkin.converted_record_id is not None,
+        walkin.converted_at is not None,
+        walkin.converted_by_id is not None,
+    ))
+
+
+def restore_walkin_from_enrollment_reversal(walkin, enrollment, user, reason=''):
+    """Restore a locked walk-in while retaining its enrollment audit record.
+
+    The caller must hold locks for both records inside one transaction.  This
+    intentionally does not remove ``Enrollment.walkin``: that relationship is
+    the audit link, while the cleared conversion fields make the walk-in active
+    again.
+    """
+    link_error = walkin_reversal_link_error(walkin, enrollment)
+    if link_error:
+        raise ValueError(link_error)
+
+    previous_status = walkin.status
+    walkin.status = restored_walkin_status(walkin)
+    walkin.converted_to_type = ''
+    walkin.converted_record_id = None
+    walkin.converted_at = None
+    walkin.converted_by = None
+    walkin.save(update_fields=[
+        'status', 'converted_to_type', 'converted_record_id',
+        'converted_at', 'converted_by', 'updated_at',
+    ])
+    create_status_history(
+        walkin,
+        CandidateStatusHistory.RecordType.WALKIN,
+        previous_status,
+        walkin.status,
+        user,
+        f'Enrollment reversed to walk-in. {str(reason or "").strip()}'.strip(),
+    )
+    return walkin
 
 
 def clear_stale_walkin_conversion(walkin):
@@ -478,7 +565,7 @@ def clear_stale_walkin_conversion(walkin):
     walkin.converted_at = None
     walkin.converted_by = None
     if walkin.status == WalkIn.Status.CONVERTED:
-        walkin.status = WalkIn.Status.NEW
+        walkin.status = restored_walkin_status(walkin)
     walkin.save(update_fields=[
         'status', 'converted_to_type', 'converted_record_id',
         'converted_at', 'converted_by', 'updated_at',
@@ -7930,16 +8017,67 @@ class WalkInViewSet(viewsets.ModelViewSet):
         data = request.data.copy()
         existing_enrollment = valid_walkin_enrollment(walkin)
         if existing_enrollment:
-            if (
-                walkin.status != WalkIn.Status.CONVERTED
-                or walkin.converted_to_type != 'enrollment'
-                or walkin.converted_record_id != existing_enrollment.id
-                or walkin.follow_up_date is not None
-            ):
-                with transaction.atomic():
-                    mark_walkin_enrollment_converted(walkin, existing_enrollment, request.user)
+            # Use the same enrollment -> walk-in lock order as reversal.  A
+            # request which read the enrollment before a concurrent reversal
+            # must re-check after acquiring the lock, rather than writing the
+            # stale ``converted`` state back onto the restored walk-in.
+            with transaction.atomic():
+                locked_enrollment = Enrollment.objects.select_for_update().filter(
+                    pk=existing_enrollment.id,
+                    walkin_id=walkin.id,
+                ).first()
+                locked_walkin = WalkIn.objects.select_for_update().filter(pk=walkin.id).first()
+                if not locked_enrollment or not locked_walkin:
+                    return Response(
+                        {'detail': 'The enrollment conversion changed. Please refresh and try again.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if locked_enrollment.status == Enrollment.Status.REVERSED_TO_WALKIN:
+                    return Response(
+                        {
+                            'detail': (
+                                'This walk-in already has a retained reversed enrollment. '
+                                'A duplicate enrollment will not be created.'
+                            ),
+                            'enrollment_id': locked_enrollment.id,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if locked_enrollment.is_deleted:
+                    return Response(
+                        {'detail': 'The enrollment conversion changed. Please refresh and try again.'},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                if (
+                    locked_walkin.status != WalkIn.Status.CONVERTED
+                    or locked_walkin.converted_to_type != 'enrollment'
+                    or locked_walkin.converted_record_id != locked_enrollment.id
+                    or locked_walkin.follow_up_date is not None
+                ):
+                    mark_walkin_enrollment_converted(
+                        locked_walkin,
+                        locked_enrollment,
+                        request.user,
+                    )
             clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
             return Response({'detail': 'This record has already been converted.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Keep the reversed enrollment as an audit record and do not try to
+        # create a second row for the same one-to-one walk-in relationship.
+        # In particular, do not "fix" the walk-in by marking it converted
+        # again just because its retained enrollment is historical.
+        retained_enrollment = Enrollment.objects.filter(walkin=walkin).first()
+        if retained_enrollment:
+            return Response(
+                {
+                    'detail': (
+                        'This walk-in already has a retained reversed enrollment. '
+                        'A duplicate enrollment will not be created.'
+                    ),
+                    'enrollment_id': retained_enrollment.id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         clear_stale_walkin_conversion(walkin)
         walkin.refresh_from_db()
 
@@ -7994,18 +8132,52 @@ class WalkInViewSet(viewsets.ModelViewSet):
 
         serializer = EnrollmentDetailSerializer(data=data, context={'request': request, 'walkin': walkin})
         serializer.is_valid(raise_exception=True)
-        with transaction.atomic():
-            enrollment = serializer.save(
-                walkin=walkin,
-                original_walkin_course=walkin.course,
-                final_enrollment_course=course,
-                enrolled_by=request.user,
-                created_by=request.user,
-                counselor=walkin.counseling_by or walkin.assigned_to or walkin.created_by or request.user,
-                status=Enrollment.Status.PENDING_RULES,
+        try:
+            with transaction.atomic():
+                # Lock the parent walk-in before the final duplicate check so
+                # concurrent conversion requests cannot create two enrollment
+                # records or overwrite a reversal restore.
+                locked_walkin = WalkIn.objects.select_for_update().filter(pk=walkin.pk).first()
+                if not locked_walkin:
+                    return Response({'detail': 'Walk-in not found.'}, status=status.HTTP_404_NOT_FOUND)
+                retained_enrollment = Enrollment.objects.select_for_update().filter(
+                    walkin=locked_walkin,
+                ).first()
+                if retained_enrollment:
+                    if retained_enrollment.status == Enrollment.Status.REVERSED_TO_WALKIN:
+                        detail = (
+                            'This walk-in already has a retained reversed enrollment. '
+                            'A duplicate enrollment will not be created.'
+                        )
+                    else:
+                        detail = 'This record has already been converted.'
+                    return Response(
+                        {'detail': detail, 'enrollment_id': retained_enrollment.id},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+
+                enrollment = serializer.save(
+                    walkin=locked_walkin,
+                    original_walkin_course=locked_walkin.course,
+                    final_enrollment_course=course,
+                    enrolled_by=request.user,
+                    created_by=request.user,
+                    counselor=(
+                        locked_walkin.counseling_by
+                        or locked_walkin.assigned_to
+                        or locked_walkin.created_by
+                        or request.user
+                    ),
+                    status=Enrollment.Status.PENDING_RULES,
+                )
+                enrollment.refresh_from_db()
+                mark_walkin_enrollment_converted(locked_walkin, enrollment, request.user, data)
+        except IntegrityError:
+            logger.exception('Concurrent walk-in conversion prevented for walk-in %s.', walkin.id)
+            return Response(
+                {'detail': 'An enrollment already exists for this walk-in. Please refresh and try again.'},
+                status=status.HTTP_409_CONFLICT,
             )
-            enrollment.refresh_from_db()
-            mark_walkin_enrollment_converted(walkin, enrollment, request.user, data)
         clear_follow_up_notifications_for_record(FollowUp.RecordType.WALKIN, walkin.id)
         resolve_public_walkin_notifications(walkin.id)
         notify_admin_enrollment_created(enrollment, request.user)
@@ -10519,53 +10691,102 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 {'reversal_reason': ['A reversal reason is required.']},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        with transaction.atomic():
-            # Do not use the normal detail queryset here.  It select_relateds
-            # nullable relationships; PostgreSQL refuses ``FOR UPDATE`` on
-            # the nullable side of that outer join before this action can make
-            # any changes.  Lock each row explicitly instead.
-            enrollment_queryset = visible_candidate_queryset(Enrollment.objects.all())
-            if not request.user.is_super_admin:
-                enrollment_queryset = enrollment_queryset.filter(branch=request.user.branch)
-            enrollment = enrollment_queryset.select_for_update().filter(pk=pk).first()
-            if not enrollment:
-                return Response({'detail': 'Enrollment not found.'}, status=status.HTTP_404_NOT_FOUND)
-            walkin = WalkIn.objects.select_for_update().filter(pk=enrollment.walkin_id).first()
-            if not walkin:
-                return Response({'detail': 'Only enrollments created from a walk-in can be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
-            if enrollment.status in Enrollment.FINAL_STATUSES or enrollment.student_number:
-                return Response({'detail': 'A finalized student enrollment cannot be reversed to a walk-in.'}, status=status.HTTP_400_BAD_REQUEST)
-            signing = RulesSigningRequest.objects.filter(enrollment=enrollment).first()
-            if signing and signing.status == RulesSigningRequest.Status.SUBMITTED:
-                return Response({'detail': 'An enrollment with signed Rules & Regulations cannot be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
-            if PaymentInstallment.objects.filter(enrollment=enrollment).exists():
-                return Response({'detail': 'An enrollment with collected installments cannot be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
-            if enrollment.status == Enrollment.Status.REVERSED_TO_WALKIN:
-                return Response({'detail': 'This enrollment has already been reversed to a walk-in.'}, status=status.HTTP_400_BAD_REQUEST)
+        recovered_walkin = False
+        try:
+            with transaction.atomic():
+                # Do not use the normal detail queryset here.  It select_relateds
+                # nullable relationships; PostgreSQL refuses ``FOR UPDATE`` on
+                # the nullable side of that outer join before this action can make
+                # any changes.  Lock each row explicitly instead.
+                enrollment_queryset = visible_candidate_queryset(Enrollment.objects.all())
+                if not request.user.is_super_admin:
+                    enrollment_queryset = enrollment_queryset.filter(branch=request.user.branch)
+                enrollment = enrollment_queryset.select_for_update().filter(pk=pk).first()
+                if not enrollment:
+                    return Response({'detail': 'Enrollment not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-            previous_status = enrollment.status
-            previous_walkin_status = walkin.status
-            enrollment.status = Enrollment.Status.REVERSED_TO_WALKIN
-            enrollment.reversed_at = timezone.now()
-            enrollment.reversed_by = request.user
-            enrollment.reversal_reason = reason
-            enrollment.save(update_fields=['status', 'reversed_at', 'reversed_by', 'reversal_reason', 'updated_at'])
-            walkin.status = WalkIn.Status.FOLLOW_UP if walkin.follow_up_date else WalkIn.Status.NEW
-            walkin.converted_to_type = ''
-            walkin.converted_record_id = None
-            walkin.converted_at = None
-            walkin.converted_by = None
-            walkin.save(update_fields=['status', 'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at'])
-            create_status_history(enrollment, CandidateStatusHistory.RecordType.ENROLLMENT, previous_status, enrollment.status, request.user, reason)
-            create_status_history(
-                walkin,
-                CandidateStatusHistory.RecordType.WALKIN,
-                previous_walkin_status,
-                walkin.status,
-                request.user,
-                f'Enrollment reversed to walk-in. {reason}',
+                walkin = WalkIn.objects.select_for_update().filter(pk=enrollment.walkin_id).first()
+                if not walkin:
+                    return Response(
+                        {'detail': 'Only enrollments created from a walk-in can be reversed.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                link_error = walkin_reversal_link_error(walkin, enrollment)
+                if link_error:
+                    return Response({'detail': link_error}, status=status.HTTP_409_CONFLICT)
+
+                # A deployment of an older reversal implementation may have
+                # retained the enrollment audit row but left the walk-in as
+                # converted.  Retrying the normal API repairs only that stale
+                # linked record; it never changes the original audit details.
+                if enrollment.status == Enrollment.Status.REVERSED_TO_WALKIN:
+                    if not walkin_requires_reversal_restore(walkin):
+                        return Response(
+                            {'detail': 'This enrollment has already been reversed to a walk-in.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    restore_walkin_from_enrollment_reversal(
+                        walkin,
+                        enrollment,
+                        request.user,
+                        enrollment.reversal_reason or reason,
+                    )
+                    recovered_walkin = True
+                else:
+                    if enrollment.status in Enrollment.FINAL_STATUSES or enrollment.student_number:
+                        return Response(
+                            {'detail': 'A finalized student enrollment cannot be reversed to a walk-in.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    signing = RulesSigningRequest.objects.filter(enrollment=enrollment).first()
+                    if signing and signing.status == RulesSigningRequest.Status.SUBMITTED:
+                        return Response(
+                            {'detail': 'An enrollment with signed Rules & Regulations cannot be reversed.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    if PaymentInstallment.objects.filter(enrollment=enrollment).exists():
+                        return Response(
+                            {'detail': 'An enrollment with collected installments cannot be reversed.'},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    previous_status = enrollment.status
+                    enrollment.status = Enrollment.Status.REVERSED_TO_WALKIN
+                    enrollment.reversed_at = timezone.now()
+                    enrollment.reversed_by = request.user
+                    enrollment.reversal_reason = reason
+                    enrollment.save(update_fields=[
+                        'status', 'reversed_at', 'reversed_by', 'reversal_reason', 'updated_at',
+                    ])
+                    restore_walkin_from_enrollment_reversal(
+                        walkin,
+                        enrollment,
+                        request.user,
+                        reason,
+                    )
+                    create_status_history(
+                        enrollment,
+                        CandidateStatusHistory.RecordType.ENROLLMENT,
+                        previous_status,
+                        enrollment.status,
+                        request.user,
+                        reason,
+                    )
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_409_CONFLICT)
+        except IntegrityError:
+            logger.exception('Unable to reverse enrollment %s to its walk-in.', pk)
+            return Response(
+                {'detail': 'The enrollment could not be reversed safely. Please refresh and try again.'},
+                status=status.HTTP_409_CONFLICT,
             )
-        return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
+
+        data = EnrollmentDetailSerializer(enrollment, context={'request': request}).data
+        if recovered_walkin:
+            data['detail'] = 'The linked walk-in was restored from the prior reversal.'
+            data['restored_walkin_id'] = walkin.id
+        return Response(data)
 
     @action(detail=True, methods=['post'], url_path='toggle-important')
     def toggle_important(self, request, pk=None):

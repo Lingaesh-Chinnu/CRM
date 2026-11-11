@@ -751,7 +751,7 @@ export default function WalkInDetailPage() {
 
   const errorFor = (field) => fieldErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{fieldErrors[field]}</p> : null
   const detailErrorFor = (field) => detailErrors[field] ? <p className="mt-1 text-xs font-medium text-rose-600">{detailErrors[field]}</p> : null
-  const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id || walkin.status === 'converted')
+  const hasValidEnrollmentConversion = Boolean(walkin.is_converted_to_enrollment || walkin.enrollment_id)
   const enrollmentRecordId = walkin.enrollment_id || (hasValidEnrollmentConversion ? walkin.converted_record_id : null)
   const convertedLink = enrollmentRecordId ? `/enrollments/${enrollmentRecordId}` : ''
   const canAssignEmptyOwnership = (!walkin.assigned_to && !isFixedWalkInBy(walkin.walk_in_by)) || !walkin.counseling_by
