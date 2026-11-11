@@ -9966,7 +9966,10 @@ class EnrollmentFilter(django_filters.FilterSet):
 
     def filter_queue(self, queryset, name, value):
         if value == 'yet_to_enroll':
-            return queryset.exclude(status__in=Enrollment.FINAL_STATUSES)
+            return queryset.exclude(status__in=(
+                *Enrollment.FINAL_STATUSES,
+                Enrollment.Status.REVERSED_TO_WALKIN,
+            ))
         if value == 'enrolled':
             return queryset.filter(status__in=Enrollment.FINAL_STATUSES)
         return queryset
@@ -10511,9 +10514,23 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='reverse-to-walkin')
     def reverse_to_walkin(self, request, pk=None):
         reason = str(request.data.get('reversal_reason') or '').strip()
+        if not reason:
+            return Response(
+                {'reversal_reason': ['A reversal reason is required.']},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         with transaction.atomic():
-            enrollment = Enrollment.objects.select_for_update().select_related('walkin').get(pk=pk)
-            walkin = enrollment.walkin
+            # Do not use the normal detail queryset here.  It select_relateds
+            # nullable relationships; PostgreSQL refuses ``FOR UPDATE`` on
+            # the nullable side of that outer join before this action can make
+            # any changes.  Lock each row explicitly instead.
+            enrollment_queryset = visible_candidate_queryset(Enrollment.objects.all())
+            if not request.user.is_super_admin:
+                enrollment_queryset = enrollment_queryset.filter(branch=request.user.branch)
+            enrollment = enrollment_queryset.select_for_update().filter(pk=pk).first()
+            if not enrollment:
+                return Response({'detail': 'Enrollment not found.'}, status=status.HTTP_404_NOT_FOUND)
+            walkin = WalkIn.objects.select_for_update().filter(pk=enrollment.walkin_id).first()
             if not walkin:
                 return Response({'detail': 'Only enrollments created from a walk-in can be reversed.'}, status=status.HTTP_400_BAD_REQUEST)
             if enrollment.status in Enrollment.FINAL_STATUSES or enrollment.student_number:
@@ -10527,6 +10544,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
                 return Response({'detail': 'This enrollment has already been reversed to a walk-in.'}, status=status.HTTP_400_BAD_REQUEST)
 
             previous_status = enrollment.status
+            previous_walkin_status = walkin.status
             enrollment.status = Enrollment.Status.REVERSED_TO_WALKIN
             enrollment.reversed_at = timezone.now()
             enrollment.reversed_by = request.user
@@ -10539,6 +10557,14 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             walkin.converted_by = None
             walkin.save(update_fields=['status', 'converted_to_type', 'converted_record_id', 'converted_at', 'converted_by', 'updated_at'])
             create_status_history(enrollment, CandidateStatusHistory.RecordType.ENROLLMENT, previous_status, enrollment.status, request.user, reason)
+            create_status_history(
+                walkin,
+                CandidateStatusHistory.RecordType.WALKIN,
+                previous_walkin_status,
+                walkin.status,
+                request.user,
+                f'Enrollment reversed to walk-in. {reason}',
+            )
         return Response(EnrollmentDetailSerializer(enrollment, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='toggle-important')

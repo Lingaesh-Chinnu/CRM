@@ -976,16 +976,38 @@ class DataImportHistorySerializer(serializers.ModelSerializer):
 from crm.models import WalkIn, WalkInAssignmentChangeRequest, WalkInBranchChangeHistory
 
 
-def effective_walkin_status(obj):
+def active_walkin_enrollment(obj):
+    """Return the enrollment that currently keeps a walk-in converted.
+
+    Reversal deliberately retains ``Enrollment.walkin`` so the audit trail and
+    original candidate journey remain connected.  That historical link must
+    not, however, make the restored walk-in look converted again.
+    """
     try:
-        if getattr(obj, 'enrollment', None):
-            return WalkIn.Status.CONVERTED
-    except Exception:
-        pass
+        enrollment = getattr(obj, 'enrollment', None)
+    except Enrollment.DoesNotExist:
+        enrollment = None
+
+    if enrollment and (
+        enrollment.status != Enrollment.Status.REVERSED_TO_WALKIN
+        and not enrollment.is_deleted
+    ):
+        return enrollment
+
     if safe_deferred_value(obj, 'converted_to_type', '') == 'enrollment':
         record_id = safe_deferred_value(obj, 'converted_record_id', None)
-        if record_id and Enrollment.objects.filter(pk=record_id, walkin_id=obj.id).exists():
-            return WalkIn.Status.CONVERTED
+        if record_id:
+            return Enrollment.objects.filter(
+                pk=record_id,
+                walkin_id=obj.id,
+                is_deleted=False,
+            ).exclude(status=Enrollment.Status.REVERSED_TO_WALKIN).first()
+    return None
+
+
+def effective_walkin_status(obj):
+    if active_walkin_enrollment(obj):
+        return WalkIn.Status.CONVERTED
     stored_status = safe_deferred_value(obj, 'status', WalkIn.Status.NEW) or WalkIn.Status.NEW
     if stored_status == WalkIn.Status.CONVERTED:
         return WalkIn.Status.CONVERTED
@@ -1121,17 +1143,8 @@ class WalkInListSerializer(serializers.ModelSerializer):
             return ''
 
     def get_enrollment_id(self, obj):
-        try:
-            enrollment = getattr(obj, 'enrollment', None)
-        except Enrollment.DoesNotExist:
-            enrollment = None
-        if enrollment:
-            return enrollment.id
-        if obj.converted_to_type == 'enrollment' and obj.converted_record_id:
-            exists = Enrollment.objects.filter(pk=obj.converted_record_id, walkin_id=obj.id).exists()
-            if exists:
-                return obj.converted_record_id
-        return None
+        enrollment = active_walkin_enrollment(obj)
+        return enrollment.id if enrollment else None
 
     def get_is_converted_to_enrollment(self, obj):
         return self.get_enrollment_id(obj) is not None
@@ -1285,17 +1298,8 @@ class WalkInDetailSerializer(serializers.ModelSerializer):
         )
 
     def get_enrollment_id(self, obj):
-        try:
-            enrollment = getattr(obj, 'enrollment', None)
-        except Enrollment.DoesNotExist:
-            enrollment = None
-        if enrollment:
-            return enrollment.id
-        if obj.converted_to_type == 'enrollment' and obj.converted_record_id:
-            exists = Enrollment.objects.filter(pk=obj.converted_record_id, walkin_id=obj.id).exists()
-            if exists:
-                return obj.converted_record_id
-        return None
+        enrollment = active_walkin_enrollment(obj)
+        return enrollment.id if enrollment else None
 
     def get_is_converted_to_enrollment(self, obj):
         return self.get_enrollment_id(obj) is not None

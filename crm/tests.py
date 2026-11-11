@@ -2053,6 +2053,132 @@ class PublicWalkInFormTests(APITestCase):
         enrolled_ids = [item['id'] for item in self.client.get('/api/enrollments/', {'queue': 'enrolled'}).data]
         self.assertCountEqual(enrolled_ids, [pending.id, active.id])
 
+    def test_reverse_to_walkin_restores_the_original_walkin_and_hides_the_enrollment(self):
+        """Both the returned record and later list/detail requests use the restored lifecycle."""
+        self.client.force_authenticate(self.staff)
+
+        candidates = []
+        for suffix in ('0150', '0151'):
+            walkin = WalkIn.objects.create(
+                branch=self.branch,
+                course=self.course,
+                assigned_to=self.staff,
+                counseling_by=self.staff,
+                created_by=self.staff,
+                name=f'Reversal Candidate {suffix}',
+                phone=f'900000{suffix}',
+                email=f'reversal-{suffix}@example.com',
+                location='Coimbatore',
+                pincode='641001',
+                qualification=WalkIn.Qualification.GRADUATE,
+                degree='BCA',
+                preferred_timing=WalkIn.PreferredTiming.WEEKDAY_MORNING,
+                source=WalkIn.Source.DIRECT,
+                status=WalkIn.Status.FOLLOW_UP,
+                follow_up_date='2026-06-30',
+                remarks='Keep the original walk-in details and history.',
+                visit_date='2026-06-18',
+            )
+            FollowUp.objects.create(
+                record_type=FollowUp.RecordType.WALKIN,
+                record_id=walkin.id,
+                follow_up_date='2026-06-18',
+                next_follow_up_date='2026-06-30',
+                remarks='Original follow-up must remain.',
+                updated_by=self.staff,
+            )
+            conversion_response = self.client.post(f'/api/walkins/{walkin.id}/convert-to-enrollment/', {
+                'branch': self.branch.id,
+                'name': walkin.name,
+                'phone': walkin.phone,
+                'email': walkin.email,
+                'location': walkin.location,
+                'pincode': walkin.pincode,
+                'qualification': walkin.qualification,
+                'degree': walkin.degree,
+                'course': self.course.id,
+                'preferred_timing': walkin.preferred_timing,
+                'enrollment_date': '2026-06-18',
+                'start_date': '2026-07-01',
+            }, format='json')
+            self.assertEqual(conversion_response.status_code, 201, conversion_response.data)
+            candidates.append((walkin, Enrollment.objects.get(pk=conversion_response.data['id'])))
+
+        first_walkin, first_enrollment = candidates[0]
+        missing_reason_response = self.client.post(
+            f'/api/enrollments/{first_enrollment.id}/reverse-to-walkin/',
+            {},
+            format='json',
+        )
+        self.assertEqual(missing_reason_response.status_code, 400)
+        self.assertIn('reversal_reason', missing_reason_response.data)
+        first_enrollment.refresh_from_db()
+        self.assertEqual(first_enrollment.status, Enrollment.Status.PENDING_RULES)
+
+        for index, (walkin, enrollment) in enumerate(candidates, start=1):
+            reason = f'Candidate requested a walk-in follow-up again ({index}).'
+            response = self.client.post(
+                f'/api/enrollments/{enrollment.id}/reverse-to-walkin/',
+                {'reversal_reason': reason},
+                format='json',
+            )
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertEqual(response.data['status'], Enrollment.Status.REVERSED_TO_WALKIN)
+
+            enrollment.refresh_from_db()
+            walkin.refresh_from_db()
+            self.assertEqual(enrollment.status, Enrollment.Status.REVERSED_TO_WALKIN)
+            self.assertEqual(enrollment.reversal_reason, reason)
+            self.assertEqual(enrollment.reversed_by, self.staff)
+            self.assertIsNotNone(enrollment.reversed_at)
+            self.assertEqual(enrollment.walkin_id, walkin.id)
+            self.assertEqual(Payment.objects.filter(enrollment=enrollment).count(), 0)
+
+            self.assertEqual(walkin.status, WalkIn.Status.NEW)
+            self.assertEqual(walkin.converted_to_type, '')
+            self.assertIsNone(walkin.converted_record_id)
+            self.assertIsNone(walkin.converted_at)
+            self.assertIsNone(walkin.converted_by_id)
+            self.assertEqual(walkin.branch_id, self.branch.id)
+            self.assertEqual(walkin.assigned_to_id, self.staff.id)
+            self.assertEqual(walkin.counseling_by_id, self.staff.id)
+            self.assertEqual(walkin.remarks, 'Keep the original walk-in details and history.')
+            self.assertTrue(FollowUp.objects.filter(
+                record_type=FollowUp.RecordType.WALKIN,
+                record_id=walkin.id,
+                remarks='Original follow-up must remain.',
+            ).exists())
+            self.assertTrue(CandidateStatusHistory.objects.filter(
+                record_type=CandidateStatusHistory.RecordType.ENROLLMENT,
+                record_id=enrollment.id,
+                new_status=Enrollment.Status.REVERSED_TO_WALKIN,
+                remarks=reason,
+            ).exists())
+            self.assertTrue(CandidateStatusHistory.objects.filter(
+                record_type=CandidateStatusHistory.RecordType.WALKIN,
+                record_id=walkin.id,
+                old_status=WalkIn.Status.CONVERTED,
+                new_status=WalkIn.Status.NEW,
+            ).exists())
+
+            list_response = self.client.get('/api/walkins/', {'search': walkin.phone})
+            self.assertEqual(list_response.status_code, 200)
+            list_rows = list_response.data.get('results', list_response.data)
+            list_row = next(row for row in list_rows if row['id'] == walkin.id)
+            self.assertEqual(list_row['status'], WalkIn.Status.NEW)
+            self.assertIsNone(list_row['enrollment_id'])
+            self.assertFalse(list_row['is_converted_to_enrollment'])
+
+            detail_response = self.client.get(f'/api/walkins/{walkin.id}/')
+            self.assertEqual(detail_response.status_code, 200)
+            self.assertEqual(detail_response.data['status'], WalkIn.Status.NEW)
+            self.assertIsNone(detail_response.data['enrollment_id'])
+            self.assertFalse(detail_response.data['is_converted_to_enrollment'])
+
+            yet_to_enroll = self.client.get('/api/enrollments/', {'queue': 'yet_to_enroll', 'search': enrollment.phone})
+            yet_rows = yet_to_enroll.data.get('results', yet_to_enroll.data)
+            self.assertNotIn(enrollment.id, [row['id'] for row in yet_rows])
+
     def test_stale_converted_walkin_without_enrollment_is_not_treated_as_converted(self):
         walkin = WalkIn.objects.create(
             branch=self.branch,

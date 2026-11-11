@@ -297,6 +297,40 @@ function ConfirmChangesModal({ changes, saving, onCancel, onConfirm }) {
   )
 }
 
+function ReverseToWalkInModal({ reason, error, saving, onReasonChange, onCancel, onConfirm }) {
+  return (
+    <div onClick={saving ? undefined : onCancel} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+      <div onClick={(event) => event.stopPropagation()} className="relative w-full max-w-lg rounded-[24px] bg-white p-6 shadow-2xl">
+        <ModalCloseButton onClick={onCancel} disabled={saving} label="Close reverse to walk-in dialog" />
+        <h3 className="pr-10 text-lg font-black tracking-tight text-slate-950">Reverse to Walk-in</h3>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          This restores the original walk-in and removes this candidate from active enrollment queues. The enrollment and its history are retained.
+        </p>
+        <label className="mt-5 block">
+          <span className="mb-2 block text-sm font-semibold text-slate-700">Reversal reason</span>
+          <textarea
+            value={reason}
+            onChange={(event) => onReasonChange(event.target.value)}
+            rows={4}
+            autoFocus
+            placeholder="Explain why this enrollment is being reversed"
+            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-slate-400 focus:bg-white"
+          />
+          {error && <p className="mt-2 text-sm font-medium text-rose-700">{error}</p>}
+        </label>
+        <div className="mt-6 flex flex-col justify-end gap-3 sm:flex-row">
+          <button type="button" onClick={onCancel} disabled={saving} className="inline-flex min-w-[110px] justify-center whitespace-nowrap rounded-2xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 disabled:opacity-60">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={saving} className="inline-flex min-w-[150px] justify-center whitespace-nowrap rounded-2xl bg-rose-700 px-5 py-3 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-60">
+            {saving ? 'Reversing...' : 'Confirm Reversal'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function EnrollmentDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -324,6 +358,9 @@ export default function EnrollmentDetailPage() {
   const [loadError, setLoadError] = useState('')
   const [saving, setSaving] = useState(false)
   const [showCourseChange, setShowCourseChange] = useState(false)
+  const [showReverseToWalkIn, setShowReverseToWalkIn] = useState(false)
+  const [reversalReason, setReversalReason] = useState('')
+  const [reversalError, setReversalError] = useState('')
   const isSuperAdmin = user?.role === 'super_admin'
 
   useEffect(() => {
@@ -762,17 +799,23 @@ export default function EnrollmentDetailPage() {
   }
 
   const reverseToWalkIn = async () => {
-    if (!window.confirm('Are you sure you want to reverse this enrollment to Walk-in?')) return
-    const reversalReason = window.prompt('Reversal reason (optional)')
+    const reason = reversalReason.trim()
+    if (!reason) {
+      setReversalError('A reversal reason is required.')
+      return
+    }
     setSaving(true)
     setMessage('')
+    setReversalError('')
     try {
-      const { data } = await api.post(`/enrollments/${id}/reverse-to-walkin/`, { reversal_reason: String(reversalReason || '').trim() })
+      const { data } = await api.post(`/enrollments/${id}/reverse-to-walkin/`, { reversal_reason: reason })
       setRow(data)
-      setMessage('Enrollment reversed to Walk-in. The original walk-in history was preserved.')
-      navigate('/walkins', { state: { message: 'Enrollment reversed to Walk-in.' } })
+      setShowReverseToWalkIn(false)
+      navigate(`/walkins?search=${encodeURIComponent(data.phone || row.phone || '')}`, {
+        state: { message: 'Enrollment reversed to Walk-in. The original walk-in and its history have been restored.' },
+      })
     } catch (error) {
-      setMessage(apiErrorMessage(error, 'Failed to reverse enrollment to Walk-in.'))
+      setReversalError(apiErrorMessage(error, 'Failed to reverse enrollment to Walk-in.'))
     } finally {
       setSaving(false)
     }
@@ -862,7 +905,7 @@ export default function EnrollmentDetailPage() {
           </button>
         )}
         {canReverseToWalkIn && (
-          <button type="button" onClick={reverseToWalkIn} disabled={saving} className="mt-5 ml-0 w-fit rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-100 disabled:opacity-60 sm:ml-3">
+          <button type="button" onClick={() => { setReversalReason(''); setReversalError(''); setShowReverseToWalkIn(true) }} disabled={saving} className="mt-5 ml-0 w-fit rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-800 transition hover:bg-rose-100 disabled:opacity-60 sm:ml-3">
             Reverse to Walk-in
           </button>
         )}
@@ -1224,6 +1267,16 @@ export default function EnrollmentDetailPage() {
           mode={isSuperAdmin ? 'direct' : 'request'}
           onCancel={() => setShowCourseChange(false)}
           onSubmit={submitCourseChange}
+        />
+      )}
+      {showReverseToWalkIn && (
+        <ReverseToWalkInModal
+          reason={reversalReason}
+          error={reversalError}
+          saving={saving}
+          onReasonChange={(value) => { setReversalReason(value); setReversalError('') }}
+          onCancel={() => { setShowReverseToWalkIn(false); setReversalError('') }}
+          onConfirm={reverseToWalkIn}
         />
       )}
     </div>
